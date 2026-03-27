@@ -63,15 +63,10 @@ protocol.registerSchemesAsPrivileged([
  */
 function registerVideoProtocol() {
   protocol.handle('local-video', (request) => {
-    // Extraire le chemin depuis l'URL en gerant les differences de format
-    const url = new URL(request.url)
-    let filePath = decodeURIComponent(url.pathname)
-    // Sur Windows, l'URL ajoute un slash devant le lecteur (ex: /C:/...)
-    if (process.platform === 'win32' && filePath.startsWith('/') && /^\/[A-Za-z]:/.test(filePath)) {
-      filePath = filePath.slice(1)
-    }
-    logger.info('Lecture vidéo :', filePath)
-    return net.fetch(pathToFileURL(filePath).toString())
+    // Convertir local-video:///C:/path en file:///C:/path pour net.fetch
+    const fileUrl = request.url.replace('local-video://', 'file://')
+    logger.info('Lecture vidéo :', fileUrl)
+    return net.fetch(fileUrl)
   })
 }
 

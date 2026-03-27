@@ -228,7 +228,7 @@ const VideoPreview = () => {
                 <video
                     key={videoFile.path}
                     ref={videoRef}
-                    src={`local-video://${videoFile.path.replace(/#/g, '%23').replace(/\?/g, '%3F')}`}
+                    src={`local-video:///${videoFile.path.replace(/\\/g, '/')}`}
                     className="w-full h-full object-contain cursor-pointer"
                     onClick={togglePlay}
                     onError={(e) => console.error('[VideoPreview] Erreur lecture vidéo:', (e.target as HTMLVideoElement).error)}
