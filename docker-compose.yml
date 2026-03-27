@@ -2,9 +2,9 @@
 # Clipr — Docker Compose
 # =============================================================================
 # Trois services :
-#   1. clipr     : L'application web (Express + React)
-#   2. ollama    : Le serveur LLM local
-#   3. caddy     : Reverse proxy avec HTTPS automatique (Let's Encrypt)
+#   1. clipr     : Application web (Express + React)
+#   2. ollama    : Serveur LLM local
+#   3. caddy     : Reverse proxy HTTPS automatique
 # =============================================================================
 
 services:
@@ -21,13 +21,14 @@ services:
       - CLIPR_DATA_DIR=/data
     volumes:
       - clipr-data:/data
-      # Monter le repo git pour permettre la MAJ depuis l'UI (git pull + rebuild)
+      # Repo git monté pour les mises à jour depuis l'UI
       - .:/repo
-      # Monter le socket Docker pour permettre le rebuild depuis le container
+      # Socket Docker pour le rebuild depuis l'UI
       - /var/run/docker.sock:/var/run/docker.sock
     working_dir: /repo
     depends_on:
-      - ollama
+      ollama:
+        condition: service_started
     networks:
       - clipr-net
 
@@ -38,7 +39,7 @@ services:
     restart: always
     volumes:
       - ollama-data:/root/.ollama
-    # Décommenter pour utiliser le GPU NVIDIA :
+    # Décommenter pour GPU NVIDIA :
     # deploy:
     #   resources:
     #     reservations:
@@ -49,8 +50,7 @@ services:
     networks:
       - clipr-net
 
-  # --- Caddy (Reverse Proxy + HTTPS) ---
-  # Décommenter et configurer avec votre NDD pour accès distant
+  # --- Caddy (Reverse Proxy + HTTPS automatique) ---
   caddy:
     image: caddy:2-alpine
     container_name: clipr-caddy

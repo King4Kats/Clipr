@@ -1,173 +1,56 @@
 {
-  "name": "decoupeur-video",
-  "version": "1.3.0",
-  "description": "Découpeur de vidéos intelligent avec transcription Whisper et analyse AI",
-  "main": "out/main/index.js",
+  "name": "clipr",
+  "version": "2.0.0",
+  "description": "Segmentation vidéo intelligente par IA — Application web Docker",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build && electron-builder",
-    "preview": "electron-vite preview",
-    "package": "electron-builder --win --dir",
-    "dist": "electron-builder --win",
-    "postinstall": "electron-builder install-app-deps",
-    "test": "vitest run",
     "dev:web": "concurrently \"npx tsx server/index.ts\" \"npx vite --config vite.config.ts\"",
     "build:web": "npx vite build --config vite.config.ts",
     "start:web": "npx tsx server/index.ts",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f clipr"
+    "docker:logs": "docker compose logs -f clipr",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.30.1",
-    "@dnd-kit/core": "^6.1.0",
-    "@dnd-kit/sortable": "^8.0.0",
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "@ffprobe-installer/ffprobe": "^2.1.2",
-    "@radix-ui/react-accordion": "^1.2.12",
-    "@radix-ui/react-alert-dialog": "^1.1.15",
-    "@radix-ui/react-aspect-ratio": "^1.1.8",
-    "@radix-ui/react-avatar": "^1.1.11",
-    "@radix-ui/react-checkbox": "^1.3.3",
-    "@radix-ui/react-collapsible": "^1.1.12",
-    "@radix-ui/react-context-menu": "^2.2.16",
-    "@radix-ui/react-dialog": "^1.1.15",
-    "@radix-ui/react-dropdown-menu": "^2.1.16",
-    "@radix-ui/react-hover-card": "^1.1.15",
-    "@radix-ui/react-label": "^2.1.8",
-    "@radix-ui/react-menubar": "^1.1.16",
-    "@radix-ui/react-navigation-menu": "^1.2.14",
-    "@radix-ui/react-popover": "^1.1.15",
-    "@radix-ui/react-progress": "^1.1.8",
-    "@radix-ui/react-radio-group": "^1.3.8",
-    "@radix-ui/react-scroll-area": "^1.2.10",
-    "@radix-ui/react-select": "^2.2.6",
-    "@radix-ui/react-separator": "^1.1.8",
-    "@radix-ui/react-slider": "^1.3.6",
-    "@radix-ui/react-slot": "^1.2.4",
-    "@radix-ui/react-switch": "^1.2.6",
-    "@radix-ui/react-tabs": "^1.1.13",
-    "@radix-ui/react-toast": "^1.2.15",
-    "@radix-ui/react-toggle": "^1.1.10",
-    "@radix-ui/react-toggle-group": "^1.1.11",
-    "@radix-ui/react-tooltip": "^1.2.8",
-    "@tanstack/react-query": "^5.90.21",
-    "@types/react-grid-layout": "^1.3.6",
-    "archiver": "^7.0.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
-    "electron-log": "^5.4.3",
-    "electron-updater": "^6.8.3",
-    "embla-carousel-react": "^8.6.0",
+    "express": "^4.21.0",
     "fluent-ffmpeg": "^2.1.3",
     "framer-motion": "^12.34.3",
-    "input-otp": "^1.4.2",
     "lucide-react": "^0.575.0",
+    "multer": "^1.4.5-lts.1",
     "next-themes": "^0.4.6",
-    "node-llama-cpp": "^3.15.1",
-    "ollama": "^0.6.3",
     "react": "^18.2.0",
-    "react-day-picker": "^9.13.2",
     "react-dom": "^18.2.0",
     "react-grid-layout": "^2.2.2",
-    "react-resizable-panels": "^4.6.4",
-    "react-router-dom": "^7.13.0",
-    "recharts": "^3.7.0",
-    "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",
+    "tsx": "^4.19.0",
     "uuid": "^9.0.1",
-    "vaul": "^1.1.2",
-    "whisper-node": "^0.1.5",
-    "zod": "^4.3.6",
-    "zustand": "^4.4.7",
-    "express": "^4.21.0",
     "ws": "^8.18.0",
-    "multer": "^1.4.5-lts.1",
-    "tsx": "^4.19.0"
+    "zustand": "^4.4.7",
+    "@radix-ui/react-select": "^2.2.6",
+    "@radix-ui/react-slider": "^1.3.6",
+    "@radix-ui/react-slot": "^1.2.4"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.30.1",
-    "@types/archiver": "^7.0.0",
     "@types/fluent-ffmpeg": "^2.1.24",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.12",
     "@types/node": "^20.10.6",
     "@types/react": "^18.2.46",
     "@types/react-dom": "^18.2.18",
+    "@types/react-grid-layout": "^1.3.6",
     "@types/uuid": "^9.0.7",
+    "@types/ws": "^8.5.12",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.16",
     "concurrently": "^8.2.2",
-    "electron": "^27.3.0",
-    "electron-builder": "^24.9.1",
-    "electron-rebuild": "^3.2.9",
-    "electron-vite": "^5.0.0",
-    "jsdom": "^28.1.0",
     "postcss": "^8.4.33",
-    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
     "vite": "^5.0.11",
-    "vitest": "^4.0.18",
-    "wait-on": "^7.2.0",
-    "@types/express": "^4.17.21",
-    "@types/ws": "^8.5.12",
-    "@types/multer": "^1.4.12"
-  },
-  "build": {
-    "appId": "com.decoupeur-video.app",
-    "productName": "Clipr",
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "King4Kats",
-        "repo": "Clipr"
-      }
-    ],
-    "directories": {
-      "output": "release"
-    },
-    "win": {
-      "target": "nsis",
-      "icon": "src/assets/Clipr.ico"
-    },
-    "files": [
-      "out/**/*",
-      "models/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "scripts",
-        "to": "scripts",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "models",
-        "to": "models",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "node_modules/@ffmpeg-installer/win32-x64",
-        "to": "ffmpeg"
-      },
-      {
-        "from": "node_modules/@ffprobe-installer/win32-x64",
-        "to": "ffprobe"
-      }
-    ],
-    "asarUnpack": [
-      "node_modules/whisper-node/**/*",
-      "node_modules/node-llama-cpp/**/*"
-    ],
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": false
-    }
+    "vitest": "^4.0.18"
   }
 }

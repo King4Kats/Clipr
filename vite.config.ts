@@ -13,8 +13,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src'),
-      '@electron': resolve(__dirname, 'electron')
+      '@': resolve(__dirname, 'src')
     }
   },
   build: {

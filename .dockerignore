@@ -7,3 +7,4 @@ dist-server
 *.exe
 *.msi
 models/
+.github/

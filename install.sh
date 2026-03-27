@@ -14,7 +14,7 @@ set -e
 
 INSTALL_DIR="$HOME/clipr"
 REPO_URL="https://github.com/King4Kats/Clipr.git"
-BRANCH="claude/desktop-to-web-docker-uoaKU"
+BRANCH="${CLIPR_BRANCH:-main}"
 
 echo ""
 echo "  🎬 Installation de Clipr Web"

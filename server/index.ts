@@ -91,6 +91,12 @@ if (existsSync(DIST_DIR)) {
   app.use(express.static(DIST_DIR))
 }
 
+// Servir la documentation HTML
+const DOCS_DIR = join(process.cwd(), 'docs')
+if (existsSync(DOCS_DIR)) {
+  app.use('/docs', express.static(DOCS_DIR))
+}
+
 // Servir les fichiers vidéo/audio depuis le data dir
 app.get('/api/files/*', (req, res) => {
   // Décoder le chemin du fichier depuis l'URL

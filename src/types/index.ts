@@ -107,18 +107,12 @@ export type UpdateStatus =
   | { status: 'downloaded'; version: string }
   | { status: 'error'; message: string }
 
-/** Interface de l'API Electron exposée au frontend via le preload script */
-export interface ElectronAPI {
-  // ─── Boîtes de dialogue système ───
-  openVideoDialog: () => Promise<string | null>
-  openVideosDialog: () => Promise<string[]>
-  selectFolderDialog: () => Promise<string | null>
-  openFolder: (path: string) => Promise<string>
-  getAppPath: (name: 'temp' | 'userData' | 'downloads') => Promise<string>
-  saveTextFile: (content: string, defaultName: string) => Promise<string | null>
-
-  // ─── Lecture de fichiers ───
+/** Interface de l'API exposée au frontend via src/api.ts (HTTP + WebSocket) */
+export interface CliprAPI {
+  // ─── Upload et fichiers ───
+  uploadVideos: (files: FileList | File[]) => Promise<any[]>
   readFileBuffer: (filePath: string) => Promise<ArrayBuffer>
+  saveTextFile: (content: string, defaultName: string) => Promise<string | null>
 
   // ─── FFmpeg : manipulation vidéo ───
   getVideoDuration: (videoPath: string) => Promise<number>
@@ -132,50 +126,59 @@ export interface ElectronAPI {
   transcribe: (audioPath: string, language: string) => Promise<TranscriptSegment[]>
   cancelTranscription: () => Promise<void>
 
-  // ─── Ollama/LLM : analyse sémantique du transcript ───
+  // ─── Ollama/LLM : analyse sémantique ───
   checkOllama: () => Promise<boolean>
   listOllamaModels: () => Promise<string[]>
   analyzeTranscript: (transcript: string, context: string, model: string) => Promise<OllamaAnalysisResult>
+  pullOllamaModel: (modelName: string) => Promise<{ success: boolean; message: string }>
 
-  // ─── Setup & Modèles : vérification et installation des dépendances ───
+  // ─── Setup & dépendances ───
   checkDependencies: () => Promise<DependencyStatus[]>
   installWhisper: () => Promise<{ success: boolean; message: string }>
   installLLM: () => Promise<{ success: boolean; message: string }>
-  pullOllamaModel: (modelName: string) => Promise<{ success: boolean; message: string }>
   installOllama: () => Promise<{ success: boolean; message: string }>
   getModelStatus: () => Promise<ModelStatus>
   areModelsReady: () => Promise<boolean>
 
-  // ─── Projet & Historique : sauvegarde et restauration ───
+  // ─── Projet & Historique ───
   autoSaveProject: (data: any) => Promise<void>
   getProjectHistory: () => Promise<any[]>
   saveProject: (data: any) => Promise<string | null>
   loadProject: () => Promise<any | null>
 
-  // ─── Événements IPC : communication temps réel avec le processus principal ───
+  // ─── Export ───
+  exportVideos: (segments: any[], videoFiles: any[], clipsData: any[][]) => Promise<any>
+
+  // ─── Événements temps réel (WebSocket) ───
   onProgress: (callback: (data: { progress: number; message: string }) => void) => () => void
   onSegments: (callback: (segments: VideoSegment[]) => void) => () => void
   onTranscriptSegment: (callback: (segment: TranscriptSegment) => void) => () => void
   onModelProgress: (callback: (data: { type: 'whisper' | 'llm'; progress: number; message: string }) => void) => () => void
 
-  // ─── Mise à jour automatique ───
-  checkForUpdates: () => Promise<void>
-  installUpdate: () => Promise<void>
+  // ─── Mise à jour (Docker rebuild) ───
+  checkForUpdates: () => Promise<any>
+  triggerUpdate: () => Promise<any>
   getAppVersion: () => Promise<string>
   onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void
 
-  // ─── Diagnostic et Logs : support technique ───
+  // ─── Diagnostic ───
   getInstallationId: () => Promise<string>
   sendLogs: () => Promise<{ success: boolean; message: string }>
   onLogSendProgress: (callback: (data: { percent: number; message: string }) => void) => () => void
 
-  // ─── Documentation ───
+  // ─── Stubs de compatibilité ───
+  openFolder: (path: string) => Promise<string>
+  getAppPath: (name: string) => Promise<string>
+  selectFolderDialog: () => Promise<string | null>
+  openVideoDialog: () => Promise<string | null>
+  openVideosDialog: () => Promise<string[]>
   openDocumentation: () => Promise<void>
+  installUpdate: () => Promise<void>
 }
 
-// Déclaration globale : rend l'API Electron accessible via window.electron
+// Déclaration globale : rend l'API accessible via window.electron (compatibilité)
 declare global {
   interface Window {
-    electron: ElectronAPI
+    electron: CliprAPI
   }
 }
