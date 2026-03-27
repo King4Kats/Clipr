@@ -284,7 +284,7 @@ export const useStore = create<AppState>((set, get) => ({
 
         clips.push({
           videoIndex: i,
-          videoPath: video.path,
+          videoPath: video.originalPath,
           start: clipStart,
           end: clipEnd
         })
@@ -309,7 +309,7 @@ export const useStore = create<AppState>((set, get) => ({
       const newAudioPaths: string[] = []
 
       for (let i = 0; i < state.videoFiles.length; i++) {
-        const path = await window.electron.extractAudio(state.videoFiles[i].path)
+        const path = await window.electron.extractAudio(state.videoFiles[i].originalPath)
         newAudioPaths.push(path)
         state.setProcessing('extracting-audio', ((i + 1) / state.videoFiles.length) * 100, `Audio ${i + 1}/${state.videoFiles.length} extrait`)
       }

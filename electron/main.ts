@@ -15,7 +15,7 @@ import fs from 'fs'
 import { logger, logSystemInfo } from './services/logger.js'
 import { getInstallationId, exportLogs } from './services/log-sender.js'
 import { initUpdater, checkForUpdates, installUpdate } from './services/updater.js'
-import { getVideoDuration, extractAudio, cutVideo, concatenateVideos, checkFFmpeg } from './services/ffmpeg.js'
+import { getVideoDuration, extractAudio, cutVideo, concatenateVideos, checkFFmpeg, convertToMp4 } from './services/ffmpeg.js'
 import {
   setMainWindow,
   areModelsReady,
@@ -241,6 +241,20 @@ ipcMain.handle('ffmpeg:cut', async (_, input: string, start: number, end: number
   return cutVideo(input, start, end, output, 23, (percent) => {
     sendProgress(percent, 'Export en cours...')
   })
+})
+
+ipcMain.handle('ffmpeg:convertToMp4', async (_, videoPath: string) => {
+  logger.info('Conversion en MP4 pour lecture :', videoPath)
+  try {
+    const result = await convertToMp4(videoPath, (percent) => {
+      sendProgress(percent, 'Conversion vidéo en cours...')
+    })
+    logger.info('Conversion terminée :', result)
+    return result
+  } catch (error) {
+    logger.error('Erreur de conversion :', error)
+    throw error
+  }
 })
 
 ipcMain.handle('ffmpeg:concatenate', async (_, inputPaths: string[], output: string) => {

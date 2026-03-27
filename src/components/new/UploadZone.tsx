@@ -17,17 +17,30 @@ const UploadZone = () => {
   const [isLoading, setIsLoading] = useState(false);
   const { addVideoFile, setProcessing } = useStore();
 
-  // Traite les fichiers sélectionnés : récupère la durée via FFmpeg et les ajoute au store
+  // Formats non supportés nativement par le lecteur HTML5 de Chromium
+  const UNSUPPORTED_FORMATS = ['mts', 'avi', 'mkv', 'mov', 'wmv', 'flv'];
+
+  // Traite les fichiers sélectionnés : convertit si nécessaire, récupère la durée et ajoute au store
   const handleFiles = useCallback(
     async (filePaths: string[]) => {
       setIsLoading(true);
       try {
         for (const filePath of filePaths) {
+          const ext = filePath.split('.').pop()?.toLowerCase() || '';
+          let playablePath = filePath;
+
+          // Convertir en MP4 si le format n'est pas supporté par le lecteur
+          if (UNSUPPORTED_FORMATS.includes(ext)) {
+            setProcessing("processing", 0, "Conversion vidéo en cours...");
+            playablePath = await window.electron.convertToMp4(filePath);
+          }
+
           const duration = await window.electron.getVideoDuration(filePath);
           const name = filePath.split(/[\\/]/).pop() || "video";
 
           addVideoFile({
-            path: filePath,
+            path: playablePath,
+            originalPath: filePath,
             name,
             duration,
             size: 0,

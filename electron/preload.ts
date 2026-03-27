@@ -23,6 +23,7 @@ export interface ElectronAPI {
   getVideoDuration: (videoPath: string) => Promise<number>
   extractAudio: (videoPath: string) => Promise<string>
   cutVideo: (input: string, start: number, end: number, output: string) => Promise<void>
+  convertToMp4: (videoPath: string) => Promise<string>
   concatenateVideos: (inputPaths: string[], output: string) => Promise<void>
 
   // --- Transcription Audio (Imagine Whisper) ---
@@ -85,6 +86,7 @@ const api: ElectronAPI = {
   getVideoDuration: (videoPath) => ipcRenderer.invoke('ffmpeg:getDuration', videoPath),
   extractAudio: (videoPath) => ipcRenderer.invoke('ffmpeg:extractAudio', videoPath),
   cutVideo: (input, start, end, output) => ipcRenderer.invoke('ffmpeg:cut', input, start, end, output),
+  convertToMp4: (videoPath) => ipcRenderer.invoke('ffmpeg:convertToMp4', videoPath),
   concatenateVideos: (inputPaths, output) => ipcRenderer.invoke('ffmpeg:concatenate', inputPaths, output),
 
   // --- Implémentation des méthodes Whisper ---

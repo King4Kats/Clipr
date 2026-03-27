@@ -246,6 +246,43 @@ export function cutVideo(
  * Concatène plusieurs fichiers vidéo en un seul fichier de sortie.
  * FFmpeg fusionne les flux dans l'ordre de la liste fournie.
  */
+/**
+ * Convertit une vidéo dans un format non supporté par Chromium (mts, avi, mkv, mov)
+ * en MP4 H.264 pour permettre la lecture dans le lecteur HTML5.
+ * Retourne le chemin du fichier converti dans le répertoire temporaire.
+ */
+export function convertToMp4(
+  inputPath: string,
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const tempDir = getTempDir()
+    const outputPath = join(tempDir, `preview_${Date.now()}.mp4`)
+    const command = ffmpeg(inputPath) as any
+    hideWindow(command)
+
+    command
+      .videoCodec('libx264')
+      .audioCodec('aac')
+      .audioBitrate('192k')
+      .addOption('-crf', '23')
+      .addOption('-preset', 'fast')
+      .addOption('-movflags', '+faststart')
+      .on('progress', (progress: any) => {
+        if (progress.percent && onProgress) {
+          onProgress(progress.percent)
+        }
+      })
+      .on('end', () => {
+        resolve(outputPath)
+      })
+      .on('error', (err: any) => {
+        reject(err)
+      })
+      .save(outputPath)
+  })
+}
+
 export function concatenateVideos(
   inputPaths: string[],
   outputPath: string,

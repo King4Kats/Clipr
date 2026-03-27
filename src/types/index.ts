@@ -27,6 +27,7 @@ export interface VideoSegment {
 /** Fichier vidéo chargé dans l'application */
 export interface VideoFile {
   path: string
+  originalPath: string // Chemin original du fichier (avant conversion éventuelle)
   name: string
   duration: number
   size: number
@@ -120,6 +121,7 @@ export interface ElectronAPI {
   getVideoDuration: (videoPath: string) => Promise<number>
   extractAudio: (videoPath: string) => Promise<string>
   cutVideo: (input: string, start: number, end: number, output: string) => Promise<void>
+  convertToMp4: (videoPath: string) => Promise<string>
   concatenateVideos: (inputPaths: string[], output: string) => Promise<void>
 
   // ─── Whisper : transcription audio → texte ───
