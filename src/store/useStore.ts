@@ -259,6 +259,10 @@ export const useStore = create<AppState>((set, get) => ({
     const state = get()
     if (state.activeTabId === id) return
 
+    // Bloquer le switch pendant une analyse IA en cours
+    const isProcessing = state.processingStep !== 'idle' && state.processingStep !== 'ready' && state.processingStep !== 'done'
+    if (isProcessing) return
+
     // Sauvegarder l'onglet courant
     let tabs = state.tabs.map(t =>
       t.id === state.activeTabId

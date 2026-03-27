@@ -48,11 +48,13 @@ const Header = ({ onOpenSetup }: HeaderProps) => {
           {tabs.length > 0 && tabs.map((tab) => (
             <div
               key={tab.id}
-              onClick={() => switchTab(tab.id)}
-              className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all whitespace-nowrap shrink-0 ${
-                activeTabId === tab.id
-                  ? "bg-primary/10 text-primary border border-primary/20"
-                  : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+              onClick={() => !isProcessing && switchTab(tab.id)}
+              className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap shrink-0 ${
+                isProcessing && activeTabId !== tab.id
+                  ? "text-muted-foreground/40 cursor-not-allowed"
+                  : activeTabId === tab.id
+                  ? "bg-primary/10 text-primary border border-primary/20 cursor-default"
+                  : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground cursor-pointer"
               }`}
             >
               <span className="max-w-[120px] truncate">{tab.name}</span>

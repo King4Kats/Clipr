@@ -115,39 +115,41 @@ const VideoPreview = () => {
         const video = videoRef.current;
         if (!video || !videoFile) return;
 
-        let isSyncing = false;
+        let cancelled = false;
 
         const syncPlayer = async () => {
+            if (cancelled) return;
+
             if (isFragmentMode) {
                 const diff = Math.abs(video.currentTime - segmentStartLocal);
                 const shouldJump = diff > 0.5 || video.currentTime === 0;
 
                 if (shouldJump) {
-                    isSyncing = true;
                     if (!video.paused) video.pause();
-
                     video.currentTime = segmentStartLocal;
                     setCurrentTime(segmentStartLocal);
 
-                    const onSeeked = async () => {
-                        video.removeEventListener("seeked", onSeeked);
-                        isSyncing = false;
+                    // Attendre le seek puis jouer si besoin
+                    await new Promise<void>(resolve => {
+                        const onSeeked = () => {
+                            video.removeEventListener("seeked", onSeeked);
+                            resolve();
+                        };
+                        video.addEventListener("seeked", onSeeked);
+                    });
 
-                        if (isPlaying && video.paused) {
-                            try { await video.play(); } catch { /* autoplay blocked */ }
-                        }
-                    };
-                    video.addEventListener("seeked", onSeeked);
+                    if (cancelled) return;
+                    if (isPlaying && video.paused) {
+                        try { await video.play(); } catch { /* autoplay blocked */ }
+                    }
                     return;
                 }
             }
 
-            if (!isSyncing) {
-                if (isPlaying && video.paused) {
-                    video.play().catch(() => { });
-                } else if (!isPlaying && !video.paused) {
-                    video.pause();
-                }
+            if (isPlaying && video.paused) {
+                video.play().catch(() => { });
+            } else if (!isPlaying && !video.paused) {
+                video.pause();
             }
         };
 
@@ -162,8 +164,7 @@ const VideoPreview = () => {
         }
 
         return () => {
-            video.removeEventListener("loadedmetadata", () => { });
-            video.removeEventListener("seeked", () => { });
+            cancelled = true;
         };
     }, [selectedSegmentId, isPlaying, segmentStartLocal, videoFile?.path]);
 
