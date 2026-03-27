@@ -121,15 +121,12 @@ const VideoPreview = () => {
             if (cancelled) return;
 
             if (isFragmentMode) {
-                const diff = Math.abs(video.currentTime - segmentStartLocal);
-                const shouldJump = diff > 0.5 || video.currentTime === 0;
+                // Toujours se repositionner au debut du segment quand on change de segment
+                video.currentTime = segmentStartLocal;
+                setCurrentTime(segmentStartLocal);
 
-                if (shouldJump) {
-                    if (!video.paused) video.pause();
-                    video.currentTime = segmentStartLocal;
-                    setCurrentTime(segmentStartLocal);
-
-                    // Attendre le seek puis jouer si besoin
+                if (isPlaying) {
+                    // Attendre le seek puis jouer
                     await new Promise<void>(resolve => {
                         const onSeeked = () => {
                             video.removeEventListener("seeked", onSeeked);
@@ -139,11 +136,11 @@ const VideoPreview = () => {
                     });
 
                     if (cancelled) return;
-                    if (isPlaying && video.paused) {
+                    if (video.paused) {
                         try { await video.play(); } catch { /* autoplay blocked */ }
                     }
-                    return;
                 }
+                return;
             }
 
             if (isPlaying && video.paused) {
