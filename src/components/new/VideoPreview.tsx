@@ -231,6 +231,7 @@ const VideoPreview = () => {
                     src={`local-video://${encodeURIComponent(videoFile.path)}`}
                     className="w-full h-full object-contain cursor-pointer"
                     onClick={togglePlay}
+                    onError={(e) => console.error('[VideoPreview] Erreur lecture vidéo:', (e.target as HTMLVideoElement).error)}
                     playsInline
                 />
                 {!isPlaying && (

@@ -62,12 +62,13 @@ protocol.registerSchemesAsPrivileged([
  * Transforme les requêtes du rendu en flux de données Node.js.
  */
 function registerVideoProtocol() {
-  protocol.registerFileProtocol('local-video', (request, callback) => {
+  protocol.handle('local-video', (request) => {
     let filePath = decodeURIComponent(request.url.replace('local-video://', ''))
     if (process.platform === 'win32' && filePath.startsWith('/') && filePath.includes(':')) {
       filePath = filePath.slice(1)
     }
-    callback({ path: filePath })
+    logger.info('Lecture vidéo :', filePath)
+    return net.fetch(pathToFileURL(filePath).toString())
   })
 }
 
