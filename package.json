@@ -1,6 +1,6 @@
 {
   "name": "decoupeur-video",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Découpeur de vidéos intelligent avec transcription Whisper et analyse AI",
   "main": "out/main/index.js",
   "scripts": {
