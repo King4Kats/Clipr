@@ -124,6 +124,13 @@
     ],
     "extraResources": [
       {
+        "from": "scripts",
+        "to": "scripts",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "models",
         "to": "models",
         "filter": [
