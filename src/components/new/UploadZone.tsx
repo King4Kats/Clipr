@@ -31,7 +31,6 @@ const UploadZone = () => {
 
           // Convertir en MP4 si le format n'est pas supporté par le lecteur
           if (UNSUPPORTED_FORMATS.includes(ext)) {
-            setProcessing("processing", 0, "Conversion vidéo en cours...");
             playablePath = await window.electron.convertToMp4(filePath);
           }
 
