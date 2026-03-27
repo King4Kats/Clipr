@@ -1,0 +1,323 @@
+/**
+ * INDEX.CSS : Feuille de styles globale de l'application
+ *
+ * Définit le système de design complet basé sur Tailwind CSS :
+ * - Variables CSS pour les thèmes clair et sombre (tokens de couleur)
+ * - Typographie (Space Grotesk + JetBrains Mono)
+ * - Classes utilitaires personnalisées (gradients, ombres, scrollbars)
+ * - Animations CSS (float, pulse-glow)
+ * - Styles pour react-grid-layout (éditeur NLE redimensionnable)
+ */
+
+/* Import des polices Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* Directives Tailwind CSS : injection des styles de base, composants et utilitaires */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ===== THÈME CLAIR — Palette glaciale / gris-bleu froid ===== */
+  :root {
+    --background: 216 18% 93%;       /* Fond glacial gris-bleu — #e8eaef */
+    --foreground: 222 20% 14%;       /* Texte quasi-noir bleuté */
+
+    --card: 210 20% 99%;             /* Cartes blanc pur — ressort sur le fond */
+    --card-foreground: 222 20% 14%;
+
+    --popover: 210 20% 99%;
+    --popover-foreground: 222 20% 14%;
+
+    --primary: 191 75% 38%;          /* Cyan profond — bon contraste sur blanc */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 214 18% 89%;        /* Gris-bleu léger pour boutons secondaires */
+    --secondary-foreground: 216 20% 30%;
+
+    --muted: 216 14% 90%;            /* Gris givré */
+    --muted-foreground: 218 12% 50%; /* Texte secondaire — pas trop clair */
+
+    --accent: 191 75% 38%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 216 16% 84%;           /* Bordures subtiles froides */
+    --input: 216 16% 84%;
+    --ring: 191 75% 38%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 216 18% 95%;
+    --sidebar-foreground: 218 12% 35%;
+    --sidebar-primary: 191 75% 38%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 216 14% 90%;
+    --sidebar-accent-foreground: 222 20% 14%;
+    --sidebar-border: 216 16% 84%;
+    --sidebar-ring: 191 75% 38%;
+
+    /* Custom tokens - Light */
+    --gradient-primary: linear-gradient(135deg, hsl(191 75% 38%), hsl(200 50% 32%));
+    --gradient-surface: linear-gradient(180deg, hsl(210 20% 99%), hsl(216 18% 95%));
+    --gradient-glow: radial-gradient(ellipse at center, hsl(191 75% 38% / 0.06), transparent 70%);
+    --shadow-glow: 0 0 24px -5px hsl(191 75% 38% / 0.12);
+    --shadow-card: 0 1px 3px 0 hsl(220 20% 20% / 0.04), 0 2px 8px -2px hsl(220 20% 20% / 0.06);
+  }
+
+  /* ===== THÈME SOMBRE — Palette cyan profond ===== */
+  .dark {
+    --background: 190 41% 10%;
+    --foreground: 0 0% 98%;
+
+    --card: 190 41% 14%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 190 41% 14%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 191 88% 62%;
+    --primary-foreground: 190 41% 10%;
+
+    --secondary: 189 40% 47%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 190 30% 18%;
+    --muted-foreground: 190 15% 65%;
+
+    --accent: 191 88% 62%;
+    --accent-foreground: 190 41% 10%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 190 30% 22%;
+    --input: 190 30% 22%;
+    --ring: 191 88% 62%;
+
+    --sidebar-background: 190 41% 11%;
+    --sidebar-foreground: 190 15% 85%;
+    --sidebar-primary: 191 88% 62%;
+    --sidebar-primary-foreground: 190 41% 10%;
+    --sidebar-accent: 190 35% 18%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 190 30% 22%;
+    --sidebar-ring: 191 88% 62%;
+
+    /* Custom tokens - Dark */
+    --gradient-primary: linear-gradient(135deg, hsl(191 88% 62%), hsl(189 40% 47%));
+    --gradient-surface: linear-gradient(180deg, hsl(190 41% 18%), hsl(190 41% 10%));
+    --gradient-glow: radial-gradient(ellipse at center, hsl(191 88% 62% / 0.15), transparent 70%);
+    --shadow-glow: 0 0 30px -5px hsl(191 88% 62% / 0.3);
+    --shadow-card: 0 4px 24px -4px hsl(190 50% 5% / 0.5);
+  }
+}
+
+/* ===== STYLES DE BASE : typographie, bordures, scrollbars ===== */
+@layer base {
+  /* Applique la couleur de bordure par défaut à tous les éléments */
+  * {
+    @apply border-border;
+  }
+
+  /* Corps de page : fond et police principale (Space Grotesk) */
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Space Grotesk', sans-serif;
+  }
+
+  /* Blocs de code : police monospace (JetBrains Mono) */
+  code,
+  pre {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* Masquage global des scrollbars tout en gardant le défilement fonctionnel */
+  * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  *::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ===== CLASSES UTILITAIRES PERSONNALISÉES ===== */
+@layer utilities {
+  /* Texte avec dégradé (effet gradient sur le texte) */
+  .text-gradient {
+    @apply bg-clip-text text-transparent;
+    background-image: var(--gradient-primary);
+  }
+
+  /* Fond avec dégradé primaire */
+  .bg-gradient-primary {
+    background-image: var(--gradient-primary);
+  }
+
+  /* Fond avec dégradé de surface (cartes, panneaux) */
+  .bg-gradient-surface {
+    background-image: var(--gradient-surface);
+  }
+
+  /* Effet de lueur (glow) autour des éléments importants */
+  .glow {
+    box-shadow: var(--shadow-glow);
+  }
+
+  /* Ombre portée pour les cartes */
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+
+  /* Scrollbar discrète pour les listes avec défilement visible */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    display: block;
+    width: 4px;
+    height: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 20px;
+    border: none;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+/* ===== ANIMATIONS CSS PERSONNALISÉES ===== */
+/* Animation de flottement vertical (effet lévitation) */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+/* Animation de pulsation lumineuse (opacité cyclique) */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* ===== REACT-GRID-LAYOUT : styles pour l'éditeur NLE redimensionnable ===== */
+.react-grid-layout {
+  position: relative;
+}
+
+.react-grid-item {
+  transition: all 200ms ease;
+}
+
+/* Placeholder affiché lors du glisser-déposer d'un panneau */
+.react-grid-item.react-grid-placeholder {
+  background: hsl(var(--primary) / 0.08) !important;
+  border: 2px dashed hsl(var(--primary) / 0.3) !important;
+  border-radius: 0.75rem;
+  opacity: 1 !important;
+}
+
+/* Élément en cours de glissement : élévation et transparence */
+.react-grid-item.react-draggable-dragging {
+  z-index: 100 !important;
+  opacity: 0.92;
+  box-shadow: 0 12px 40px -4px hsl(0 0% 0% / 0.3);
+  border-radius: 0.75rem;
+}
+
+/* Poignées de redimensionnement : visibles uniquement au survol */
+.react-grid-item > .react-resizable-handle {
+  z-index: 30;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.react-grid-item:hover > .react-resizable-handle {
+  opacity: 1;
+}
+
+/* Poignées de coin (se, sw, ne, nw) : petits carrés colorés */
+.react-grid-item > .react-resizable-handle::after {
+  border-color: hsl(var(--primary) / 0.4) !important;
+  width: 8px !important;
+  height: 8px !important;
+}
+
+.react-grid-item:hover > .react-resizable-handle::after {
+  border-color: hsl(var(--primary) / 0.7) !important;
+}
+
+/* Poignées de bord (e, w, n, s) : zone de clic élargie */
+.react-grid-item > .react-resizable-handle-e,
+.react-grid-item > .react-resizable-handle-w {
+  width: 8px !important;
+  height: 100% !important;
+  top: 0 !important;
+  margin-top: 0 !important;
+}
+
+.react-grid-item > .react-resizable-handle-n,
+.react-grid-item > .react-resizable-handle-s {
+  height: 8px !important;
+  width: 100% !important;
+  left: 0 !important;
+  margin-left: 0 !important;
+}
+
+/* Masquage de l'icône SVG par défaut sur les poignées de bord */
+.react-grid-item > .react-resizable-handle-e,
+.react-grid-item > .react-resizable-handle-w,
+.react-grid-item > .react-resizable-handle-n,
+.react-grid-item > .react-resizable-handle-s {
+  background-image: none !important;
+}
+
+/* Ligne subtile au survol pour les poignées de bord (indication visuelle) */
+.react-grid-item > .react-resizable-handle-e::after,
+.react-grid-item > .react-resizable-handle-w::after {
+  content: "" !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: 2px !important;
+  height: 24px !important;
+  border: none !important;
+  border-radius: 1px !important;
+  background: hsl(var(--primary) / 0.5) !important;
+}
+
+.react-grid-item > .react-resizable-handle-n::after,
+.react-grid-item > .react-resizable-handle-s::after {
+  content: "" !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: 24px !important;
+  height: 2px !important;
+  border: none !important;
+  border-radius: 1px !important;
+  background: hsl(var(--primary) / 0.5) !important;
+}
