@@ -68,9 +68,19 @@ const AIAnalysisPanel = () => {
     processingStep !== "done" &&
     processingStep !== "error";
 
+  // Verifie si un autre onglet est deja en analyse IA
+  const isAnotherTabAnalyzing = useStore((s) =>
+    s.tabs.some(t => {
+      if (t.id === s.activeTabId) return false;
+      const step = t.snapshot.processingStep;
+      return step === 'extracting-audio' || step === 'transcribing' || step === 'analyzing';
+    })
+  );
+
   // Lance le workflow d'analyse complet (extraction audio + transcription + analyse IA)
   const handleStart = async () => {
     if (videoFiles.length === 0) return;
+    if (isAnotherTabAnalyzing) return;
     await useStore.getState().triggerAnalysis();
   };
 
@@ -212,12 +222,12 @@ const AIAnalysisPanel = () => {
         ) : (
           <Button
             onClick={handleStart}
-            disabled={videoFiles.length === 0 || !modelsReady}
+            disabled={videoFiles.length === 0 || !modelsReady || isAnotherTabAnalyzing}
             className="w-full h-11 bg-primary hover:bg-primary/90 text-primary-foreground font-bold uppercase tracking-wide rounded-lg"
           >
             <span className="flex items-center gap-2">
               <Sparkles className="w-4 h-4" />
-              Lancer l'analyse
+              {isAnotherTabAnalyzing ? "Analyse en cours sur un autre projet" : "Lancer l'analyse"}
             </span>
           </Button>
         )}
