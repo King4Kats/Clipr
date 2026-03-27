@@ -10,7 +10,13 @@
     "package": "electron-builder --win --dir",
     "dist": "electron-builder --win",
     "postinstall": "electron-builder install-app-deps",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev:web": "concurrently \"npx tsx server/index.ts\" \"npx vite --config vite.config.ts\"",
+    "build:web": "npx vite build --config vite.config.ts",
+    "start:web": "npx tsx server/index.ts",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f clipr"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",
@@ -76,7 +82,11 @@
     "vaul": "^1.1.2",
     "whisper-node": "^0.1.5",
     "zod": "^4.3.6",
-    "zustand": "^4.4.7"
+    "zustand": "^4.4.7",
+    "express": "^4.21.0",
+    "ws": "^8.18.0",
+    "multer": "^1.4.5-lts.1",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.30.1",
@@ -100,7 +110,10 @@
     "typescript": "^5.3.3",
     "vite": "^5.0.11",
     "vitest": "^4.0.18",
-    "wait-on": "^7.2.0"
+    "wait-on": "^7.2.0",
+    "@types/express": "^4.17.21",
+    "@types/ws": "^8.5.12",
+    "@types/multer": "^1.4.12"
   },
   "build": {
     "appId": "com.decoupeur-video.app",

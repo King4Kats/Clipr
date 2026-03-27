@@ -12,6 +12,9 @@ import { ThemeProvider } from 'next-themes'
 import App from './App'
 import './index.css'
 
+// Initialiser l'API web (remplace window.electron du preload Electron)
+import './api'
+
 // Montage de l'application dans l'élément root du DOM
 // - StrictMode : active les vérifications supplémentaires en développement
 // - ThemeProvider : gère le basculement clair/sombre via la classe CSS "dark"

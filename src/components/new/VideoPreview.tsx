@@ -13,6 +13,7 @@ import { Play, Pause, Volume2, Edit2, Check, GripHorizontal } from "lucide-react
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
+import { videoUrl } from "@/api";
 
 // Formate un nombre de secondes en chaîne lisible (H:MM:SS ou M:SS)
 function formatTime(seconds: number): string {
@@ -239,7 +240,7 @@ const VideoPreview = () => {
                 <video
                     key={videoFile.path}
                     ref={videoRef}
-                    src={`local-video:///${videoFile.path.replace(/\\/g, '/')}`}
+                    src={videoUrl(videoFile.path)}
                     className="w-full h-full object-contain cursor-pointer"
                     onClick={togglePlay}
                     onError={(e) => console.error('[VideoPreview] Erreur lecture vidéo:', (e.target as HTMLVideoElement).error)}

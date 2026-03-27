@@ -108,9 +108,12 @@ const Header = ({ onOpenSetup }: HeaderProps) => {
             <Button
               variant="secondary"
               size="sm"
-              onClick={loadProject}
+              onClick={() => {
+                // En web, on charge depuis l'historique (pas de dialogue fichier)
+                loadProject()
+              }}
               className="h-8 gap-2"
-              title="Ouvrir un projet"
+              title="Ouvrir un projet récent"
             >
               <FolderOpen className="w-4 h-4" />
               <span className="hidden sm:inline">Ouvrir</span>

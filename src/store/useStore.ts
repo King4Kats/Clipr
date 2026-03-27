@@ -584,9 +584,14 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   loadProject: async () => {
+    // En mode web, loadProject retourne null (pas de dialogue fichier natif)
+    // On recharge l'historique pour que l'utilisateur puisse choisir un projet récent
     const projectData = await window.electron.loadProject()
     if (projectData) {
       get().loadFromHistory(projectData)
+    } else {
+      // Fallback : recharger l'historique
+      await get().loadHistory()
     }
   },
 
@@ -618,9 +623,13 @@ export const useStore = create<AppState>((set, get) => ({
       config: state.config,
       projectName: state.videoFiles[0].name
     }
-    const path = await window.electron.saveProject(projectData)
-    if (path) {
-      console.log('Projet sauvegardé avec succès :', path)
+    try {
+      const path = await window.electron.saveProject(projectData)
+      if (path) {
+        console.log('Projet sauvegardé avec succès :', path)
+      }
+    } catch (e) {
+      console.error('Erreur sauvegarde projet:', e)
     }
   },
 

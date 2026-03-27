@@ -1,0 +1,9 @@
+node_modules
+release
+out
+dist
+dist-server
+.git
+*.exe
+*.msi
+models/

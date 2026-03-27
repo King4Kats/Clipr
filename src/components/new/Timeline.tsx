@@ -80,58 +80,36 @@ const Timeline = () => {
     });
   };
 
-  // Exporte chaque segment en fichier vidéo MP4 via FFmpeg
+  // Exporte chaque segment en fichier vidéo MP4 via le serveur
   const handleExportVideo = async () => {
     if (segments.length === 0 || videoFiles.length === 0) return;
-
-    const outputFolder = await window.electron.selectFolderDialog();
-    if (!outputFolder) return;
 
     setIsExporting(true);
     setShowExportMenu(false);
     setProcessing('exporting', 0, 'Démarrage de l\'export...');
 
     try {
-      for (let i = 0; i < segments.length; i++) {
-        const segment = segments[i];
-        const safeTitle = segment.title
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/[^a-zA-Z0-9\s-]/g, '')
-          .replace(/\s+/g, '_')
-          .substring(0, 50);
+      // Préparer les clips pour chaque segment
+      const clipsData = segments.map(segment =>
+        getClipsForSegment(segment.start, segment.end)
+      );
 
-        const sep = navigator.platform.includes('Win') ? '\\' : '/';
-        const outputPath = `${outputFolder}${sep}${String(i + 1).padStart(2, '0')}_${safeTitle}.mp4`;
+      // Envoyer au serveur pour export
+      const result = await (window.electron as any).exportVideos(segments, videoFiles, clipsData);
 
-        setProcessing(
-          'exporting',
-          ((i / segments.length) * 100),
-          `Export ${i + 1}/${segments.length}: ${segment.title}`
-        );
-
-        const clips = getClipsForSegment(segment.start, segment.end);
-        if (clips.length === 0) continue;
-
-        if (clips.length === 1) {
-          await window.electron.cutVideo(clips[0].videoPath, clips[0].start, clips[0].end, outputPath);
-        } else {
-          const tempDir = await window.electron.getAppPath('temp');
-          const tempFiles: string[] = [];
-
-          for (let j = 0; j < clips.length; j++) {
-            const clip = clips[j];
-            const tempPath = `${tempDir}${sep}decoupeur-video${sep}temp_clip_${i}_${j}_${Date.now()}.mp4`;
-            tempFiles.push(tempPath);
-            await window.electron.cutVideo(clip.videoPath, clip.start, clip.end, tempPath);
-          }
-
-          await window.electron.concatenateVideos(tempFiles, outputPath);
+      if (result.success && result.files) {
+        // Proposer le téléchargement de chaque fichier
+        for (const filePath of result.files) {
+          const a = document.createElement('a');
+          a.href = `/api/export/download/${encodeURIComponent(filePath)}`;
+          a.download = filePath.split('/').pop() || 'export.mp4';
+          a.click();
+          // Petit délai entre les téléchargements
+          await new Promise(r => setTimeout(r, 500));
         }
       }
 
       setProcessing('done', 100, 'Export terminé !');
-      await window.electron.openFolder(outputFolder);
     } catch (error: any) {
       console.error('Export error:', error);
       setProcessing('error', 0, `Erreur lors de l'export: ${error.message || error}`);

@@ -1,0 +1,74 @@
+# =============================================================================
+# Clipr — Docker Compose
+# =============================================================================
+# Trois services :
+#   1. clipr     : L'application web (Express + React)
+#   2. ollama    : Le serveur LLM local
+#   3. caddy     : Reverse proxy avec HTTPS automatique (Let's Encrypt)
+# =============================================================================
+
+services:
+  # --- Application Clipr ---
+  clipr:
+    build: .
+    container_name: clipr-app
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - OLLAMA_HOST=ollama
+      - OLLAMA_PORT=11434
+      - CLIPR_DATA_DIR=/data
+    volumes:
+      - clipr-data:/data
+    depends_on:
+      - ollama
+    networks:
+      - clipr-net
+
+  # --- Ollama (LLM local) ---
+  ollama:
+    image: ollama/ollama:latest
+    container_name: clipr-ollama
+    restart: always
+    volumes:
+      - ollama-data:/root/.ollama
+    # Décommenter pour utiliser le GPU NVIDIA :
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    networks:
+      - clipr-net
+
+  # --- Caddy (Reverse Proxy + HTTPS) ---
+  # Décommenter et configurer avec votre NDD pour accès distant
+  caddy:
+    image: caddy:2-alpine
+    container_name: clipr-caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "3000:3000"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - clipr
+    networks:
+      - clipr-net
+
+volumes:
+  clipr-data:
+  ollama-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  clipr-net:
+    driver: bridge

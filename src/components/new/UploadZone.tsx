@@ -1,24 +1,24 @@
 /**
- * UPLOADZONE.TSX : Zone d'importation vidéo (drag & drop)
+ * UPLOADZONE.TSX : Zone d'importation vidéo (drag & drop) — Version Web
  *
- * Composant d'upload permettant à l'utilisateur d'importer des vidéos
- * soit par glisser-déposer, soit via un dialogue de sélection de fichiers.
- * Valide les extensions vidéo et récupère la durée via FFmpeg.
+ * Utilise un <input type="file"> et l'upload HTTP multipart au lieu
+ * des dialogues natifs Electron.
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Upload, Film, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useStore } from "@/store/useStore";
+import { api } from "@/api";
 
 const UploadZone = () => {
-  // --- Etat local : indicateurs de drag & chargement ---
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [convertProgress, setConvertProgress] = useState<{ percent: number; message: string } | null>(null);
   const { addVideoFile, setProcessing } = useStore();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Ecouter les events de progression IPC pendant la conversion
+  // Écouter la progression via WebSocket pendant l'upload/conversion
   useEffect(() => {
     if (!isLoading) return;
     const unsub = window.electron.onProgress(({ progress, message }) => {
@@ -27,35 +27,21 @@ const UploadZone = () => {
     return () => { unsub(); };
   }, [isLoading]);
 
-  // Formats non supportés nativement par le lecteur HTML5 de Chromium
-  const UNSUPPORTED_FORMATS = ['mts', 'avi', 'mkv', 'mov', 'wmv', 'flv'];
-
-  // Traite les fichiers sélectionnés : convertit si nécessaire, récupère la durée et ajoute au store
+  // Traite les fichiers uploadés via l'API web
   const handleFiles = useCallback(
-    async (filePaths: string[]) => {
+    async (files: FileList | File[]) => {
       setIsLoading(true);
       setConvertProgress(null);
       try {
-        for (const filePath of filePaths) {
-          const ext = filePath.split('.').pop()?.toLowerCase() || '';
-          let playablePath = filePath;
+        const results = await api.uploadVideos(files);
 
-          // Convertir en MP4 si le format n'est pas supporté par le lecteur
-          if (UNSUPPORTED_FORMATS.includes(ext)) {
-            setConvertProgress({ percent: 0, message: 'Conversion vidéo en cours...' });
-            playablePath = await window.electron.convertToMp4(filePath);
-          }
-
-          setConvertProgress(null);
-          const duration = await window.electron.getVideoDuration(filePath);
-          const name = filePath.split(/[\\/]/).pop() || "video";
-
+        for (const fileInfo of results) {
           addVideoFile({
-            path: playablePath,
-            originalPath: filePath,
-            name,
-            duration,
-            size: 0,
+            path: fileInfo.path,
+            originalPath: fileInfo.originalPath,
+            name: fileInfo.name,
+            duration: fileInfo.duration,
+            size: fileInfo.size || 0,
           });
         }
         setProcessing("idle", 0, "");
@@ -69,16 +55,22 @@ const UploadZone = () => {
     [addVideoFile, setProcessing]
   );
 
-  // Ouvre le dialogue natif de sélection de fichiers vidéo
-  const handleClick = async () => {
+  // Ouvre le sélecteur de fichier natif du navigateur
+  const handleClick = () => {
     if (isLoading) return;
-    const filePaths = await window.electron.openVideosDialog();
-    if (filePaths && filePaths.length > 0) {
-      handleFiles(filePaths);
-    }
+    fileInputRef.current?.click();
   };
 
-  // --- Gestionnaires de drag & drop ---
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      handleFiles(files);
+    }
+    // Reset l'input pour pouvoir re-sélectionner le même fichier
+    e.target.value = '';
+  };
+
+  // Drag & drop
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -89,7 +81,6 @@ const UploadZone = () => {
     setIsDragging(false);
   };
 
-  // Valide les extensions vidéo autorisées et traite les fichiers déposés
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
@@ -98,23 +89,21 @@ const UploadZone = () => {
     const files = e.dataTransfer.files;
     if (files.length > 0) {
       const videoExtensions = ["mp4", "avi", "mov", "mkv", "mts", "webm"];
-      const validPaths: string[] = [];
+      const validFiles: File[] = [];
 
       for (let i = 0; i < files.length; i++) {
-        const file = files[i] as File & { path: string };
-        const ext = file.name.split(".").pop()?.toLowerCase();
-        if (ext && videoExtensions.includes(ext) && file.path) {
-          validPaths.push(file.path);
+        const ext = files[i].name.split(".").pop()?.toLowerCase();
+        if (ext && videoExtensions.includes(ext)) {
+          validFiles.push(files[i]);
         }
       }
 
-      if (validPaths.length > 0) {
-        handleFiles(validPaths);
+      if (validFiles.length > 0) {
+        handleFiles(validFiles);
       }
     }
   };
 
-  // --- Rendu : zone d'upload avec indicateurs visuels ---
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -126,6 +115,16 @@ const UploadZone = () => {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {/* Input fichier caché */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept=".mp4,.avi,.mov,.mkv,.mts,.webm"
+        onChange={handleFileInput}
+        className="hidden"
+      />
+
       <div
         className={`border-2 border-dashed rounded-lg p-10 text-center transition-all duration-300 bg-card/50 ${isDragging
             ? "border-primary glow bg-primary/5 scale-[1.02]"
@@ -165,7 +164,6 @@ const UploadZone = () => {
             </p>
           </div>
 
-          {/* Barre de progression de conversion */}
           {convertProgress && convertProgress.percent > 0 && (
             <div className="w-full max-w-xs">
               <div className="h-2 bg-secondary/30 rounded-full overflow-hidden">

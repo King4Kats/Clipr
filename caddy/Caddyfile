@@ -1,0 +1,20 @@
+# =============================================================================
+# Caddyfile — Configuration du reverse proxy
+# =============================================================================
+#
+# CONFIGURATION :
+# Remplacez "clipr.example.com" par votre nom de domaine réel.
+# Caddy gère automatiquement le certificat HTTPS via Let's Encrypt.
+#
+# Pour un accès local uniquement (sans NDD), utilisez le bloc :3000
+# =============================================================================
+
+# --- Accès local sans NDD (port 3000) ---
+:3000 {
+    reverse_proxy clipr:3000
+}
+
+# --- Accès distant avec NDD (décommenter et configurer) ---
+# clipr.example.com {
+#     reverse_proxy clipr:3000
+# }
