@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { VideoFile, VideoSegment, TranscriptSegment, ProcessingStep, AppConfig, VideoClip } from '../types'
+import { VideoFile, VideoSegment, TranscriptSegment, ProcessingStep, AppConfig, VideoClip, WorkMode } from '../types'
 
 /**
  * USESTORE.TS : Gestion de l'état global (Store Zustand)
@@ -9,7 +9,36 @@ import { VideoFile, VideoSegment, TranscriptSegment, ProcessingStep, AppConfig, 
  * du workflow de traitement. Permet une synchronisation inter-composants fluide.
  */
 
+/** Snapshot de l'etat d'un projet (onglet) */
+interface ProjectSnapshot {
+  videoFiles: VideoFile[]
+  transcript: TranscriptSegment[]
+  segments: VideoSegment[]
+  workMode: WorkMode
+  processingStep: ProcessingStep
+  progress: number
+  progressMessage: string
+  config: AppConfig
+  audioPaths: string[]
+  selectedSegmentId: string | null
+  currentVideoIndex: number
+}
+
+/** Onglet de projet */
+export interface ProjectTab {
+  id: string
+  name: string
+  snapshot: ProjectSnapshot
+}
+
 interface AppState {
+  // Onglets
+  tabs: ProjectTab[]
+  activeTabId: string | null
+  addTab: () => void
+  removeTab: (id: string) => void
+  switchTab: (id: string) => void
+
   // Videos (support multi-vidéos)
   videoFiles: VideoFile[]
   addVideoFile: (file: Omit<VideoFile, 'offset'>) => void
@@ -30,6 +59,10 @@ interface AppState {
   removeSegment: (id: string) => void
   addSegment: (segment: VideoSegment) => void
   reorderSegments: (segments: VideoSegment[]) => void
+
+  // Mode de travail (choix, manuel, IA)
+  workMode: WorkMode
+  setWorkMode: (mode: WorkMode) => void
 
   // État du processus de traitement (workflows asynchrones)
   processingStep: ProcessingStep
@@ -97,7 +130,153 @@ const SEGMENT_COLORS = [
   '#84cc16', // Lime
 ]
 
+/** Capture un snapshot de l'etat courant du projet */
+function captureSnapshot(state: AppState): ProjectSnapshot {
+  return {
+    videoFiles: state.videoFiles,
+    transcript: state.transcript,
+    segments: state.segments,
+    workMode: state.workMode,
+    processingStep: state.processingStep,
+    progress: state.progress,
+    progressMessage: state.progressMessage,
+    config: state.config,
+    audioPaths: state.audioPaths,
+    selectedSegmentId: state.selectedSegmentId,
+    currentVideoIndex: state.currentVideoIndex,
+  }
+}
+
+/** Restaure un snapshot dans le store */
+function restoreSnapshot(snapshot: ProjectSnapshot): Partial<AppState> {
+  return {
+    videoFiles: snapshot.videoFiles,
+    transcript: snapshot.transcript,
+    segments: snapshot.segments,
+    workMode: snapshot.workMode,
+    processingStep: snapshot.processingStep,
+    progress: snapshot.progress,
+    progressMessage: snapshot.progressMessage,
+    config: snapshot.config,
+    audioPaths: snapshot.audioPaths,
+    audioPath: snapshot.audioPaths[0] || null,
+    selectedSegmentId: snapshot.selectedSegmentId,
+    currentVideoIndex: snapshot.currentVideoIndex,
+    videoFile: snapshot.videoFiles[snapshot.currentVideoIndex] || null,
+    isPlaying: false,
+  }
+}
+
 export const useStore = create<AppState>((set, get) => ({
+  // --- Systeme d'onglets ---
+  tabs: [],
+  activeTabId: null,
+
+  addTab: () => {
+    const state = get()
+    const newId = Math.random().toString(36).substring(2, 11)
+
+    // Sauvegarder l'onglet actif avant de creer le nouveau
+    let tabs = [...state.tabs]
+    if (state.activeTabId) {
+      tabs = tabs.map(t =>
+        t.id === state.activeTabId
+          ? { ...t, snapshot: captureSnapshot(state), name: state.videoFiles[0]?.name || 'Projet' }
+          : t
+      )
+    } else if (state.videoFiles.length > 0) {
+      // Premier onglet implicite : sauvegarder le projet courant
+      tabs.push({
+        id: Math.random().toString(36).substring(2, 11),
+        name: state.videoFiles[0]?.name || 'Projet',
+        snapshot: captureSnapshot(state),
+      })
+    }
+
+    // Creer le nouvel onglet vide
+    const emptySnapshot: ProjectSnapshot = {
+      videoFiles: [],
+      transcript: [],
+      segments: [],
+      workMode: 'choose',
+      processingStep: 'idle',
+      progress: 0,
+      progressMessage: '',
+      config: state.config,
+      audioPaths: [],
+      selectedSegmentId: null,
+      currentVideoIndex: 0,
+    }
+
+    tabs.push({ id: newId, name: 'Nouveau', snapshot: emptySnapshot })
+
+    set({
+      tabs,
+      activeTabId: newId,
+      ...restoreSnapshot(emptySnapshot),
+    })
+  },
+
+  removeTab: (id) => {
+    const state = get()
+    const tabs = state.tabs.filter(t => t.id !== id)
+
+    if (tabs.length === 0) {
+      // Plus d'onglets : reset complet
+      set({
+        tabs: [],
+        activeTabId: null,
+        videoFiles: [],
+        transcript: [],
+        segments: [],
+        workMode: 'choose',
+        processingStep: 'idle',
+        progress: 0,
+        progressMessage: '',
+        audioPaths: [],
+        audioPath: null,
+        videoFile: null,
+        selectedSegmentId: null,
+      })
+      get().loadHistory()
+      return
+    }
+
+    // Si on ferme l'onglet actif, basculer sur le premier restant
+    if (state.activeTabId === id) {
+      const next = tabs[0]
+      set({
+        tabs,
+        activeTabId: next.id,
+        ...restoreSnapshot(next.snapshot),
+      })
+    } else {
+      set({ tabs })
+    }
+  },
+
+  switchTab: (id) => {
+    const state = get()
+    if (state.activeTabId === id) return
+
+    // Sauvegarder l'onglet courant
+    let tabs = state.tabs.map(t =>
+      t.id === state.activeTabId
+        ? { ...t, snapshot: captureSnapshot(state), name: state.videoFiles[0]?.name || t.name }
+        : t
+    )
+
+    // Restaurer l'onglet cible
+    const target = tabs.find(t => t.id === id)
+    if (!target) return
+
+    set({
+      tabs,
+      activeTabId: id,
+      ...restoreSnapshot(target.snapshot),
+    })
+  },
+
   // --- Gestion de la collection de fichiers vidéo ---
   videoFiles: [],
 
@@ -173,6 +352,10 @@ export const useStore = create<AppState>((set, get) => ({
       ]
     })),
   reorderSegments: (segments) => set({ segments }),
+
+  // --- Mode de travail ---
+  workMode: 'choose',
+  setWorkMode: (mode) => set({ workMode: mode }),
 
   // --- Suivi de la Progression du Traitement ---
   processingStep: 'idle',
@@ -375,6 +558,7 @@ export const useStore = create<AppState>((set, get) => ({
       videoFiles: [],
       transcript: [],
       segments: [],
+      workMode: 'choose',
       processingStep: 'idle',
       progress: 0,
       progressMessage: '',

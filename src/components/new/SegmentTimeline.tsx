@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { useStore } from "@/store/useStore";
-import { ZoomIn, ZoomOut, Maximize2, GripHorizontal } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, GripHorizontal, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -49,7 +49,9 @@ const SegmentTimeline = () => {
     selectedSegmentId,
     setSelectedSegmentId,
     updateSegment,
+    addSegment,
     getTotalDuration,
+    workMode,
   } = useStore();
 
   const audioPath = useStore((s) => s.audioPath);
@@ -255,6 +257,21 @@ const SegmentTimeline = () => {
     };
   }, [isDragging, segments, pixelToTime, totalDuration, updateSegment]);
 
+  // Ajouter un segment manuellement a la position donnee
+  const addManualSegment = useCallback((time: number) => {
+    const segDuration = Math.min(30, totalDuration - time);
+    if (segDuration < 1) return;
+
+    addSegment({
+      id: Math.random().toString(36).substring(2, 11),
+      title: `Segment ${segments.length + 1}`,
+      start: Math.round(time * 10) / 10,
+      end: Math.round((time + segDuration) * 10) / 10,
+      transcriptSegments: [],
+      color: '',
+    });
+  }, [addSegment, segments.length, totalDuration]);
+
   // Click on timeline to seek
   const handleTimelineClick = (e: React.MouseEvent) => {
     if (isDragging) return;
@@ -276,6 +293,7 @@ const SegmentTimeline = () => {
       }
     }
   };
+
 
   // Zoom controls
   const handleZoomIn = () => {
@@ -343,7 +361,17 @@ const SegmentTimeline = () => {
           )}
         </div>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleZoomOut} title="Dézoomer">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => addManualSegment(currentTime)}
+            title="Ajouter un segment ici"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </Button>
+          <div className="w-px h-4 bg-border mx-1" />
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleZoomOut} title="Dezoomer">
             <ZoomOut className="w-3.5 h-3.5" />
           </Button>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleFitAll} title="Voir tout">

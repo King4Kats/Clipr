@@ -371,7 +371,16 @@ const Timeline = () => {
         {segments.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <Scissors className="w-8 h-8 text-muted-foreground/30 mb-3" />
-            <p className="text-xs text-muted-foreground/60">Aucune séquence</p>
+            <p className="text-xs text-muted-foreground/60 mb-3">Aucune sequence</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleAddDefault}
+              className="h-8 gap-2 text-xs"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Ajouter une sequence
+            </Button>
           </div>
         )}
       </div>

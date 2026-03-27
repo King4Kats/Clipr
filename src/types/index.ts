@@ -53,6 +53,9 @@ export type ProcessingStep =
   | 'done'
   | 'error'
 
+/** Mode de travail après import vidéo */
+export type WorkMode = 'choose' | 'manual' | 'ai'
+
 /** État de progression d'une étape de traitement */
 export interface ProcessingProgress {
   step: ProcessingStep

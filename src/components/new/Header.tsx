@@ -1,12 +1,12 @@
 /**
  * HEADER.TSX : Barre de navigation principale
  *
- * Affiche le logo, les informations du projet en cours, et les actions :
- * ouvrir/sauvegarder un projet, réinitialiser, basculer le thème clair/sombre,
- * et accéder aux paramètres. Se fixe en haut de l'écran (sticky).
+ * Affiche le logo, les onglets de projets, et les actions :
+ * ouvrir/sauvegarder un projet, reinitialiser, basculer le theme clair/sombre,
+ * et acceder aux parametres. Se fixe en haut de l'ecran (sticky).
  */
 
-import { Settings, Save, FolderOpen, RotateCcw, Sun, Moon } from "lucide-react";
+import { Settings, Save, FolderOpen, RotateCcw, Sun, Moon, Plus, X } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -18,15 +18,15 @@ interface HeaderProps {
 
 const Header = ({ onOpenSetup }: HeaderProps) => {
   // --- Etat global et utilitaires ---
-  const { videoFiles, processingStep, reset, saveProject, loadProject } = useStore();
+  const { videoFiles, processingStep, reset, saveProject, loadProject, tabs, activeTabId, addTab, removeTab, switchTab } = useStore();
   const { theme, setTheme } = useTheme();
 
-  // Drapeaux dérivés de l'état
+  // Drapeaux derives de l'etat
   const hasVideos = videoFiles.length > 0;
   const isProcessing =
     processingStep !== "idle" && processingStep !== "ready" && processingStep !== "done";
 
-  // Bascule entre thème clair et sombre
+  // Bascule entre theme clair et sombre
   const toggleTheme = () => {
     setTheme(theme === "dark" ? "light" : "dark");
   };
@@ -36,31 +36,72 @@ const Header = ({ onOpenSetup }: HeaderProps) => {
     <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
         {/* Logo et nom de l'application */}
-        <div className="flex items-center gap-3 select-none">
+        <div className="flex items-center gap-3 select-none shrink-0">
           <div className="w-8 h-8 rounded-xl bg-primary/10 p-1 flex items-center justify-center overflow-hidden">
             <img src={logo} alt="Clipr Logo" className="w-6 h-6" />
           </div>
           <span className="text-xl font-bold tracking-tight text-foreground">Clipr</span>
         </div>
 
-        {/* Informations du projet en cours ou indicateur de traitement */}
-        <div className="flex-1 px-8">
-          {isProcessing ? (
-            <div className="flex items-center gap-2 text-primary animate-pulse text-sm font-medium">
-              <RotateCcw className="w-4 h-4 animate-spin-slow" />
-              <span>Analyse ou traitement en cours...</span>
+        {/* Onglets de projets */}
+        <div className="flex-1 flex items-center gap-1 px-4 overflow-x-auto scrollbar-none">
+          {tabs.length > 0 && tabs.map((tab) => (
+            <div
+              key={tab.id}
+              onClick={() => switchTab(tab.id)}
+              className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all whitespace-nowrap shrink-0 ${
+                activeTabId === tab.id
+                  ? "bg-primary/10 text-primary border border-primary/20"
+                  : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+              }`}
+            >
+              <span className="max-w-[120px] truncate">{tab.name}</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeTab(tab.id);
+                }}
+                className="opacity-0 group-hover:opacity-100 hover:text-destructive transition-all p-0.5 rounded"
+              >
+                <X className="w-3 h-3" />
+              </button>
             </div>
-          ) : hasVideos ? (
-            <div className="text-sm text-muted-foreground truncate max-w-md">
-              <span className="font-semibold text-foreground">Projet:</span>{" "}
-              {videoFiles.length === 1 ? videoFiles[0].name : `${videoFiles.length} vidéos`}
-            </div>
-          ) : null}
+          ))}
+
+          {/* Bouton nouveau projet / onglet */}
+          {hasVideos && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={addTab}
+              className="h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-primary"
+              title="Nouveau projet (nouvel onglet)"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </Button>
+          )}
+
+          {/* Info projet courant (quand pas d'onglets) */}
+          {tabs.length === 0 && (
+            <>
+              {isProcessing ? (
+                <div className="flex items-center gap-2 text-primary animate-pulse text-sm font-medium">
+                  <RotateCcw className="w-4 h-4 animate-spin-slow" />
+                  <span>Analyse ou traitement en cours...</span>
+                </div>
+              ) : hasVideos ? (
+                <div className="text-sm text-muted-foreground truncate max-w-md">
+                  <span className="font-semibold text-foreground">Projet:</span>{" "}
+                  {videoFiles.length === 1 ? videoFiles[0].name : `${videoFiles.length} videos`}
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
 
-        {/* Barre d'actions : gestion de projet, thème, paramètres */}
-        <div className="flex items-center gap-2">
-          {/* Actions projet : ouvrir, sauvegarder, réinitialiser */}
+        {/* Barre d'actions : gestion de projet, theme, parametres */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Actions projet : ouvrir, sauvegarder, reinitialiser */}
           <div className="flex items-center gap-1 border-r border-border pr-3 mr-1">
             <Button
               variant="secondary"
@@ -100,7 +141,7 @@ const Header = ({ onOpenSetup }: HeaderProps) => {
             )}
           </div>
 
-          {/* Bascule du thème clair/sombre */}
+          {/* Bascule du theme clair/sombre */}
           <Button
             variant="ghost"
             size="sm"
@@ -115,13 +156,13 @@ const Header = ({ onOpenSetup }: HeaderProps) => {
             )}
           </Button>
 
-          {/* Bouton paramètres / configuration IA */}
+          {/* Bouton parametres / configuration IA */}
           <Button
             variant="ghost"
             size="sm"
             onClick={onOpenSetup}
             className="w-8 h-8 p-0 rounded-lg hover:bg-secondary/80 transition-colors"
-            title="Configuration IA & Paramètres"
+            title="Configuration IA & Parametres"
           >
             <Settings className="w-4 h-4 text-muted-foreground" />
           </Button>
