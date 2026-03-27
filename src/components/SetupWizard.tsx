@@ -189,15 +189,46 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
     setDownloading(null)
   }
 
-  // Lance la vérification des mises à jour via l'auto-updater Electron
+  // Vérifie si une mise à jour est disponible (git fetch + compare)
   const handleCheckUpdates = async () => {
     setUpdateStatus({ status: 'checking' })
-    await window.electron.checkForUpdates()
+    try {
+      const result = await (window.electron as any).checkForUpdates()
+      if (result.available) {
+        setUpdateStatus({ status: 'available', version: `${result.commits} commit(s)`, releaseNotes: result.details })
+      } else {
+        setUpdateStatus({ status: 'not-available', version: appVersion })
+      }
+    } catch (error: any) {
+      setUpdateStatus({ status: 'error', message: error.message })
+    }
   }
 
-  // Applique la mise à jour téléchargée (redémarrage de l'application)
-  const handleInstallUpdate = () => {
-    window.electron.installUpdate()
+  // Lance le rebuild Docker (git pull + docker compose up --build)
+  const handleInstallUpdate = async () => {
+    setUpdateStatus({ status: 'downloading', percent: 50, bytesPerSecond: 0, transferred: 0, total: 0 })
+    try {
+      const result = await (window.electron as any).triggerUpdate()
+      if (result.status === 'updating') {
+        setUpdateStatus({ status: 'downloaded', version: 'Redémarrage...' })
+        // Attendre quelques secondes puis recharger la page
+        setTimeout(() => {
+          const checkAlive = setInterval(async () => {
+            try {
+              const res = await fetch('/api/health')
+              if (res.ok) {
+                clearInterval(checkAlive)
+                window.location.reload()
+              }
+            } catch { /* serveur pas encore prêt */ }
+          }, 3000)
+        }, 5000)
+      } else if (result.status === 'up-to-date') {
+        setUpdateStatus({ status: 'not-available', version: appVersion })
+      }
+    } catch (error: any) {
+      setUpdateStatus({ status: 'error', message: error.message })
+    }
   }
 
   // Exporte les logs de diagnostic vers un fichier
@@ -462,7 +493,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
           </div>
         </div>
 
-        {/* --- Section : Vérification et installation des mises à jour --- */}
+        {/* --- Section : Mise à jour (git pull + rebuild Docker) --- */}
         <div className="mb-6">
           <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Mise a jour</h2>
           <div className={`p-4 rounded-xl border transition-colors ${
@@ -478,9 +509,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
               <div className="flex items-center gap-3">
                 {updateStatus?.status === 'downloaded' ? (
                   <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center">
-                    <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
+                    <Spinner className="w-4 h-4 text-green-500" />
                   </div>
                 ) : updateStatus?.status === 'not-available' ? (
                   <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center">
@@ -508,28 +537,32 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
                 <div>
                   <p className="text-sm font-medium text-foreground">
                     {updateStatus?.status === 'checking' && 'Verification...'}
-                    {updateStatus?.status === 'available' && `Version ${updateStatus.version} disponible`}
-                    {updateStatus?.status === 'downloading' && `Telechargement : ${updateStatus.percent}%`}
-                    {updateStatus?.status === 'downloaded' && 'Mise a jour prete !'}
+                    {updateStatus?.status === 'available' && `${(updateStatus as any).version} disponible(s)`}
+                    {updateStatus?.status === 'downloading' && 'Rebuild Docker en cours...'}
+                    {updateStatus?.status === 'downloaded' && 'Redemarrage en cours...'}
                     {updateStatus?.status === 'not-available' && 'Vous etes a jour'}
-                    {updateStatus?.status === 'error' && 'Erreur de verification'}
+                    {updateStatus?.status === 'error' && 'Erreur de mise a jour'}
                     {!updateStatus && `Version ${appVersion}`}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {updateStatus?.status === 'downloaded' && 'Veuillez redemarrer pour appliquer la mise a jour.'}
-                    {updateStatus?.status === 'error' && updateStatus.message}
+                    {updateStatus?.status === 'downloaded' && 'L\'application va se recharger automatiquement.'}
+                    {updateStatus?.status === 'downloading' && 'Git pull + Docker rebuild. La page se rechargera.'}
+                    {updateStatus?.status === 'available' && (updateStatus as any).releaseNotes && (
+                      <span className="font-mono whitespace-pre-wrap">{(updateStatus as any).releaseNotes}</span>
+                    )}
+                    {updateStatus?.status === 'error' && (updateStatus as any).message}
                     {updateStatus?.status === 'not-available' && `Version actuelle : ${appVersion}`}
-                    {!updateStatus && 'Cliquez pour verifier les mises a jour.'}
+                    {!updateStatus && 'Verifie le repo Git et rebuild le container Docker.'}
                   </p>
                 </div>
               </div>
 
-              {updateStatus?.status === 'downloaded' ? (
+              {updateStatus?.status === 'available' ? (
                 <button
                   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors whitespace-nowrap"
                   onClick={handleInstallUpdate}
                 >
-                  Redemarrer
+                  Mettre a jour
                 </button>
               ) : (
                 <button
@@ -542,16 +575,17 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
               )}
             </div>
 
-            {/* Progress bar MAJ */}
-            {updateStatus?.status === 'downloading' && (
+            {/* Indicateur de rebuild en cours */}
+            {(updateStatus?.status === 'downloading' || updateStatus?.status === 'downloaded') && (
               <div className="mt-3">
                 <div className="h-1.5 bg-secondary/20 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-300"
-                    style={{ width: `${updateStatus.percent}%` }}
-                  />
+                  <div className="h-full bg-primary rounded-full animate-pulse w-full" />
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1 text-right">{updateStatus.percent}%</p>
+                <p className="text-[10px] text-muted-foreground mt-1 text-center">
+                  {updateStatus?.status === 'downloaded'
+                    ? 'Container en cours de redemarrage...'
+                    : 'Rebuild Docker en cours — ne fermez pas cette page'}
+                </p>
               </div>
             )}
           </div>

@@ -27,12 +27,15 @@ RUN npx vite build --config vite.config.ts 2>/dev/null || true
 # --- Stage 2 : Runtime ---
 FROM node:20-slim
 
-# Installer FFmpeg et Python + faster-whisper
+# Installer FFmpeg, Python, git et Docker CLI (pour la MAJ depuis l'UI)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
     python3-pip \
     python3-venv \
+    git \
+    curl \
+    && curl -fsSL https://get.docker.com | sh \
     && rm -rf /var/lib/apt/lists/*
 
 # Installer faster-whisper dans un venv

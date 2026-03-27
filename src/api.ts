@@ -258,6 +258,15 @@ export const api = {
     return wsClient.on('logs:sendProgress', callback)
   },
 
+  // --- Mise à jour Docker ---
+  checkForUpdates: async (): Promise<any> => {
+    return apiGet('/update/check')
+  },
+
+  triggerUpdate: async (): Promise<any> => {
+    return apiPost('/update')
+  },
+
   // --- Stubs (fonctions Electron non nécessaires en web) ---
   openFolder: async (_path: string): Promise<string> => { return '' },
   getAppPath: async (_name: string): Promise<string> => { return '' },
@@ -269,7 +278,6 @@ export const api = {
   installOllama: async (): Promise<{ success: boolean; message: string }> => ({ success: true, message: 'Ollama est un service Docker' }),
   getModelStatus: async () => ({ whisper: { model: 'medium', downloaded: true }, llm: { model: 'ollama', downloaded: true } }),
   areModelsReady: async () => true,
-  checkForUpdates: async (): Promise<void> => {},
   installUpdate: async (): Promise<void> => {},
   getInstallationId: async (): Promise<string> => 'web-instance',
   sendLogs: async (): Promise<{ success: boolean; message: string }> => {

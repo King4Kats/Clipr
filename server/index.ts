@@ -467,7 +467,100 @@ app.post('/api/export/text', (req, res) => {
 
 // --- Version ---
 app.get('/api/version', (_, res) => {
-  res.json({ version: '2.0.0-web' })
+  // Lire la version depuis le dernier commit git
+  const repoDir = existsSync('/repo/.git') ? '/repo' : process.cwd()
+  let gitHash = ''
+  let gitDate = ''
+  try {
+    gitHash = require('child_process').execSync('git rev-parse --short HEAD', { cwd: repoDir, encoding: 'utf-8' }).trim()
+    gitDate = require('child_process').execSync('git log -1 --format=%ci', { cwd: repoDir, encoding: 'utf-8' }).trim()
+  } catch { /* pas de git disponible */ }
+
+  res.json({ version: '2.0.0-web', gitHash, gitDate })
+})
+
+// --- Mise à jour : git pull + rebuild Docker ---
+app.post('/api/update', async (_, res) => {
+  const { spawn } = require('child_process')
+  const repoDir = existsSync('/repo/.git') ? '/repo' : process.cwd()
+
+  // Étape 1 : vérifier s'il y a des mises à jour disponibles
+  try {
+    const fetchResult = require('child_process').execSync(
+      'git fetch origin && git log HEAD..origin/HEAD --oneline',
+      { cwd: repoDir, encoding: 'utf-8', timeout: 30000 }
+    ).trim()
+
+    if (!fetchResult) {
+      return res.json({ status: 'up-to-date', message: 'Déjà à jour, aucune mise à jour disponible.' })
+    }
+
+    // Il y a des commits à récupérer — on lance le processus de MAJ
+    logger.info('[Update] Mise à jour détectée, lancement du rebuild...')
+    logger.info('[Update] Nouveaux commits :\n' + fetchResult)
+
+    // Répondre immédiatement au client — le rebuild va redémarrer le container
+    res.json({
+      status: 'updating',
+      message: 'Mise à jour en cours... L\'application va redémarrer automatiquement.',
+      commits: fetchResult
+    })
+
+    // Étape 2 : lancer le rebuild en arrière-plan (détaché du process Node)
+    // Le repo est monté en read-only sur /repo, on fait le git pull sur le host via docker exec
+    // ou directement si on a accès au socket Docker
+    setTimeout(() => {
+      // Le working_dir du container est /repo (le repo git monté du host)
+      // On utilise le socket Docker monté pour relancer docker compose
+      const repoDir = '/repo'
+      const updateScript = `
+        cd ${repoDir} && \
+        git pull origin 2>&1 && \
+        docker compose up -d --build 2>&1 | tee /tmp/clipr-update.log
+      `
+
+      const child = spawn('sh', ['-c', updateScript], {
+        detached: true,
+        stdio: 'ignore',
+        cwd: repoDir
+      })
+      child.unref()
+
+      logger.info('[Update] Processus de rebuild lancé (PID: ' + child.pid + ')')
+    }, 500)
+
+  } catch (error: any) {
+    logger.error('[Update] Erreur :', error)
+    res.status(500).json({ status: 'error', message: error.message })
+  }
+})
+
+// --- Vérifier si une MAJ est disponible (sans l'appliquer) ---
+app.get('/api/update/check', async (_, res) => {
+  const repoDir = existsSync('/repo/.git') ? '/repo' : process.cwd()
+  try {
+    require('child_process').execSync('git fetch origin', {
+      cwd: repoDir, encoding: 'utf-8', timeout: 30000
+    })
+
+    const behind = require('child_process').execSync(
+      'git log HEAD..origin/HEAD --oneline',
+      { cwd: repoDir, encoding: 'utf-8' }
+    ).trim()
+
+    if (behind) {
+      const commitCount = behind.split('\n').length
+      res.json({
+        available: true,
+        commits: commitCount,
+        details: behind
+      })
+    } else {
+      res.json({ available: false })
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message })
+  }
 })
 
 // --- Logs ---

@@ -21,6 +21,11 @@ services:
       - CLIPR_DATA_DIR=/data
     volumes:
       - clipr-data:/data
+      # Monter le repo git pour permettre la MAJ depuis l'UI (git pull + rebuild)
+      - .:/repo
+      # Monter le socket Docker pour permettre le rebuild depuis le container
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /repo
     depends_on:
       - ollama
     networks:
