@@ -6,7 +6,7 @@
  * Valide les extensions vidéo et récupère la durée via FFmpeg.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Upload, Film, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useStore } from "@/store/useStore";
@@ -15,7 +15,17 @@ const UploadZone = () => {
   // --- Etat local : indicateurs de drag & chargement ---
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [convertProgress, setConvertProgress] = useState<{ percent: number; message: string } | null>(null);
   const { addVideoFile, setProcessing } = useStore();
+
+  // Ecouter les events de progression IPC pendant la conversion
+  useEffect(() => {
+    if (!isLoading) return;
+    const unsub = window.electron.onProgress(({ progress, message }) => {
+      setConvertProgress({ percent: Math.round(progress), message });
+    });
+    return () => { unsub(); };
+  }, [isLoading]);
 
   // Formats non supportés nativement par le lecteur HTML5 de Chromium
   const UNSUPPORTED_FORMATS = ['mts', 'avi', 'mkv', 'mov', 'wmv', 'flv'];
@@ -24,6 +34,7 @@ const UploadZone = () => {
   const handleFiles = useCallback(
     async (filePaths: string[]) => {
       setIsLoading(true);
+      setConvertProgress(null);
       try {
         for (const filePath of filePaths) {
           const ext = filePath.split('.').pop()?.toLowerCase() || '';
@@ -31,9 +42,11 @@ const UploadZone = () => {
 
           // Convertir en MP4 si le format n'est pas supporté par le lecteur
           if (UNSUPPORTED_FORMATS.includes(ext)) {
+            setConvertProgress({ percent: 0, message: 'Conversion vidéo en cours...' });
             playablePath = await window.electron.convertToMp4(filePath);
           }
 
+          setConvertProgress(null);
           const duration = await window.electron.getVideoDuration(filePath);
           const name = filePath.split(/[\\/]/).pop() || "video";
 
@@ -51,12 +64,14 @@ const UploadZone = () => {
         setProcessing("error", 0, "Erreur lors du chargement de la vidéo");
       }
       setIsLoading(false);
+      setConvertProgress(null);
     },
     [addVideoFile, setProcessing]
   );
 
   // Ouvre le dialogue natif de sélection de fichiers vidéo
   const handleClick = async () => {
+    if (isLoading) return;
     const filePaths = await window.electron.openVideosDialog();
     if (filePaths && filePaths.length > 0) {
       handleFiles(filePaths);
@@ -78,6 +93,7 @@ const UploadZone = () => {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+    if (isLoading) return;
 
     const files = e.dataTransfer.files;
     if (files.length > 0) {
@@ -113,6 +129,8 @@ const UploadZone = () => {
       <div
         className={`border-2 border-dashed rounded-lg p-10 text-center transition-all duration-300 bg-card/50 ${isDragging
             ? "border-primary glow bg-primary/5 scale-[1.02]"
+            : isLoading
+            ? "border-primary/50 bg-primary/5"
             : "border-border hover:border-primary hover:glow"
           }`}
       >
@@ -134,10 +152,31 @@ const UploadZone = () => {
           </div>
           <div>
             <p className="text-foreground font-medium text-lg">
-              {isLoading ? "Chargement de la vidéo..." : "Déposer une interview ici"}
+              {convertProgress
+                ? "Conversion de la vidéo..."
+                : isLoading
+                ? "Chargement de la vidéo..."
+                : "Déposer une interview ici"}
             </p>
-            <p className="text-muted-foreground text-sm mt-1">MP4, MOV, AVI • Automatiquement prêt pour l'IA</p>
+            <p className="text-muted-foreground text-sm mt-1">
+              {convertProgress
+                ? `${convertProgress.percent}% — Cette opération peut prendre quelques minutes`
+                : "MP4, MOV, AVI, MTS • Automatiquement prêt pour l'IA"}
+            </p>
           </div>
+
+          {/* Barre de progression de conversion */}
+          {convertProgress && convertProgress.percent > 0 && (
+            <div className="w-full max-w-xs">
+              <div className="h-2 bg-secondary/30 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-500 ease-out"
+                  style={{ width: `${convertProgress.percent}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {!isLoading && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Film className="w-3.5 h-3.5" />
