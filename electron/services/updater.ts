@@ -27,8 +27,8 @@ let mainWindowRef: BrowserWindow | null = null
 export function initUpdater(window: BrowserWindow): void {
   mainWindowRef = window
 
-  // Configuration
-  autoUpdater.autoDownload = false
+  // Configuration : telecharger et installer automatiquement
+  autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
 
   // Utiliser notre logger
@@ -54,8 +54,6 @@ export function initUpdater(window: BrowserWindow): void {
         ? info.releaseNotes
         : undefined
     })
-    // Lancer le telechargement automatiquement
-    autoUpdater.downloadUpdate()
   })
 
   autoUpdater.on('update-not-available', (info: UpdateInfo) => {
@@ -75,8 +73,12 @@ export function initUpdater(window: BrowserWindow): void {
   })
 
   autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
-    logger.info(`[Updater] Update downloaded: ${info.version}`)
+    logger.info(`[Updater] Update downloaded: ${info.version}. Restarting...`)
     sendUpdateStatus({ status: 'downloaded', version: info.version })
+    // Installer automatiquement apres 3 secondes (laisser le temps d'afficher la notif)
+    setTimeout(() => {
+      autoUpdater.quitAndInstall()
+    }, 3000)
   })
 
   autoUpdater.on('error', (error: Error) => {
