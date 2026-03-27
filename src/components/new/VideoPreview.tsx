@@ -110,32 +110,44 @@ const VideoPreview = () => {
         return () => video.removeEventListener("loadedmetadata", syncDuration);
     }, [videoFile?.path, videoFile?.duration]);
 
+    // Ref pour tracker le segment précédent (détecte le changement de segment)
+    const prevSegmentIdRef = useRef<string | null>(null);
+
     // --- Effet : synchronise le lecteur vidéo avec le segment sélectionné et l'état play/pause ---
     useEffect(() => {
         const video = videoRef.current;
         if (!video || !videoFile) return;
 
         let cancelled = false;
+        const segmentChanged = selectedSegmentId !== prevSegmentIdRef.current;
+        prevSegmentIdRef.current = selectedSegmentId;
 
         const syncPlayer = async () => {
             if (cancelled) return;
 
             if (isFragmentMode) {
-                // Toujours se repositionner au debut du segment quand on change de segment
+                // Se repositionner au début du segment
                 video.currentTime = segmentStartLocal;
                 setCurrentTime(segmentStartLocal);
 
-                if (isPlaying) {
-                    // Attendre le seek puis jouer
-                    await new Promise<void>(resolve => {
-                        const onSeeked = () => {
-                            video.removeEventListener("seeked", onSeeked);
-                            resolve();
-                        };
-                        video.addEventListener("seeked", onSeeked);
-                    });
+                // Attendre le seek
+                await new Promise<void>(resolve => {
+                    if (Math.abs(video.currentTime - segmentStartLocal) < 0.1) {
+                        resolve();
+                        return;
+                    }
+                    const onSeeked = () => {
+                        video.removeEventListener("seeked", onSeeked);
+                        resolve();
+                    };
+                    video.addEventListener("seeked", onSeeked);
+                });
 
-                    if (cancelled) return;
+                if (cancelled) return;
+
+                // Lancer la lecture si on est en play OU si on vient de changer de segment
+                if (isPlaying || segmentChanged) {
+                    if (!isPlaying) setIsPlaying(true);
                     if (video.paused) {
                         try { await video.play(); } catch { /* autoplay blocked */ }
                     }
@@ -143,6 +155,7 @@ const VideoPreview = () => {
                 return;
             }
 
+            // Mode libre (pas de segment sélectionné)
             if (isPlaying && video.paused) {
                 video.play().catch(() => { });
             } else if (!isPlaying && !video.paused) {
