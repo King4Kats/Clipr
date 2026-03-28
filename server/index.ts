@@ -13,6 +13,7 @@ import * as whisperService from './services/whisper.js'
 import * as ollamaService from './services/ollama.js'
 import * as projectService from './services/project-history.js'
 import * as authService from './services/auth.js'
+import * as aiLockService from './services/ai-lock.js'
 import { requireAuth, requireAdmin, optionalAuth } from './middleware/auth.js'
 
 // ── Config ──
@@ -129,6 +130,12 @@ app.get('/api/admin/users', requireAuth, requireAdmin, (_req, res) => {
 // Admin: list all projects
 app.get('/api/admin/projects', requireAuth, requireAdmin, (_req, res) => {
   res.json(projectService.getAllProjects())
+})
+
+// AI Lock status — any authenticated user can check
+app.get('/api/ai/status', requireAuth, (_req, res) => {
+  const lock = aiLockService.getActiveLock()
+  res.json({ locked: !!lock, lock })
 })
 
 // Version
@@ -407,7 +414,8 @@ app.patch('/api/project/:id/status', requireAuth, (req, res) => {
 // ── Server-side AI Analysis (background processing) ──
 app.post('/api/project/:id/analyze', requireAuth, async (req, res) => {
   const projectId = req.params.id
-  const project = projectService.getProject(projectId, req.user!.userId)
+  const userId = req.user!.userId
+  const project = projectService.getProject(projectId, userId)
   if (!project) return res.status(404).json({ error: 'Projet non trouve' })
 
   const { config } = req.body
@@ -415,6 +423,12 @@ app.post('/api/project/:id/analyze', requireAuth, async (req, res) => {
 
   if (!data.videoFiles || data.videoFiles.length === 0) {
     return res.status(400).json({ error: 'Aucune video dans le projet' })
+  }
+
+  // Try to acquire AI lock
+  const lockResult = aiLockService.acquireLock(userId, projectId)
+  if (!lockResult.success) {
+    return res.status(423).json({ error: lockResult.error, lock: lockResult.lock })
   }
 
   // Respond immediately — analysis runs in background
@@ -537,9 +551,15 @@ app.post('/api/project/:id/analyze', requireAuth, async (req, res) => {
 
       logger.info(`[Analysis] Project ${projectId} completed: ${finalSegments.length} segments`)
 
+      // Release AI lock
+      aiLockService.releaseLockForProject(projectId)
+
     } catch (err: any) {
       logger.error(`[Analysis] Project ${projectId} failed:`, err)
       projectService.updateProjectStatus(projectId, 'draft')
+
+      // Release AI lock on error
+      aiLockService.releaseLockForProject(projectId)
 
       broadcastToProject(projectId, 'analysis:error', {
         step: 'error',
