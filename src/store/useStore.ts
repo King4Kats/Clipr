@@ -78,13 +78,25 @@ interface AppState {
   autoSave: () => Promise<void>
 }
 
+const DEFAULT_WHISPER_PROMPT = `Patrimoine immatériel, patrimoine culturel, tradition orale, savoir-faire, mémoire collective.
+Vendée, Bretagne, Pays de la Loire, bocage vendéen, marais breton, marais poitevin, pays de Retz.
+Maraîchin, poitevin-saintongeais, gallo, breton, patois vendéen.
+Bourrine, maraîchine, métairie, closerie, longère, chaumière, toiture en chaume.
+Sabotier, chaumier, bourrelier, tonnelier, tisserand, forgeron, maréchal-ferrant, vannier, charron, meulier, saunier, paludier.
+Fest-noz, fest-deiz, veillée, assemblée, frairie, pardon, fête patronale.
+Chants de marais, chants à répondre, complainte, gwerz, kan ha diskan, ronde, gavotte, avant-deux, maraîchine.
+Vielle à roue, bombarde, biniou, accordéon diatonique, épinette.
+Transhumance, embouche, pêche à pied, marais salant, sel, brioche vendéenne, préfou, mogette, jambon de Vendée, gâche, galette.
+Bourrine du marais, écomusée, collectage, informateur, enquête ethnographique.`
+
 const defaultConfig: AppConfig = {
-  whisperModel: 'medium',
-  ollamaModel: 'qwen2.5:3b',
+  whisperModel: 'large-v3',
+  ollamaModel: 'mixtral:8x7b',
   language: 'fr',
   outputQuality: 23,
   outputFolder: null,
-  context: ''
+  context: '',
+  whisperPrompt: DEFAULT_WHISPER_PROMPT
 }
 
 const SEGMENT_COLORS = [
@@ -330,7 +342,7 @@ export const useStore = create<AppState>((set, get) => ({
           `Transcription vidéo ${i + 1}/${newAudioPaths.length}...`
         )
 
-        const segments = await api.transcribe(newAudioPaths[i], state.config.language, state.config.whisperModel) as any[]
+        const segments = await api.transcribe(newAudioPaths[i], state.config.language, state.config.whisperModel, state.config.whisperPrompt) as any[]
         const offset = state.videoFiles[i]?.offset || 0
 
         // Ajuster les timestamps avec l'offset global de la vidéo

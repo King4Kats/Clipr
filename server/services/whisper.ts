@@ -29,10 +29,11 @@ export function transcribe(
   audioPath: string,
   language: string,
   onSegment: (segment: TranscriptSegment) => void,
-  onProgress: (percent: number) => void
+  onProgress: (percent: number) => void,
+  initialPrompt?: string
 ): Promise<TranscriptSegment[]> {
   return new Promise(async (resolve, reject) => {
-    const model = currentModel || 'medium'
+    const model = currentModel || 'large-v3'
     const segments: TranscriptSegment[] = []
 
     const scriptPath = getTranscribeScriptPath()
@@ -50,6 +51,10 @@ export function transcribe(
     logger.info('Audio:', audioPath, '| Modele:', model, '| Langue:', language)
 
     const args = [scriptPath, audioPath, '--model', model, '--language', language, '--output', outputPath]
+    if (initialPrompt) {
+      args.push('--prompt', initialPrompt)
+      logger.info('Initial prompt:', initialPrompt.substring(0, 100) + '...')
+    }
 
     whisperProcess = spawn('python3', args, { stdio: ['pipe', 'pipe', 'pipe'] })
 
