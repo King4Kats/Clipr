@@ -108,17 +108,17 @@ const Header = ({ onOpenSetup, onOpenAdmin }: HeaderProps) => {
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 border-r border-border pr-3 mr-1">
             {/* Retour accueil */}
-            {hasProject && (
+            {(hasProject || hasVideos) && (
               <Button
                 variant="secondary"
                 size="sm"
                 onClick={reset}
                 disabled={isProcessing}
-                className="h-8 gap-2"
+                className="h-8 gap-2 bg-primary/10 hover:bg-primary/20 text-primary border-primary/30"
                 title="Retour à l'accueil"
               >
                 <Home className="w-4 h-4" />
-                <span className="hidden sm:inline">Accueil</span>
+                <span>Accueil</span>
               </Button>
             )}
 
