@@ -285,77 +285,37 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   /**
-   * Coordonne le workflow complet d'analyse IA :
-   * 1. Extraction Audio FFmpeg
-   * 2. Transcription Whisper
-   * 3. Analyse Sémantique Ollama
+   * Lance l'analyse IA en arrière-plan côté serveur.
+   * L'utilisateur peut naviguer vers d'autres projets pendant le traitement.
+   * Le serveur sauvegarde les résultats en DB à la fin.
    */
   triggerAnalysis: async () => {
     const state = get()
-    if (state.videoFiles.length === 0) return
+    if (state.videoFiles.length === 0 || !state.activeProjectId) return
 
     try {
-      state.setProcessing('extracting-audio', 0, 'Extraction des pistes audio...')
-      const newAudioPaths: string[] = []
-
-      for (let i = 0; i < state.videoFiles.length; i++) {
-        const path = await api.extractAudio(state.videoFiles[i].path)
-        newAudioPaths.push(path)
-        state.setProcessing('extracting-audio', ((i + 1) / state.videoFiles.length) * 100, `Audio ${i + 1}/${state.videoFiles.length} extrait`)
-      }
-
-      state.setAudioPaths(newAudioPaths)
-
-      state.setProcessing('transcribing', 0, 'Transcription de la voix...')
-      state.clearTranscript()
-
-      const allTranscriptSegments: any[] = []
-
-      for (let i = 0; i < newAudioPaths.length; i++) {
-        state.setProcessing(
-          'transcribing',
-          (i / newAudioPaths.length) * 100,
-          `Transcription vidéo ${i + 1}/${newAudioPaths.length}...`
-        )
-
-        const segments = await api.transcribe(newAudioPaths[i], state.config.language, state.config.whisperModel, state.config.whisperPrompt) as any[]
-        const offset = state.videoFiles[i]?.offset || 0
-
-        const adjustedSegments = segments.map((seg: any) => ({
-          ...seg,
-          start: seg.start + offset,
-          end: seg.end + offset
-        }))
-
-        allTranscriptSegments.push(...adjustedSegments)
-      }
-
-      state.setTranscript(allTranscriptSegments)
-
-      state.setProcessing('analyzing', 0, 'Découpage intelligent par l\'IA...')
-      const fullText = allTranscriptSegments
-        .map((t: any) => `[${t.start.toFixed(1)}s] ${t.text}`)
-        .join('\n')
-      const result = await api.analyzeTranscript(fullText, state.config.context, state.config.ollamaModel)
-
-      if (result && result.segments) {
-        state.setSegments(result.segments.map((s: any) => ({
-          ...s,
-          id: Math.random().toString(36).substring(2, 11),
-          transcriptSegments: []
-        })))
-      }
-
-      state.setProcessing('done', 100, 'Analyse terminée !')
+      // Sauvegarder l'état actuel avant de lancer l'analyse
       await state.saveProject()
+
+      // S'abonner au channel WebSocket du projet
+      api.subscribeToProject(state.activeProjectId)
+
+      // Lancer l'analyse côté serveur (retour immédiat)
+      state.setProcessing('extracting-audio', 0, 'Lancement de l\'analyse IA...')
+      await api.launchAnalysis(state.activeProjectId, state.config)
+
+      // Le suivi de progression se fait via les events WebSocket
+      // (configurés dans App.tsx via onProgress / onAnalysisComplete)
+
     } catch (e: any) {
-      console.error('Erreur lors de l\'analyse IA :', e)
+      console.error('Erreur lors du lancement de l\'analyse IA :', e)
       state.setProcessing('error', 0, `Échec : ${e.message}`)
     }
   },
 
   // Reset — retour à l'écran d'accueil (décharge le projet actif)
   reset: () => {
+    api.unsubscribeFromProject()
     set({
       activeProjectId: null,
       activeProjectName: '',
@@ -394,6 +354,16 @@ export const useStore = create<AppState>((set, get) => ({
   loadFromHistory: (projectRecord) => {
     const data = projectRecord.data || projectRecord
     const audioPaths = data.audioPaths || []
+
+    // Unsubscribe from previous project, subscribe to new one
+    api.unsubscribeFromProject()
+    if (projectRecord.id) {
+      api.subscribeToProject(projectRecord.id)
+    }
+
+    // Si le projet est en cours de traitement, afficher la progression
+    const isProcessing = projectRecord.status === 'processing'
+
     set({
       activeProjectId: projectRecord.id || null,
       activeProjectName: projectRecord.name || data.projectName || '',
@@ -404,9 +374,9 @@ export const useStore = create<AppState>((set, get) => ({
       audioPath: audioPaths.length > 0 ? audioPaths[0] : null,
       config: { ...get().config, ...data.config },
       videoFile: data.videoFiles && data.videoFiles.length > 0 ? data.videoFiles[0] : null,
-      processingStep: 'ready',
-      progress: 100,
-      progressMessage: 'Projet chargé'
+      processingStep: isProcessing ? 'analyzing' : 'ready',
+      progress: isProcessing ? 50 : 100,
+      progressMessage: isProcessing ? 'Analyse en cours (arrière-plan)...' : 'Projet chargé'
     })
   },
 
