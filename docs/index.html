@@ -160,8 +160,14 @@
     <a href="#u-config">Reglages</a>
   </div>
   <div class="dev-section visible" id="sidebarDev">
+    <div class="sidebar-label">Demarrage</div>
+    <a href="#d-overview">Vue d'ensemble</a>
+    <a href="#d-install">Installation Docker</a>
+    <a href="#d-config">Configuration</a>
+    <a href="#d-dev-local">Dev local (hors Docker)</a>
     <div class="sidebar-label">Architecture</div>
     <a href="#d-stack">Stack technique</a>
+    <a href="#d-docker">Services Docker</a>
     <a href="#d-structure">Structure du projet</a>
     <a href="#d-database">Base de donnees</a>
     <a href="#d-pipeline">Pipeline IA</a>
@@ -172,9 +178,9 @@
     <a href="#d-share-api">Partage</a>
     <a href="#d-ai-api">IA &amp; Fichiers</a>
     <a href="#d-admin-api">Administration</a>
-    <div class="sidebar-label">Securite</div>
-    <a href="#d-securite">Mesures</a>
-    <a href="#d-production">Production</a>
+    <div class="sidebar-label">Deploiement</div>
+    <a href="#d-securite">Securite</a>
+    <a href="#d-production">Mise en production</a>
   </div>
 </nav>
 <main class="content">
@@ -401,20 +407,176 @@
 <!-- ======== DEVELOPPEUR ======== -->
 <div class="dev-section visible" id="contentDev">
 
+<section class="section" id="d-overview">
+  <h2 class="section-title">Vue d'ensemble</h2>
+  <div class="card">
+    <h3>Qu'est-ce que Clipr ?</h3>
+    <p>Clipr est une plateforme web <strong>multi-utilisateurs</strong> de segmentation video par IA locale. L'application tourne entierement dans <strong>Docker</strong> (3 conteneurs) et ne depend d'aucun service cloud — tout reste sur votre serveur.</p>
+    <h3>Architecture en 3 services Docker</h3>
+    <div class="schema"><span class="hl">docker-compose.yml</span>
+
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│  ┌──────────────────┐  ┌─────────────┐  ┌───────────┐  │
+│  │  <span class="hl">clipr</span>            │  │  <span class="y">ollama</span>      │  │  <span class="g">caddy</span>    │  │
+│  │                  │  │             │  │           │  │
+│  │  Node.js 20      │  │  LLM local  │  │  Reverse  │  │
+│  │  Express + API   │  │  GPU/CPU    │  │  Proxy    │  │
+│  │  SQLite (DB)     │  │             │  │  HTTPS    │  │
+│  │  FFmpeg          │  │             │  │  auto     │  │
+│  │  Python/Whisper  │  │  :11434     │  │  :443     │  │
+│  │  JWT Auth        │  │             │  │  :80      │  │
+│  │  :3000           │  │             │  │           │  │
+│  └──────────────────┘  └─────────────┘  └───────────┘  │
+│                                                         │
+│  Volumes: clipr-data, ollama-data, caddy-data           │
+└─────────────────────────────────────────────────────────┘</div>
+    <table>
+      <tr><th>Service</th><th>Image</th><th>Role</th><th>Port</th></tr>
+      <tr><td><code>clipr</code></td><td>Build depuis <code>Dockerfile</code></td><td>Application complete (API, frontend, FFmpeg, Whisper)</td><td>3000</td></tr>
+      <tr><td><code>ollama</code></td><td><code>ollama/ollama</code></td><td>Serveur LLM pour l'analyse semantique</td><td>11434</td></tr>
+      <tr><td><code>caddy</code></td><td><code>caddy:2-alpine</code></td><td>Reverse proxy HTTPS avec Let's Encrypt auto</td><td>80, 443</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="section" id="d-install">
+  <h2 class="section-title">Installation Docker</h2>
+  <div class="card">
+    <h3>Prerequis</h3>
+    <ul>
+      <li><strong>Docker</strong> >= 20.10 et <strong>Docker Compose</strong> >= 2.0</li>
+      <li><strong>GPU</strong> recommande pour Ollama et Whisper (NVIDIA CUDA ou AMD ROCm) — fonctionne aussi en CPU, juste plus lent</li>
+      <li><strong>~20 GB d'espace</strong> (image Docker + modeles IA)</li>
+    </ul>
+    <h3>Lancement rapide</h3>
+    <pre>git clone https://github.com/King4Kats/Clipr.git
+cd Clipr
+docker compose up -d --build</pre>
+    <p>L'app est accessible sur <code>http://localhost:3000</code>. Le premier utilisateur inscrit devient admin.</p>
+    <h3>GPU NVIDIA</h3>
+    <p>Decommentez la section <code>deploy.resources</code> dans <code>docker-compose.yml</code> pour le service <code>ollama</code> :</p>
+    <pre>ollama:
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - capabilities: [gpu]</pre>
+    <div class="warn">AMD (ROCm) : Ollama fonctionne mais Whisper tourne en CPU (<code>int8</code>). Pas de section deploy necessaire.</div>
+    <h3>Commandes utiles</h3>
+    <table>
+      <tr><th>Commande</th><th>Description</th></tr>
+      <tr><td><code>docker compose up -d</code></td><td>Demarrer tous les services</td></tr>
+      <tr><td><code>docker compose down</code></td><td>Arreter tous les services</td></tr>
+      <tr><td><code>docker compose logs -f clipr</code></td><td>Logs Clipr en temps reel</td></tr>
+      <tr><td><code>docker compose restart clipr</code></td><td>Redemarrer Clipr</td></tr>
+      <tr><td><code>docker compose build --no-cache</code></td><td>Rebuild complet</td></tr>
+      <tr><td><code>docker compose exec clipr sh</code></td><td>Shell dans le conteneur</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="section" id="d-config">
+  <h2 class="section-title">Configuration</h2>
+  <div class="card">
+    <h3>Variables d'environnement</h3>
+    <p>A definir dans <code>docker-compose.yml</code> sous <code>services.clipr.environment</code> :</p>
+    <table>
+      <tr><th>Variable</th><th>Defaut</th><th>Description</th></tr>
+      <tr><td><code>PORT</code></td><td>3000</td><td>Port du serveur Express</td></tr>
+      <tr><td><code>DATA_DIR</code></td><td>/data</td><td>Repertoire de stockage (DB, uploads, exports)</td></tr>
+      <tr><td><code>JWT_SECRET</code></td><td>Auto-genere</td><td>Secret pour signer les tokens JWT. <strong>Obligatoire en production</strong> pour persister les sessions entre redemarrages</td></tr>
+      <tr><td><code>CORS_ORIGINS</code></td><td>* (tous)</td><td>Origines autorisees, separees par virgule</td></tr>
+      <tr><td><code>OLLAMA_HOST</code></td><td>ollama</td><td>Hostname du service Ollama</td></tr>
+      <tr><td><code>OLLAMA_PORT</code></td><td>11434</td><td>Port Ollama</td></tr>
+    </table>
+    <h3>Exemple production</h3>
+    <pre>services:
+  clipr:
+    environment:
+      - JWT_SECRET=votre-secret-aleatoire-32-caracteres-minimum
+      - CORS_ORIGINS=https://clipr.votre-domaine.fr</pre>
+    <h3>HTTPS avec Caddy</h3>
+    <p>Editez <code>caddy/Caddyfile</code> :</p>
+    <pre>clipr.votre-domaine.fr {
+    reverse_proxy clipr:3000
+}</pre>
+    <p>Caddy obtient automatiquement un certificat Let's Encrypt.</p>
+  </div>
+</section>
+
+<section class="section" id="d-dev-local">
+  <h2 class="section-title">Developpement local (hors Docker)</h2>
+  <div class="card">
+    <h3>Prerequis sur la machine</h3>
+    <ul>
+      <li><strong>Node.js 20+</strong></li>
+      <li><strong>FFmpeg</strong> dans le PATH</li>
+      <li><strong>Python 3</strong> + <code>pip install faster-whisper torch</code></li>
+      <li><strong>Ollama</strong> installe et lance sur <code>localhost:11434</code></li>
+    </ul>
+    <h3>Lancement</h3>
+    <pre>npm install
+
+# Variables d'env pour dev local
+export OLLAMA_HOST=localhost
+export OLLAMA_PORT=11434
+export JWT_SECRET=dev-secret
+
+# Lancer client (Vite HMR :5173) + serveur (tsx watch :3000) en parallele
+npm run dev</pre>
+    <h3>Build production</h3>
+    <pre>npm run build        # Build client (Vite) + serveur (TypeScript)
+npm start            # Lance le serveur de production sur :3000</pre>
+  </div>
+</section>
+
 <section class="section" id="d-stack">
   <h2 class="section-title">Stack technique</h2>
   <div class="card">
     <table>
-      <tr><th>Couche</th><th>Technologie</th></tr>
-      <tr><td>Frontend</td><td>React 18, TypeScript, Zustand, Tailwind CSS, Framer Motion</td></tr>
-      <tr><td>Backend</td><td>Express.js, TypeScript, better-sqlite3</td></tr>
-      <tr><td>Auth</td><td>JWT (jsonwebtoken), bcrypt</td></tr>
-      <tr><td>Video</td><td>FFmpeg (fluent-ffmpeg)</td></tr>
-      <tr><td>Transcription</td><td>faster-whisper (Python), large-v3</td></tr>
-      <tr><td>Analyse</td><td>Ollama (mistral-small:22b)</td></tr>
-      <tr><td>Temps reel</td><td>WebSocket (ws) par projet</td></tr>
-      <tr><td>Deploiement</td><td>Docker Compose, Caddy</td></tr>
+      <tr><th>Couche</th><th>Technologie</th><th>Details</th></tr>
+      <tr><td>Frontend</td><td>React 18, TypeScript</td><td>Zustand (state), Tailwind CSS, Framer Motion, Radix UI</td></tr>
+      <tr><td>Backend</td><td>Express.js, TypeScript</td><td>API REST + WebSocket par projet</td></tr>
+      <tr><td>Base de donnees</td><td>SQLite (better-sqlite3)</td><td>Fichier unique dans <code>DATA_DIR/clipr.db</code></td></tr>
+      <tr><td>Auth</td><td>JWT + bcrypt</td><td>Tokens 7 jours, rate limiting login</td></tr>
+      <tr><td>Video</td><td>FFmpeg</td><td>Extraction audio, decoupe, concatenation, export</td></tr>
+      <tr><td>Transcription</td><td>faster-whisper (Python)</td><td>Modele large-v3, initial_prompt configurable</td></tr>
+      <tr><td>Analyse IA</td><td>Ollama</td><td>mistral-small:22b par defaut, communication HTTP</td></tr>
+      <tr><td>Temps reel</td><td>WebSocket (ws)</td><td>Channels par projet, auth JWT</td></tr>
+      <tr><td>Deploiement</td><td>Docker Compose</td><td>3 services : clipr, ollama, caddy</td></tr>
     </table>
+  </div>
+</section>
+
+<section class="section" id="d-docker">
+  <h2 class="section-title">Services Docker en detail</h2>
+  <div class="card">
+    <h3>clipr (Dockerfile multi-stage)</h3>
+    <p>L'image est construite en 3 etapes :</p>
+    <ol>
+      <li><strong>deps</strong> — Installe les node_modules (production only)</li>
+      <li><strong>build</strong> — Compile le client (Vite) et le serveur (TypeScript)</li>
+      <li><strong>runtime</strong> — Image finale avec Node.js 20, FFmpeg, Python 3, faster-whisper, Docker CLI, Git</li>
+    </ol>
+    <p>Le conteneur expose le port <strong>3000</strong> et stocke toutes les donnees dans le volume <code>/data</code> :</p>
+    <pre>/data/
+  clipr.db          # Base SQLite (users, projects, shares, locks)
+  uploads/          # Videos uploadees par les utilisateurs
+  exports/          # Fichiers exportes (MP4, TXT, JSON)
+  temp/             # Fichiers temporaires (audio WAV, clips)
+  logs/             # Logs serveur (clipr.log)</pre>
+  </div>
+  <div class="card">
+    <h3>ollama</h3>
+    <p>Image officielle <code>ollama/ollama</code>. Stocke les modeles LLM dans le volume <code>ollama-data</code>. Healthcheck toutes les 15s sur <code>/api/tags</code>.</p>
+    <p>Clipr attend qu'Ollama soit healthy avant de demarrer (<code>depends_on: condition: service_healthy</code>).</p>
+    <div class="tip">Pour utiliser le GPU NVIDIA, decommentez la section <code>deploy.resources</code> dans le <code>docker-compose.yml</code>.</div>
+  </div>
+  <div class="card">
+    <h3>caddy</h3>
+    <p>Reverse proxy avec HTTPS automatique (Let's Encrypt). Configure via <code>caddy/Caddyfile</code>. Optionnel pour le dev local.</p>
+    <p>Pour lancer sans Caddy : <code>docker compose up -d clipr ollama</code></p>
   </div>
 </section>
 
@@ -609,25 +771,51 @@ scripts/transcribe.py     # Python faster-whisper</pre>
 </section>
 
 <section class="section" id="d-production">
-  <h2 class="section-title">Deploiement production</h2>
+  <h2 class="section-title">Mise en production</h2>
   <div class="card">
-    <h3>Checklist</h3>
+    <h3>Checklist avant deploiement</h3>
     <ol>
-      <li>Definir <code>JWT_SECRET</code> avec une valeur aleatoire (32+ caracteres)</li>
-      <li>Configurer <code>CORS_ORIGINS</code> avec votre domaine</li>
-      <li>HTTPS via Caddy (automatique avec nom de domaine)</li>
-      <li>Sauvegardes regulieres du volume <code>clipr-data</code></li>
+      <li><strong><code>JWT_SECRET</code></strong> — Definir une valeur aleatoire forte (32+ caracteres). Sans ca, les sessions sont perdues a chaque redemarrage du conteneur</li>
+      <li><strong><code>CORS_ORIGINS</code></strong> — Restreindre au domaine de production (ex: <code>https://clipr.votre-domaine.fr</code>)</li>
+      <li><strong>HTTPS</strong> — Configurer le <code>Caddyfile</code> avec votre domaine. Caddy gere les certificats automatiquement</li>
+      <li><strong>Sauvegardes</strong> — Planifier des backups reguliers du volume <code>clipr-data</code> (contient la DB SQLite et les fichiers)</li>
+      <li><strong>GPU</strong> — Activer si NVIDIA disponible pour accelerer Whisper et Ollama</li>
     </ol>
+  </div>
+  <div class="card">
+    <h3>Exemple docker-compose.yml production</h3>
     <pre>services:
   clipr:
+    build: .
+    container_name: clipr
+    ports:
+      - "3000:3000"
+    volumes:
+      - clipr-data:/data
     environment:
-      - JWT_SECRET=votre-secret-aleatoire-tres-long
-      - CORS_ORIGINS=https://clipr.votre-domaine.fr</pre>
-    <h3>Developpement local</h3>
-    <pre>npm install          # Installer les dependances
-npm run dev          # Client (Vite HMR) + Serveur (tsx watch)
-npm run build        # Build production
-npm start            # Lancer le serveur</pre>
+      - JWT_SECRET=un-vrai-secret-aleatoire-de-32-caracteres
+      - CORS_ORIGINS=https://clipr.votre-domaine.fr
+      - OLLAMA_HOST=ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: always</pre>
+  </div>
+  <div class="card">
+    <h3>Backup de la base</h3>
+    <pre># Copier la DB SQLite depuis le conteneur
+docker cp clipr:/data/clipr.db ./backup_clipr.db
+
+# Ou monter un volume et sauvegarder depuis l'hote
+docker compose exec clipr cp /data/clipr.db /data/backup_$(date +%Y%m%d).db</pre>
+  </div>
+  <div class="card">
+    <h3>Mise a jour</h3>
+    <pre># Depuis le serveur
+cd Clipr
+git pull origin main
+docker compose up -d --build</pre>
+    <p>Ou depuis le dashboard admin (icone bouclier → Mise a jour).</p>
   </div>
 </section>
 
