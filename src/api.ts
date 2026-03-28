@@ -164,6 +164,8 @@ const api = {
   renameProject: (id: string, name: string) => patch(`/api/project/${id}/rename`, { name }),
   deleteProject: (id: string) => del(`/api/project/${id}`),
   updateProjectStatus: (id: string, status: string) => patch(`/api/project/${id}/status`, { status }),
+  // AI lock status
+  getAiStatus: () => get<{ locked: boolean; lock: any }>('/api/ai/status'),
   // Launch server-side background analysis
   launchAnalysis: (projectId: string, config: any) =>
     post(`/api/project/${projectId}/analyze`, { config }),
