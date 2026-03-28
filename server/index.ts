@@ -265,32 +265,76 @@ app.post('/api/ollama/analyze', async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Project history
+// Project list (active projects, max 6)
 app.get('/api/project/history', (_req, res) => {
   res.json(projectService.getProjectHistory())
 })
 
-// Project save
+// Project create
+app.post('/api/project/create', (req, res) => {
+  try {
+    const { name, type } = req.body
+    const project = projectService.createProject(name || 'Projet Sans Nom', type || 'manual')
+    res.json(project)
+  } catch (err: any) { res.status(400).json({ error: err.message }) }
+})
+
+// Project save (with id)
 app.post('/api/project/save', (req, res) => {
   try {
-    const fileName = projectService.saveProject(req.body)
-    res.json({ success: true, fileName })
+    const { id, ...data } = req.body
+    if (id) {
+      projectService.saveProject(id, data)
+      res.json({ success: true, id })
+    } else {
+      const newId = projectService.saveLegacyProject(data)
+      res.json({ success: true, id: newId })
+    }
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
 // Project auto-save
-app.post('/api/project/autosave', async (req, res) => {
+app.post('/api/project/autosave', (req, res) => {
   try {
-    await projectService.autoSaveProject(req.body)
+    const { id, ...data } = req.body
+    if (id) {
+      projectService.autoSaveProject(id, data)
+    } else {
+      projectService.saveLegacyProject(data)
+    }
     res.json({ success: true })
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Project load
-app.get('/api/project/load/:fileName', (req, res) => {
-  const data = projectService.loadProject(req.params.fileName)
-  if (data) res.json(data)
+// Project load by id
+app.get('/api/project/load/:id', (req, res) => {
+  const project = projectService.getProject(req.params.id)
+  if (project) res.json(project)
   else res.status(404).json({ error: 'Projet non trouve' })
+})
+
+// Project rename
+app.patch('/api/project/:id/rename', (req, res) => {
+  try {
+    projectService.renameProject(req.params.id, req.body.name)
+    res.json({ success: true })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Project delete (soft)
+app.delete('/api/project/:id', (req, res) => {
+  try {
+    projectService.deleteProject(req.params.id)
+    res.json({ success: true })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Project status update
+app.patch('/api/project/:id/status', (req, res) => {
+  try {
+    projectService.updateProjectStatus(req.params.id, req.body.status)
+    res.json({ success: true })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
 // Project export (download JSON)
