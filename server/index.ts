@@ -239,8 +239,13 @@ app.post('/api/upload', requireAuth, upload.array('videos', 20), async (req, res
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Stream video/audio files (auth required, path-safe)
-app.get('/api/files/:filename', requireAuth, (req, res) => {
+// Stream video/audio files (token via query param for <video> tags)
+app.get('/api/files/:filename', (req, res) => {
+  // Auth via header OR query param (needed for <video src="...?token=xxx">)
+  const token = req.headers.authorization?.slice(7) || (req.query.token as string)
+  if (!token) return res.status(401).json({ error: 'Authentification requise' })
+  try { authService.verifyToken(token) } catch { return res.status(401).json({ error: 'Token invalide' }) }
+
   const filePath = safePath(UPLOAD_DIR, req.params.filename)
   if (!filePath || !existsSync(filePath)) return res.status(404).json({ error: 'Fichier non trouve' })
 
@@ -275,8 +280,12 @@ app.get('/api/files/:filename', requireAuth, (req, res) => {
   }
 })
 
-// Serve temp/data files (auth required, path-safe)
-app.get('/api/data-files/*', requireAuth, (req, res) => {
+// Serve temp/data files (token via query param for media tags)
+app.get('/api/data-files/*', (req, res) => {
+  const token = req.headers.authorization?.slice(7) || (req.query.token as string)
+  if (!token) return res.status(401).json({ error: 'Authentification requise' })
+  try { authService.verifyToken(token) } catch { return res.status(401).json({ error: 'Token invalide' }) }
+
   const relativePath = (req.params as any)[0] as string
   const filePath = safePath(DATA_DIR, relativePath)
   if (!filePath || !existsSync(filePath)) return res.status(404).json({ error: 'Not found' })
@@ -348,8 +357,11 @@ app.post('/api/export/segment', requireAuth, async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Download exported file (auth required, path-safe)
-app.get('/api/export/download/:filename', requireAuth, (req, res) => {
+// Download exported file (token via query param or header)
+app.get('/api/export/download/:filename', (req, res) => {
+  const token = req.headers.authorization?.slice(7) || (req.query.token as string)
+  if (!token) return res.status(401).json({ error: 'Authentification requise' })
+  try { authService.verifyToken(token) } catch { return res.status(401).json({ error: 'Token invalide' }) }
   const filePath = safePath(EXPORT_DIR, req.params.filename)
   if (!filePath || !existsSync(filePath)) return res.status(404).json({ error: 'Fichier non trouve' })
   res.download(filePath)

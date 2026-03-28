@@ -9,6 +9,7 @@
 
 import { useRef, useEffect, useState } from "react";
 import { useStore } from "@/store/useStore";
+import api from "@/api";
 import { Play, Pause, Volume2, Edit2, Check, GripHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -228,7 +229,7 @@ const VideoPreview = () => {
                 <video
                     key={videoFile.path}
                     ref={videoRef}
-                    src={`/api/files/${(videoFile as any).id || encodeURIComponent(videoFile.path.split('/').pop() || videoFile.path.split('\\').pop() || '')}`}
+                    src={api.getVideoUrl(videoFile.id || videoFile.path.split('/').pop() || '')}
                     className="w-full h-full object-contain cursor-pointer"
                     onClick={togglePlay}
                     playsInline

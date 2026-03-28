@@ -168,10 +168,9 @@ function App() {
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-12 text-center flex flex-col items-center gap-4"
+            className="mb-12 text-center flex flex-col items-center"
           >
-            <img src={logo} alt="Clipr" className="w-24 h-24" />
-            <h1 className="text-4xl font-black text-foreground tracking-tight">Clipr</h1>
+            <img src={logo} alt="Clipr" className="w-40 h-40" />
           </motion.div>
 
           {/* Section projets */}
