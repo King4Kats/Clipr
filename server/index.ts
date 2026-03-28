@@ -1,0 +1,384 @@
+import express from 'express'
+import { createServer } from 'http'
+import { WebSocketServer, WebSocket } from 'ws'
+import multer from 'multer'
+import cors from 'cors'
+import { join, basename, extname } from 'path'
+import { existsSync, mkdirSync, createReadStream, statSync, readFileSync, writeFileSync } from 'fs'
+import { execSync, exec } from 'child_process'
+import { logger } from './logger.js'
+
+import * as ffmpegService from './services/ffmpeg.js'
+import * as whisperService from './services/whisper.js'
+import * as ollamaService from './services/ollama.js'
+import * as projectService from './services/project-history.js'
+
+// ── Config ──
+const PORT = parseInt(process.env.PORT || '3000')
+const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
+const UPLOAD_DIR = join(DATA_DIR, 'uploads')
+const EXPORT_DIR = join(DATA_DIR, 'exports')
+
+for (const dir of [DATA_DIR, UPLOAD_DIR, EXPORT_DIR]) {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+}
+
+// ── Express ──
+const app = express()
+const server = createServer(app)
+
+app.use(cors())
+app.use(express.json({ limit: '50mb' }))
+
+// Servir le frontend build
+const distPath = join(__dirname, '..', 'dist')
+if (existsSync(distPath)) app.use(express.static(distPath))
+
+// Servir la doc
+const docsPath = join(__dirname, '..', 'docs')
+if (existsSync(docsPath)) app.use('/docs', express.static(docsPath))
+
+// ── WebSocket ──
+const wss = new WebSocketServer({ server, path: '/ws' })
+const clients = new Set<WebSocket>()
+
+wss.on('connection', (ws) => {
+  clients.add(ws)
+  ws.on('close', () => clients.delete(ws))
+})
+
+function broadcast(type: string, data: any) {
+  const msg = JSON.stringify({ type, ...data })
+  clients.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(msg) })
+}
+
+// ── Upload (multer) ──
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => cb(null, `${Date.now()}_${file.originalname}`)
+})
+const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 * 1024 } }) // 10GB max
+
+// ── Routes API ──
+
+// Health
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: Date.now() }))
+
+// Version
+app.get('/api/version', (_req, res) => {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'))
+    res.json({ version: pkg.version })
+  } catch { res.json({ version: 'unknown' }) }
+})
+
+// Upload video
+app.post('/api/upload', upload.array('videos', 20), async (req, res) => {
+  try {
+    const files = req.files as Express.Multer.File[]
+    if (!files || files.length === 0) return res.status(400).json({ error: 'Aucun fichier' })
+
+    const results = []
+    for (const file of files) {
+      const duration = await ffmpegService.getVideoDuration(file.path)
+      results.push({ id: file.filename, path: file.path, name: file.originalname, duration, size: file.size })
+    }
+    res.json(results)
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Stream video/audio files
+app.get('/api/files/:filename', (req, res) => {
+  const filePath = join(UPLOAD_DIR, req.params.filename)
+  if (!existsSync(filePath)) return res.status(404).json({ error: 'Fichier non trouve' })
+
+  const stat = statSync(filePath)
+  const ext = extname(filePath).toLowerCase()
+  const mimeTypes: Record<string, string> = {
+    '.mp4': 'video/mp4', '.avi': 'video/x-msvideo', '.mov': 'video/quicktime',
+    '.mkv': 'video/x-matroska', '.webm': 'video/webm', '.mts': 'video/mp2t',
+    '.wav': 'audio/wav', '.mp3': 'audio/mpeg'
+  }
+
+  const range = req.headers.range
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-')
+    const start = parseInt(parts[0], 10)
+    const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
+    const chunkSize = end - start + 1
+
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunkSize,
+      'Content-Type': mimeTypes[ext] || 'application/octet-stream'
+    })
+    createReadStream(filePath, { start, end }).pipe(res)
+  } else {
+    res.writeHead(200, {
+      'Content-Length': stat.size,
+      'Content-Type': mimeTypes[ext] || 'application/octet-stream'
+    })
+    createReadStream(filePath).pipe(res)
+  }
+})
+
+// Serve temp/data files (audio extracts etc.)
+app.get('/api/data-files/*', (req, res) => {
+  const relativePath = req.params[0]
+  const filePath = join(DATA_DIR, relativePath)
+  if (!existsSync(filePath) || !filePath.startsWith(DATA_DIR)) return res.status(404).json({ error: 'Not found' })
+
+  const stat = statSync(filePath)
+  const ext = extname(filePath).toLowerCase()
+  const mime = ext === '.wav' ? 'audio/wav' : ext === '.mp4' ? 'video/mp4' : 'application/octet-stream'
+  res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': mime })
+  createReadStream(filePath).pipe(res)
+})
+
+// FFmpeg duration
+app.post('/api/ffmpeg/duration', async (req, res) => {
+  try {
+    const duration = await ffmpegService.getVideoDuration(req.body.videoPath)
+    res.json({ duration })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// FFmpeg extract audio
+app.post('/api/ffmpeg/extract-audio', async (req, res) => {
+  try {
+    const audioPath = await ffmpegService.extractAudio(req.body.videoPath, (percent) => {
+      broadcast('progress', { progress: percent * 0.3, message: 'Extraction audio...' })
+    })
+    res.json({ audioPath })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// FFmpeg cut
+app.post('/api/ffmpeg/cut', async (req, res) => {
+  try {
+    const { input, start, end, output } = req.body
+    await ffmpegService.cutVideo(input, start, end, output)
+    res.json({ success: true })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// FFmpeg concatenate
+app.post('/api/ffmpeg/concatenate', async (req, res) => {
+  try {
+    await ffmpegService.concatenateVideos(req.body.inputPaths, req.body.output)
+    res.json({ success: true })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Export segment(s) as video
+app.post('/api/export/segment', async (req, res) => {
+  try {
+    const { clips, title, index } = req.body
+    const safeTitle = title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_').substring(0, 50)
+    const outputPath = join(EXPORT_DIR, `${String(index + 1).padStart(2, '0')}_${safeTitle}.mp4`)
+
+    if (clips.length === 1) {
+      await ffmpegService.cutVideo(clips[0].videoPath, clips[0].start, clips[0].end, outputPath)
+    } else {
+      const tempDir = ffmpegService.getTempDir()
+      const tempFiles: string[] = []
+      for (let j = 0; j < clips.length; j++) {
+        const tempPath = join(tempDir, `temp_clip_${index}_${j}_${Date.now()}.mp4`)
+        tempFiles.push(tempPath)
+        await ffmpegService.cutVideo(clips[j].videoPath, clips[j].start, clips[j].end, tempPath)
+      }
+      await ffmpegService.concatenateVideos(tempFiles, outputPath)
+    }
+
+    const filename = basename(outputPath)
+    res.json({ success: true, filename, downloadUrl: `/api/export/download/${filename}` })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Download exported file
+app.get('/api/export/download/:filename', (req, res) => {
+  const filePath = join(EXPORT_DIR, req.params.filename)
+  if (!existsSync(filePath)) return res.status(404).json({ error: 'Fichier non trouve' })
+  res.download(filePath)
+})
+
+// Export text
+app.post('/api/export/text', (req, res) => {
+  try {
+    const { content, filename } = req.body
+    const filePath = join(EXPORT_DIR, filename)
+    writeFileSync(filePath, content, 'utf-8')
+    res.json({ success: true, downloadUrl: `/api/export/download/${filename}` })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Whisper transcribe
+app.post('/api/whisper/transcribe', async (req, res) => {
+  try {
+    const { audioPath, language, model } = req.body
+    if (model) await whisperService.loadWhisperModel(model)
+    const segments = await whisperService.transcribe(
+      audioPath, language,
+      (segment) => broadcast('transcript:segment', segment),
+      (percent) => broadcast('progress', { progress: percent, message: 'Transcription...' })
+    )
+    res.json({ segments })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Whisper cancel
+app.post('/api/whisper/cancel', (_req, res) => {
+  whisperService.cancelTranscription()
+  res.json({ success: true })
+})
+
+// Ollama check
+app.get('/api/ollama/check', async (_req, res) => {
+  const running = await ollamaService.checkOllama()
+  res.json({ running })
+})
+
+// Ollama models
+app.get('/api/ollama/models', async (_req, res) => {
+  const models = await ollamaService.listOllamaModels()
+  res.json({ models })
+})
+
+// Ollama pull
+app.post('/api/ollama/pull', async (req, res) => {
+  try {
+    const success = await ollamaService.pullOllamaModel(req.body.model)
+    res.json({ success, message: success ? 'Modele telecharge' : 'Echec du telechargement' })
+  } catch (err: any) { res.status(500).json({ success: false, message: err.message }) }
+})
+
+// Ollama analyze
+app.post('/api/ollama/analyze', async (req, res) => {
+  try {
+    const { transcript, context, model } = req.body
+    const result = await ollamaService.analyzeTranscript(transcript, context, model, (ci, tc, sf, msg) => {
+      broadcast('progress', { progress: 60 + (ci / tc) * 40, message: msg || 'Analyse...' })
+    })
+    res.json(result)
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Project history
+app.get('/api/project/history', (_req, res) => {
+  res.json(projectService.getProjectHistory())
+})
+
+// Project save
+app.post('/api/project/save', (req, res) => {
+  try {
+    const fileName = projectService.saveProject(req.body)
+    res.json({ success: true, fileName })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Project auto-save
+app.post('/api/project/autosave', async (req, res) => {
+  try {
+    await projectService.autoSaveProject(req.body)
+    res.json({ success: true })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Project load
+app.get('/api/project/load/:fileName', (req, res) => {
+  const data = projectService.loadProject(req.params.fileName)
+  if (data) res.json(data)
+  else res.status(404).json({ error: 'Projet non trouve' })
+})
+
+// Project export (download JSON)
+app.post('/api/project/export', (req, res) => {
+  const filename = `projet-${new Date().toISOString().split('T')[0]}.json`
+  const filePath = join(EXPORT_DIR, filename)
+  writeFileSync(filePath, JSON.stringify(req.body, null, 2), 'utf-8')
+  res.json({ downloadUrl: `/api/export/download/${filename}` })
+})
+
+// Project import (upload JSON)
+app.post('/api/project/import', upload.single('project'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier' })
+    const content = readFileSync(req.file.path, 'utf-8')
+    const data = JSON.parse(content)
+    res.json(data)
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Setup dependencies check
+app.get('/api/setup/dependencies', async (_req, res) => {
+  const deps = []
+
+  // FFmpeg
+  const ffmpegOk = await ffmpegService.checkFFmpeg()
+  deps.push({ name: 'FFmpeg', installed: ffmpegOk, version: ffmpegOk ? 'Installe' : undefined })
+
+  // Python + faster-whisper
+  try {
+    execSync('python3 -c "import faster_whisper"', { timeout: 10000 })
+    deps.push({ name: 'Whisper (faster-whisper)', installed: true, version: 'Installe' })
+  } catch {
+    deps.push({ name: 'Whisper (faster-whisper)', installed: false })
+  }
+
+  // Ollama
+  const ollamaOk = await ollamaService.checkOllama()
+  deps.push({ name: 'Ollama', installed: ollamaOk, version: ollamaOk ? 'Actif' : undefined })
+
+  res.json(deps)
+})
+
+// Logs export
+app.get('/api/logs/export', (_req, res) => {
+  if (existsSync(logger.logFile)) res.download(logger.logFile)
+  else res.status(404).json({ error: 'Aucun log' })
+})
+
+// Update check
+app.get('/api/update/check', (_req, res) => {
+  try {
+    const repoDir = existsSync('/repo/.git') ? '/repo' : process.cwd()
+    execSync('git fetch origin', { cwd: repoDir, timeout: 30000 })
+    const local = execSync('git rev-parse HEAD', { cwd: repoDir }).toString().trim()
+    const remote = execSync('git rev-parse origin/main', { cwd: repoDir }).toString().trim()
+
+    if (local === remote) {
+      res.json({ available: false, message: 'A jour' })
+    } else {
+      const log = execSync(`git log --oneline ${local}..${remote}`, { cwd: repoDir }).toString().trim()
+      const commits = log.split('\n').filter(l => l.trim())
+      res.json({ available: true, commits: commits.length, details: commits })
+    }
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Update apply
+app.post('/api/update', (_req, res) => {
+  res.json({ success: true, message: 'Mise a jour en cours...' })
+
+  const repoDir = existsSync('/repo/.git') ? '/repo' : process.cwd()
+  setTimeout(() => {
+    exec(`cd ${repoDir} && git pull origin main && docker compose up -d --build`, (err) => {
+      if (err) logger.error('Update error:', err)
+      else logger.info('Update: rebuild lance')
+    })
+  }, 500)
+})
+
+// Fallback SPA
+app.get('*', (_req, res) => {
+  const indexPath = join(distPath, 'index.html')
+  if (existsSync(indexPath)) res.sendFile(indexPath)
+  else res.status(404).json({ error: 'Not found' })
+})
+
+// ── Start ──
+server.listen(PORT, '0.0.0.0', () => {
+  logger.info(`Clipr server running on port ${PORT}`)
+  logger.info(`Data directory: ${DATA_DIR}`)
+})
