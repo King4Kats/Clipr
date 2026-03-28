@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+release/
+dist/
+dist-server/
+
+# Runtime data
+data/
+
+# AI models (downloaded at runtime)
+models/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# IDE & editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS artifacts
+Thumbs.db
+Desktop.ini
+.DS_Store
+nul
+
+# Logs
+*.log
+logs/
+
+# Temp & cache
+*.tmp
+*.bak
+.cache/
+
+# Claude Code workspace
+.claude/
+
+# Project data files (user-specific)
+*.clipr
+projet-video-*.json

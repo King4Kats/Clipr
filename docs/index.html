@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clipr - Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #006B9F; --primary-light: #0088cc; --primary-glow: rgba(0,107,159,0.12);
+      --bg: #E8EAEF; --bg-secondary: #DDE0E7;
+      --card: #FCFDFE; --card-hover: #FFFFFF;
+      --text: #1A1F2E; --text-secondary: #455468; --text-muted: #7B8795;
+      --border: #D1D5E0;
+      --code-bg: #0D2430; --code-text: #FAFAF9;
+      --tip-bg: rgba(0,107,159,0.08); --tip-border: #006B9F;
+      --warn-bg: rgba(230,150,0,0.08); --warn-border: #E69600;
+      --radius: 12px; --radius-sm: 8px;
+      --shadow: 0 1px 3px rgba(26,31,46,0.04), 0 2px 8px rgba(26,31,46,0.06);
+      --shadow-glow: 0 0 24px -5px rgba(0,107,159,0.12);
+      --sidebar-width: 260px; --header-height: 64px;
+      --font: 'Space Grotesk', sans-serif; --mono: 'JetBrains Mono', monospace;
+    }
+    [data-theme="dark"] {
+      --primary: #20B2D9; --primary-light: #3DC4E8; --primary-glow: rgba(32,178,217,0.2);
+      --bg: #0D2430; --bg-secondary: #0F2B3A;
+      --card: #153847; --card-hover: #1A4258;
+      --text: #FAFAF9; --text-secondary: #B8C5D0; --text-muted: #7B9BAD;
+      --border: #1E4A5E;
+      --code-bg: #091A24; --code-text: #E8F4F8;
+      --shadow: 0 1px 3px rgba(0,0,0,0.2), 0 2px 8px rgba(0,0,0,0.15);
+      --shadow-glow: 0 0 24px -5px rgba(32,178,217,0.2);
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header-height) + 24px); }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.7; transition: background 0.3s, color 0.3s; }
+
+    /* HEADER */
+    .header { position:fixed; top:0; left:0; right:0; height:var(--header-height); background:var(--card); border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 24px; z-index:100; backdrop-filter:blur(12px); }
+    .header-left { display:flex; align-items:center; gap:12px; }
+    .logo-svg { width:36px; height:36px; }
+    .header h1 { font-size:1.3rem; font-weight:700; }
+    .header-right { display:flex; align-items:center; gap:8px; }
+    .btn { padding:6px 14px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--card); color:var(--text); font-family:var(--font); font-size:0.82rem; font-weight:500; cursor:pointer; transition:all 0.2s; display:inline-flex; align-items:center; gap:6px; }
+    .btn:hover { background:var(--card-hover); border-color:var(--primary); color:var(--primary); }
+    .btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+    .btn-icon { width:18px; height:18px; }
+
+    /* LAYOUT */
+    .layout { display:flex; margin-top:var(--header-height); min-height:calc(100vh - var(--header-height)); }
+    .sidebar { position:fixed; top:var(--header-height); left:0; width:var(--sidebar-width); height:calc(100vh - var(--header-height)); overflow-y:auto; padding:20px 12px; border-right:1px solid var(--border); background:var(--bg-secondary); z-index:50; transition:transform 0.3s; }
+    .sidebar-label { font-size:0.7rem; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); padding:12px 12px 6px; }
+    .sidebar a { display:block; padding:7px 12px; border-radius:var(--radius-sm); color:var(--text-secondary); text-decoration:none; font-size:0.82rem; font-weight:400; transition:all 0.15s; line-height:1.4; }
+    .sidebar a:hover { background:var(--primary-glow); color:var(--primary); }
+    .sidebar a.active { background:var(--primary-glow); color:var(--primary); font-weight:600; border-left:3px solid var(--primary); }
+    .content { margin-left:var(--sidebar-width); flex:1; padding:32px 40px 80px; max-width:960px; }
+
+    /* CARDS & SECTIONS */
+    .section { margin-bottom:48px; }
+    .section-title { font-size:1.6rem; font-weight:700; margin-bottom:20px; padding-bottom:12px; border-bottom:2px solid var(--border); display:flex; align-items:center; gap:10px; }
+    .section-title .icon { font-size:1.4rem; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:24px; margin-bottom:16px; box-shadow:var(--shadow); transition:box-shadow 0.2s; }
+    .card:hover { box-shadow:var(--shadow-glow); }
+    .card h3 { font-size:1.05rem; font-weight:600; margin-bottom:10px; color:var(--primary); }
+    .card p, .card li { font-size:0.9rem; color:var(--text-secondary); }
+    .card ul, .card ol { padding-left:20px; margin:8px 0; }
+    .card li { margin-bottom:4px; }
+
+    /* SCREENSHOT PLACEHOLDER */
+    .screenshot { border:2px dashed var(--border); border-radius:var(--radius); padding:40px; text-align:center; margin:16px 0; color:var(--text-muted); font-size:0.85rem; background:var(--bg-secondary); }
+    .screenshot .cam { font-size:2rem; margin-bottom:8px; display:block; }
+
+    /* TIP & WARNING */
+    .tip, .warn { border-radius:var(--radius-sm); padding:14px 18px; margin:12px 0; font-size:0.87rem; }
+    .tip { background:var(--tip-bg); border-left:3px solid var(--tip-border); color:var(--tip-border); }
+    .warn { background:var(--warn-bg); border-left:3px solid var(--warn-border); color:var(--warn-border); }
+
+    /* CODE */
+    pre { background:var(--code-bg); color:var(--code-text); border-radius:var(--radius-sm); padding:18px; margin:12px 0; overflow-x:auto; font-family:var(--mono); font-size:0.8rem; line-height:1.6; border:1px solid var(--border); }
+    code { font-family:var(--mono); font-size:0.82rem; }
+    p code, li code, td code { background:var(--primary-glow); color:var(--primary); padding:2px 6px; border-radius:4px; font-size:0.8rem; }
+
+    /* TABLES */
+    table { width:100%; border-collapse:collapse; margin:12px 0; font-size:0.85rem; }
+    th, td { padding:10px 14px; text-align:left; border-bottom:1px solid var(--border); }
+    th { font-weight:600; color:var(--primary); background:var(--bg-secondary); font-size:0.8rem; text-transform:uppercase; letter-spacing:0.04em; }
+    td { color:var(--text-secondary); }
+    tr:hover td { background:var(--primary-glow); }
+
+    /* ASCII SCHEMA */
+    .schema { background:var(--code-bg); color:var(--code-text); border-radius:var(--radius-sm); padding:20px; margin:12px 0; font-family:var(--mono); font-size:0.75rem; line-height:1.5; overflow-x:auto; white-space:pre; border:1px solid var(--border); }
+    .schema .hl { color:#49d1f2; font-weight:600; }
+    .schema .g { color:#489caa; }
+    .schema .y { color:#E69600; }
+    .schema .r { color:#E63946; }
+
+    /* MOBILE */
+    .hamburger { display:none; background:none; border:none; color:var(--text); font-size:1.5rem; cursor:pointer; padding:4px; }
+    @media(max-width:768px) {
+      .hamburger { display:block; }
+      .sidebar { transform:translateX(-100%); }
+      .sidebar.open { transform:translateX(0); }
+      .content { margin-left:0; padding:20px 16px 60px; }
+    }
+
+    /* HIDDEN SECTIONS */
+    .user-section, .dev-section { display:none; }
+    .user-section.visible, .dev-section.visible { display:block; }
+
+    /* STEP NUMBER */
+    .step-num { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:var(--primary); color:#fff; font-size:0.8rem; font-weight:700; margin-right:8px; flex-shrink:0; }
+
+    /* SERVICE BADGE */
+    .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.72rem; font-weight:600; }
+    .badge-blue { background:rgba(32,178,217,0.15); color:#20B2D9; }
+    .badge-green { background:rgba(34,197,94,0.15); color:#22C55E; }
+    .badge-amber { background:rgba(230,150,0,0.15); color:#E69600; }
+    .badge-red { background:rgba(230,57,70,0.15); color:#E63946; }
+    .badge-purple { background:rgba(168,85,247,0.15); color:#A855F7; }
+
+    /* FLOW ARROW */
+    .flow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; }
+    .flow-item { background:var(--card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 14px; font-size:0.82rem; font-weight:500; }
+    .flow-arrow { color:var(--primary); font-weight:700; font-size:1.1rem; }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="header-left">
+    <button class="hamburger" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
+    <img class="logo-svg" src="../src/assets/Clipr.svg" alt="Clipr logo">
+    <h1>Clipr <span style="font-weight:300;font-size:0.85rem;color:var(--text-muted)">Documentation</span></h1>
+  </div>
+  <div class="header-right">
+    <button class="btn" id="btnUser" onclick="switchView('user')">Utilisateur</button>
+    <button class="btn active" id="btnDev" onclick="switchView('dev')">Developpeur</button>
+    <button class="btn" onclick="toggleTheme()" title="Changer le theme">
+      <svg class="btn-icon" id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- SIDEBAR -->
+<div class="layout">
+<nav class="sidebar" id="sidebar">
+  <!-- User nav -->
+  <div class="user-section" id="sidebarUser">
+    <div class="sidebar-label">Guide Utilisateur</div>
+    <a href="#u-bienvenue">Bienvenue</a>
+    <a href="#u-installation">Installation</a>
+    <a href="#u-premier-lancement">Premier lancement</a>
+    <a href="#u-importer">Importer une video</a>
+    <a href="#u-analyse">Lancer l'analyse IA</a>
+    <a href="#u-editeur">Comprendre l'editeur</a>
+    <a href="#u-segments">Ajuster les segments</a>
+    <a href="#u-exporter">Exporter</a>
+    <a href="#u-maj">Mise a jour</a>
+    <a href="#u-diagnostic">Diagnostiquer</a>
+  </div>
+  <!-- Dev nav -->
+  <div class="dev-section visible" id="sidebarDev">
+    <div class="sidebar-label">Kit Developpeur</div>
+    <a href="#d-architecture">Architecture Electron</a>
+    <a href="#d-structure">Structure du projet</a>
+    <a href="#d-pipeline">Pipeline de traitement</a>
+    <a href="#d-ipc">Communication IPC</a>
+    <a href="#d-store">State Management (Zustand)</a>
+    <a href="#d-services">Services Backend</a>
+    <a href="#d-composants">Composants UI</a>
+    <a href="#d-types">Interfaces TypeScript</a>
+    <a href="#d-logs">Systeme de Logs</a>
+    <a href="#d-updater">Mise a jour automatique</a>
+    <a href="#d-tech">Technologies</a>
+  </div>
+</nav>
+
+<!-- MAIN CONTENT -->
+<main class="content">
+
+<!-- ================================================================
+     SECTION UTILISATEUR
+     ================================================================ -->
+<div class="user-section" id="contentUser">
+
+<section class="section" id="u-bienvenue">
+  <h2 class="section-title"><span class="icon">&#127916;</span> Bienvenue sur Clipr</h2>
+  <div class="card">
+    <p><strong>Clipr</strong> est un logiciel de bureau qui analyse automatiquement vos videos grace a l'intelligence artificielle. Il ecoute le contenu, comprend les sujets abordes, et vous propose un decoupage en segments thematiques.</p>
+    <p style="margin-top:10px">Concretement, vous importez une video (un cours, une conference, un podcast video...) et Clipr :</p>
+    <ol>
+      <li>Extrait l'audio de la video</li>
+      <li>Transcrit les paroles en texte (grace a <strong>Whisper</strong>)</li>
+      <li>Analyse le texte pour identifier les themes (grace a un <strong>LLM local</strong>)</li>
+      <li>Vous propose un editeur pour ajuster les decoupages et exporter</li>
+    </ol>
+    <p style="margin-top:10px">Tout se passe <strong>en local sur votre ordinateur</strong>. Aucune donnee n'est envoyee sur Internet.</p>
+  </div>
+  <div class="screenshot"><span class="cam">&#128247;</span>Capture d'ecran : ecran d'accueil de Clipr</div>
+</section>
+
+<section class="section" id="u-installation">
+  <h2 class="section-title"><span class="icon">&#128187;</span> Installation</h2>
+  <div class="card">
+    <h3><span class="step-num">1</span> Telecharger l'installeur</h3>
+    <p>Rendez-vous sur la page de telechargement et recuperez le fichier <code>Clipr-Setup-X.Y.Z.exe</code>.</p>
+  </div>
+  <div class="card">
+    <h3><span class="step-num">2</span> Lancer l'installation</h3>
+    <p>Double-cliquez sur le fichier telecharge. L'installation est automatique et ne necessite aucune configuration particuliere. Clipr s'installe dans votre profil utilisateur.</p>
+    <div class="tip">L'installeur ne necessite pas de droits administrateur.</div>
+  </div>
+  <div class="card">
+    <h3><span class="step-num">3</span> Premier demarrage</h3>
+    <p>Une fois installe, Clipr se lance automatiquement. Un assistant de configuration apparait pour telecharger les modeles d'IA necessaires.</p>
+  </div>
+  <div class="screenshot"><span class="cam">&#128247;</span>Capture d'ecran : installeur Windows</div>
+</section>
+
+<section class="section" id="u-premier-lancement">
+  <h2 class="section-title"><span class="icon">&#9881;&#65039;</span> Premier lancement</h2>
+  <div class="card">
+    <p>Au premier demarrage, l'assistant de configuration (SetupWizard) vous guide pour preparer l'application :</p>
+    <h3>Modeles IA a telecharger</h3>
+    <ul>
+      <li><strong>Modele Whisper</strong> (~142 Mo) : le moteur de reconnaissance vocale qui transforme l'audio en texte</li>
+      <li><strong>Modele LLM</strong> (~2.1 Go) : le cerveau qui analyse le texte et identifie les themes</li>
+    </ul>
+    <p style="margin-top:10px">Cliquez sur les boutons de telechargement et attendez que les barres de progression se remplissent. Une connexion Internet est necessaire pour cette etape uniquement.</p>
+    <div class="warn">Le telechargement du modele LLM peut prendre plusieurs minutes selon votre connexion.</div>
+  </div>
+  <div class="screenshot"><span class="cam">&#128247;</span>Capture d'ecran : assistant de configuration</div>
+</section>
+
+<section class="section" id="u-importer">
+  <h2 class="section-title"><span class="icon">&#128193;</span> Importer une video</h2>
+  <div class="card">
+    <p>Deux methodes pour importer :</p>
+    <ul>
+      <li><strong>Glisser-deposer</strong> : faites glisser votre fichier video directement dans la zone d'import</li>
+      <li><strong>Clic</strong> : cliquez sur la zone d'import pour ouvrir l'explorateur de fichiers</li>
+    </ul>
+    <h3 style="margin-top:14px">Formats supportes</h3>
+    <p><code>MP4</code> <code>MOV</code> <code>AVI</code> <code>MKV</code> <code>MTS</code> <code>WebM</code></p>
+    <div class="tip">Vous pouvez importer plusieurs videos. Elles seront concatenees dans une timeline globale pour l'analyse.</div>
+  </div>
+  <div class="screenshot"><span class="cam">&#128247;</span>Capture d'ecran : zone d'import</div>
+</section>
+
+<section class="section" id="u-analyse">
+  <h2 class="section-title"><span class="icon">&#129302;</span> Lancer l'analyse IA</h2>
+  <div class="card">
+    <p>Apres l'import, un panneau de configuration apparait a droite de la video :</p>
+    <ul>
+      <li><strong>Modele Whisper</strong> : choisissez la precision (Base = rapide, Medium = meilleure qualite)</li>
+      <li><strong>Langue</strong> : selectionnez la langue parlee dans la video</li>
+      <li><strong>Modele LLM</strong> : le modele d'analyse (Qwen 3B par defaut)</li>
+      <li><strong>Consignes</strong> : ajoutez des instructions pour guider l'IA (ex: "Cette video parle de cuisine italienne")</li>
+    </ul>
+    <p style="margin-top:10px">Cliquez sur <strong>"Lancer l'analyse"</strong>. L'operation se deroule en 3 etapes automatiques :</p>
+    <div class="flow">
+      <span class="flow-item">&#127925; Extraction audio</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-item">&#128483;&#65039; Transcription</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-item">&#129504; Analyse thematique</span>
+    </div>
+    <div class="warn">L'analyse peut durer de 2 a 30 minutes selon la longueur de la video et la puissance de votre machine.</div>
+  </div>
+  <div class="screenshot"><span class="cam">&#128247;</span>Capture d'ecran : panneau d'analyse IA</div>
+</section>
+
+<section class="section" id="u-editeur">
+  <h2 class="section-title"><span class="icon">&#9999;&#65039;</span> Comprendre l'editeur</h2>
+  <div class="card">
+    <p>Une fois l'analyse terminee, vous accedez a l'editeur compose de 3 panneaux redimensionnables :</p>
+    <h3>1. Lecteur video (en haut a gauche)</h3>
+    <p>Previsualisez votre video. Quand un segment est selectionne, la lecture se limite a ce segment.</p>
+    <h3 style="margin-top:12px">2. Liste des segments (en haut a droite)</h3>
+    <p>Tous les segments identifies par l'IA avec leur titre, duree et couleur. Cliquez pour selectionner.</p>
+    <h3 style="margin-top:12px">3. Timeline (en bas)</h3>
+    <p>Vue chronologique avec la forme d'onde audio et les segments colores superposes. Zoomez avec Ctrl+Molette.</p>
+    <div class="tip">Les panneaux sont redimensionnables et deplacables. Utilisez le bouton de reinitialisation pour revenir a la disposition par defaut.</div>
+  </div>
+  <div class="screenshot"><span class="cam">&#128247;</span>Capture d'ecran : editeur avec les 3 panneaux</div>
+</section>
+
+<section class="section" id="u-segments">
+  <h2 class="section-title"><span class="icon">&#9986;&#65039;</span> Ajuster les segments</h2>
+  <div class="card">
+    <ul>
+      <li><strong>Renommer</strong> : cliquez sur le titre d'un segment pour le modifier</li>
+      <li><strong>Deplacer les bornes</strong> : dans la timeline, glissez les bords d'un segment pour ajuster debut/fin</li>
+      <li><strong>Ajouter</strong> : utilisez le bouton "+" pour creer un nouveau segment</li>
+      <li><strong>Supprimer</strong> : cliquez sur l'icone poubelle d'un segment</li>
+      <li><strong>Reordonner</strong> : glissez-deposez les segments dans la liste pour changer l'ordre</li>
+    </ul>
+  </div>
+</section>
+
+<section class="section" id="u-exporter">
+  <h2 class="section-title"><span class="icon">&#128229;</span> Exporter</h2>
+  <div class="card">
+    <p>Le bouton d'export dans la liste des segments propose 3 options :</p>
+    <h3>1. Videos decoupees (MP4)</h3>
+    <p>Chaque segment est exporte comme un fichier video independant. Choisissez un dossier de destination.</p>
+    <h3 style="margin-top:12px">2. Texte avec timecodes (TXT)</h3>
+    <p>Un fichier texte contenant la transcription organisee par segment, avec les horaires de debut et fin.</p>
+    <h3 style="margin-top:12px">3. Transcription propre (TXT)</h3>
+    <p>Le texte brut de la transcription, sans timecodes, pret a etre copie ou reutilise.</p>
+  </div>
+  <div class="screenshot"><span class="cam">&#128247;</span>Capture d'ecran : menu d'export</div>
+</section>
+
+<section class="section" id="u-maj">
+  <h2 class="section-title"><span class="icon">&#128260;</span> Mise a jour</h2>
+  <div class="card">
+    <p>Clipr verifie automatiquement les mises a jour a chaque demarrage. Si une nouvelle version est disponible :</p>
+    <ol>
+      <li>Le telechargement se lance automatiquement en arriere-plan</li>
+      <li>Un bouton <strong>"Redemarrer"</strong> apparait dans les parametres</li>
+      <li>Cliquez dessus pour installer et relancer l'application</li>
+    </ol>
+    <div class="tip">Si vous fermez l'application alors qu'une mise a jour est telechargee, elle s'installera automatiquement au prochain lancement.</div>
+  </div>
+</section>
+
+<section class="section" id="u-diagnostic">
+  <h2 class="section-title"><span class="icon">&#128270;</span> Diagnostiquer un probleme</h2>
+  <div class="card">
+    <p>Si vous rencontrez un probleme, la section <strong>Diagnostic</strong> dans les parametres vous permet de :</p>
+    <h3>Exporter les logs</h3>
+    <p>Cliquez sur "Exporter les logs" pour generer un fichier ZIP contenant l'historique des actions de l'application. Transmettez ce fichier au support technique.</p>
+    <h3 style="margin-top:12px">ID d'installation</h3>
+    <p>Un identifiant unique (ex: <code>a1b2c3d4</code>) est affiche. Il permet de distinguer votre installation en cas de support multiple.</p>
+  </div>
+</section>
+
+</div><!-- /contentUser -->
+
+
+<!-- ================================================================
+     SECTION DEVELOPPEUR
+     ================================================================ -->
+<div class="dev-section visible" id="contentDev">
+
+<!-- ARCHITECTURE -->
+<section class="section" id="d-architecture">
+  <h2 class="section-title"><span class="icon">&#127959;&#65039;</span> Architecture Electron</h2>
+  <div class="card">
+    <p>Clipr est construit sur <strong>Electron</strong>, qui combine un processus Node.js (le <em>Main Process</em>) et un navigateur Chromium (le <em>Renderer Process</em>). La communication entre les deux passe par un pont securise : le <strong>Preload Script</strong>.</p>
+    <div class="schema">
+<span class="hl">┌─────────────────────────────────────────────────────────────────┐</span>
+│                      <span class="hl">APPLICATION CLIPR</span>                          │
+│                                                                 │
+│  <span class="g">┌───────────────────────┐</span>    IPC Bridge    <span class="y">┌──────────────────┐</span>│
+│  <span class="g">│    MAIN PROCESS       │</span>◄──────────────►<span class="y">│ RENDERER PROCESS │</span>│
+│  <span class="g">│    (Node.js)          │</span>                 <span class="y">│ (Chromium/React) │</span>│
+│  <span class="g">│                       │</span>                 <span class="y">│                  │</span>│
+│  <span class="g">│  electron/main.ts     │</span>   preload.ts    <span class="y">│  src/App.tsx     │</span>│
+│  <span class="g">│  electron/services/*  │</span>◄──────────────►<span class="y">│  src/store/*     │</span>│
+│  <span class="g">│                       │</span>  (pont IPC)     <span class="y">│  src/components/*│</span>│
+│  <span class="g">└───────────────────────┘</span>                 <span class="y">└──────────────────┘</span>│
+│         │                                          │            │
+│         ▼                                          ▼            │
+│  <span class="g">Acces systeme :</span>                         <span class="y">Interface graphique :</span>   │
+│  - Fichiers (fs)                       - React 18 + Tailwind   │
+│  - Processus (spawn)                   - Zustand (state)       │
+│  - FFmpeg, Python, Ollama              - Framer Motion (anim)  │
+│  - electron-log, updater               - Radix UI (composants) │
+<span class="hl">└─────────────────────────────────────────────────────────────────┘</span></div>
+  </div>
+  <div class="card">
+    <h3>Separation des responsabilites</h3>
+    <table>
+      <tr><th>Couche</th><th>Fichier(s)</th><th>Role</th></tr>
+      <tr><td><strong>Main Process</strong></td><td><code>electron/main.ts</code></td><td>Point d'entree Electron. Cree la fenetre, enregistre les handlers IPC, initialise les services (logger, updater, model-manager).</td></tr>
+      <tr><td><strong>Preload</strong></td><td><code>electron/preload.ts</code></td><td>Pont securise. Expose une API limitee (<code>window.electron</code>) au renderer via <code>contextBridge</code>. Aucun acces direct a Node.js depuis le renderer.</td></tr>
+      <tr><td><strong>Renderer</strong></td><td><code>src/*</code></td><td>Interface React. Communique exclusivement via <code>window.electron.*</code>. Gestion d'etat centralisee avec Zustand.</td></tr>
+      <tr><td><strong>Services</strong></td><td><code>electron/services/*</code></td><td>Modules metier isoles : FFmpeg, Whisper, Ollama, gestion modeles, logs, update, persistence projets.</td></tr>
+    </table>
+    <div class="tip"><strong>Securite</strong> : <code>contextIsolation: true</code> et <code>nodeIntegration: false</code> empechent le renderer d'acceder directement a Node.js. Tout passe par le preload.</div>
+  </div>
+</section>
+
+<!-- STRUCTURE PROJET -->
+<section class="section" id="d-structure">
+  <h2 class="section-title"><span class="icon">&#128194;</span> Structure du projet</h2>
+  <div class="card">
+<pre>decoupeur-video-js/
+├── electron/
+│   ├── main.ts                    <span style="color:var(--text-muted)"># Point d'entree Electron</span>
+│   ├── preload.ts                 <span style="color:var(--text-muted)"># Pont IPC securise</span>
+│   └── services/
+│       ├── ffmpeg.ts              <span style="color:var(--text-muted)"># Extraction audio, decoupage, concatenation</span>
+│       ├── whisper.ts             <span style="color:var(--text-muted)"># Transcription vocale (Python subprocess)</span>
+│       ├── ollama.ts              <span style="color:var(--text-muted)"># Analyse LLM (HTTP API locale)</span>
+│       ├── model-manager.ts       <span style="color:var(--text-muted)"># Telechargement modeles IA</span>
+│       ├── logger.ts              <span style="color:var(--text-muted)"># Logging structure (electron-log)</span>
+│       ├── log-sender.ts          <span style="color:var(--text-muted)"># Export ZIP des logs + UUID</span>
+│       ├── updater.ts             <span style="color:var(--text-muted)"># Mise a jour auto (GitHub Releases)</span>
+│       ├── project-history.ts     <span style="color:var(--text-muted)"># Sauvegarde/chargement projets</span>
+│       └── setup.ts               <span style="color:var(--text-muted)"># (legacy, non utilise)</span>
+├── src/
+│   ├── App.tsx                    <span style="color:var(--text-muted)"># Composant racine, routage des vues</span>
+│   ├── main.tsx                   <span style="color:var(--text-muted)"># Point d'entree React + ThemeProvider</span>
+│   ├── index.css                  <span style="color:var(--text-muted)"># Styles globaux Tailwind</span>
+│   ├── store/
+│   │   └── useStore.ts            <span style="color:var(--text-muted)"># Store Zustand (etat global)</span>
+│   ├── types/
+│   │   └── index.ts               <span style="color:var(--text-muted)"># Interfaces TypeScript</span>
+│   ├── lib/
+│   │   └── utils.ts               <span style="color:var(--text-muted)"># Utilitaire Tailwind (cn)</span>
+│   ├── assets/
+│   │   └── Clipr.svg              <span style="color:var(--text-muted)"># Logo vectoriel</span>
+│   └── components/
+│       ├── SetupWizard.tsx         <span style="color:var(--text-muted)"># Assistant de configuration</span>
+│       ├── ui/                     <span style="color:var(--text-muted)"># Composants Radix UI (button, input, select, slider)</span>
+│       └── new/
+│           ├── Header.tsx          <span style="color:var(--text-muted)"># Barre de navigation</span>
+│           ├── UploadZone.tsx      <span style="color:var(--text-muted)"># Zone d'import video</span>
+│           ├── AIAnalysisPanel.tsx  <span style="color:var(--text-muted)"># Panneau config IA</span>
+│           ├── VideoPreview.tsx     <span style="color:var(--text-muted)"># Lecteur video</span>
+│           ├── ProgressPanel.tsx    <span style="color:var(--text-muted)"># Ecran de progression</span>
+│           ├── EditorLayout.tsx     <span style="color:var(--text-muted)"># Layout NLE (grid draggable)</span>
+│           ├── SegmentTimeline.tsx  <span style="color:var(--text-muted)"># Timeline waveform + segments</span>
+│           └── Timeline.tsx         <span style="color:var(--text-muted)"># Liste des segments</span>
+├── package.json
+├── electron.vite.config.ts
+├── tailwind.config.js
+└── tsconfig.json</pre>
+  </div>
+</section>
+
+<!-- PIPELINE -->
+<section class="section" id="d-pipeline">
+  <h2 class="section-title"><span class="icon">&#9881;&#65039;</span> Pipeline de traitement</h2>
+  <div class="card">
+    <p>Le pipeline est orchestre par la methode <code>triggerAnalysis()</code> du store Zustand. C'est une sequence de 3 etapes asynchrones avec gestion d'erreur globale.</p>
+    <div class="schema">
+<span class="hl">triggerAnalysis()</span> dans useStore.ts
+│
+├─ <span class="y">ETAPE 1 : Extraction Audio</span>
+│  │  processingStep = 'extracting-audio'
+│  │
+│  │  Pour chaque videoFile :
+│  │    └─ IPC: ffmpeg:extractAudio(videoPath)
+│  │       └─ FFmpeg convertit en WAV 16kHz mono
+│  │       └─ Progress via IPC: processing:progress
+│  │
+│  └─ Resultat : audioPaths[] (fichiers temporaires)
+│
+├─ <span class="g">ETAPE 2 : Transcription</span>
+│  │  processingStep = 'transcribing'
+│  │
+│  │  Pour chaque audioPath (sequentiel) :
+│  │    └─ IPC: whisper:transcribe(audioPath, language)
+│  │       └─ Python faster-whisper process
+│  │       └─ Segments envoyes en temps reel via whisper:segment
+│  │       └─ Timestamps ajustes avec l'offset video
+│  │
+│  └─ Resultat : transcript[] (TranscriptSegment[])
+│
+├─ <span class="hl">ETAPE 3 : Analyse Thematique</span>
+│  │  processingStep = 'analyzing'
+│  │
+│  │  1. ensureOllamaRunning() - Demarre le serveur si besoin
+│  │  2. generateGlobalSummary() - Resume general du contenu
+│  │  3. splitTranscriptIntoChunks() - Decoupe en morceaux de ~30K chars
+│  │  4. Pour chaque chunk :
+│  │     └─ analyzeChunk() - Ollama identifie les segments
+│  │        └─ Prompt systeme strict (JSON, durees, titres)
+│  │        └─ Retry loop (3 tentatives, 2s delai)
+│  │  5. cleanAndForceSequential() - Post-traitement :
+│  │     - Deduplication (merge si >70% overlap)
+│  │     - Couverture totale (debut=0, fin=duree)
+│  │     - Segments courts absorbes (<30s)
+│  │
+│  └─ Resultat : segments[] (VideoSegment[])
+│
+└─ <span class="g">FINALISATION</span>
+   │  processingStep = 'ready'
+   │  setSegments(segments) - Couleurs auto-assignees
+   │  autoSave() - Sauvegarde du projet
+   │
+   └─ L'UI bascule vers l'EditorLayout</div>
+  </div>
+  <div class="card">
+    <h3>Multi-video : Timeline unifiee</h3>
+    <p>Quand plusieurs videos sont importees, elles sont concatenees dans une <strong>timeline globale</strong> grace a un systeme d'offsets :</p>
+<pre>Video 1 : offset=0,    duree=120s  → [0s   - 120s]
+Video 2 : offset=120,  duree=90s   → [120s - 210s]
+Video 3 : offset=210,  duree=150s  → [210s - 360s]
+                                      ↑ Timeline globale</pre>
+    <p style="margin-top:8px">Les methodes utilitaires du store :</p>
+    <ul>
+      <li><code>getVideoAtTime(globalTime)</code> &rarr; retourne <code>{video, localTime, index}</code></li>
+      <li><code>getClipsForSegment(start, end)</code> &rarr; retourne les <code>VideoClip[]</code> pour l'export (un segment peut chevaucher plusieurs videos)</li>
+      <li><code>getTotalDuration()</code> &rarr; somme des durees de toutes les videos</li>
+    </ul>
+  </div>
+</section>
+
+<!-- IPC -->
+<section class="section" id="d-ipc">
+  <h2 class="section-title"><span class="icon">&#128268;</span> Communication IPC</h2>
+  <div class="card">
+    <p>L'application utilise <strong>41 canaux IPC</strong> au total : 36 canaux <strong>Renderer &rarr; Main</strong> (invoke) et 5 canaux <strong>Main &rarr; Renderer</strong> (events push).</p>
+    <div class="schema">
+<span class="y">Renderer (React)</span>                      <span class="g">Main (Node.js)</span>
+     │                                      │
+     │  window.electron.methode()           │
+     │  ─────── ipcRenderer.invoke ───────► │  ipcMain.handle('canal', handler)
+     │                                      │     └─ Appelle le service backend
+     │  ◄──── return (Promise) ──────────── │     └─ Retourne le resultat
+     │                                      │
+     │  window.electron.onEvent(callback)   │
+     │  ◄── ipcRenderer.on('event') ─────── │  mainWindow.webContents.send('event', data)
+     │      callback(data)                  │     └─ Push temps reel (progress, segments)
+     │                                      │</div>
+  </div>
+
+  <div class="card">
+    <h3>Dialogue &amp; Systeme de fichiers <span class="badge badge-blue">8 canaux</span></h3>
+    <table>
+      <tr><th>Canal</th><th>Direction</th><th>Parametres</th><th>Retour</th></tr>
+      <tr><td><code>dialog:openVideo</code></td><td>R&rarr;M</td><td>-</td><td><code>string | null</code></td></tr>
+      <tr><td><code>dialog:openVideos</code></td><td>R&rarr;M</td><td>-</td><td><code>string[]</code></td></tr>
+      <tr><td><code>dialog:selectFolder</code></td><td>R&rarr;M</td><td>-</td><td><code>string | null</code></td></tr>
+      <tr><td><code>dialog:saveTextFile</code></td><td>R&rarr;M</td><td><code>content, defaultName</code></td><td><code>string | null</code></td></tr>
+      <tr><td><code>file:readBuffer</code></td><td>R&rarr;M</td><td><code>filePath</code></td><td><code>ArrayBuffer</code></td></tr>
+      <tr><td><code>shell:openFolder</code></td><td>R&rarr;M</td><td><code>folderPath</code></td><td><code>string</code></td></tr>
+      <tr><td><code>shell:openDocumentation</code></td><td>R&rarr;M</td><td>-</td><td><code>void</code> (ouvre docs/index.html dans le navigateur)</td></tr>
+      <tr><td><code>app:getPath</code></td><td>R&rarr;M</td><td><code>'temp' | 'userData' | 'downloads'</code></td><td><code>string</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>FFmpeg - Traitement video <span class="badge badge-green">5 canaux</span></h3>
+    <table>
+      <tr><th>Canal</th><th>Direction</th><th>Parametres</th><th>Retour</th></tr>
+      <tr><td><code>ffmpeg:getDuration</code></td><td>R&rarr;M</td><td><code>videoPath</code></td><td><code>number</code> (secondes)</td></tr>
+      <tr><td><code>ffmpeg:extractAudio</code></td><td>R&rarr;M</td><td><code>videoPath</code></td><td><code>string</code> (chemin WAV)</td></tr>
+      <tr><td><code>ffmpeg:cut</code></td><td>R&rarr;M</td><td><code>input, start, end, output</code></td><td><code>void</code></td></tr>
+      <tr><td><code>ffmpeg:concatenate</code></td><td>R&rarr;M</td><td><code>inputPaths[], output</code></td><td><code>void</code></td></tr>
+      <tr><td><code>processing:progress</code></td><td>M&rarr;R</td><td><code>{progress, message}</code></td><td>event push</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Whisper - Transcription <span class="badge badge-purple">4 canaux</span></h3>
+    <table>
+      <tr><th>Canal</th><th>Direction</th><th>Parametres</th><th>Retour</th></tr>
+      <tr><td><code>whisper:loadModel</code></td><td>R&rarr;M</td><td><code>model</code></td><td><code>boolean</code></td></tr>
+      <tr><td><code>whisper:transcribe</code></td><td>R&rarr;M</td><td><code>audioPath, language</code></td><td><code>TranscriptSegment[]</code></td></tr>
+      <tr><td><code>whisper:cancel</code></td><td>R&rarr;M</td><td>-</td><td><code>void</code></td></tr>
+      <tr><td><code>whisper:segment</code></td><td>M&rarr;R</td><td><code>TranscriptSegment</code></td><td>event push (temps reel)</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Ollama - Analyse LLM <span class="badge badge-amber">5 canaux</span></h3>
+    <table>
+      <tr><th>Canal</th><th>Direction</th><th>Parametres</th><th>Retour</th></tr>
+      <tr><td><code>ollama:check</code></td><td>R&rarr;M</td><td>-</td><td><code>boolean</code> (appelle <code>ensureOllamaRunning()</code> : demarre Ollama si inactif)</td></tr>
+      <tr><td><code>ollama:listModels</code></td><td>R&rarr;M</td><td>-</td><td><code>string[]</code></td></tr>
+      <tr><td><code>ollama:pull</code></td><td>R&rarr;M</td><td><code>modelName</code></td><td><code>boolean</code></td></tr>
+      <tr><td><code>ollama:install</code></td><td>R&rarr;M</td><td>-</td><td><code>{success, message}</code></td></tr>
+      <tr><td><code>ollama:analyze</code></td><td>R&rarr;M</td><td><code>transcript, context, model</code></td><td><code>OllamaAnalysisResult</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Gestion des modeles <span class="badge badge-blue">5 canaux</span></h3>
+    <table>
+      <tr><th>Canal</th><th>Direction</th><th>Parametres</th><th>Retour</th></tr>
+      <tr><td><code>models:getStatus</code></td><td>R&rarr;M</td><td>-</td><td><code>ModelStatus</code></td></tr>
+      <tr><td><code>models:areReady</code></td><td>R&rarr;M</td><td>-</td><td><code>boolean</code></td></tr>
+      <tr><td><code>models:downloadWhisper</code></td><td>R&rarr;M</td><td><code>model?</code></td><td><code>{success, error?}</code> <em>(interne, pas dans preload)</em></td></tr>
+      <tr><td><code>models:downloadLLM</code></td><td>R&rarr;M</td><td><code>model?</code></td><td><code>{success, error?}</code> <em>(interne, pas dans preload)</em></td></tr>
+      <tr><td><code>model:progress</code></td><td>M&rarr;R</td><td><code>{type, progress, message}</code></td><td>event push</td></tr>
+    </table>
+    <div class="warn"><strong>Canaux internes</strong> : <code>models:downloadWhisper</code> et <code>models:downloadLLM</code> sont enregistres dans main.ts mais ne sont pas exposes dans le preload. Le renderer utilise <code>setup:installWhisper</code> et <code>ollama:pull</code> a la place.</div>
+  </div>
+
+  <div class="card">
+    <h3>Projets, Setup, Update, Logs <span class="badge badge-green">15 canaux</span></h3>
+    <table>
+      <tr><th>Canal</th><th>Direction</th><th>Parametres</th><th>Retour</th></tr>
+      <tr><td><code>project:autoSave</code></td><td>R&rarr;M</td><td><code>ProjectData</code></td><td><code>string | null</code></td></tr>
+      <tr><td><code>project:getHistory</code></td><td>R&rarr;M</td><td>-</td><td><code>ProjectData[]</code></td></tr>
+      <tr><td><code>project:saveManual</code></td><td>R&rarr;M</td><td><code>ProjectData</code></td><td><code>string | null</code></td></tr>
+      <tr><td><code>project:loadManual</code></td><td>R&rarr;M</td><td>-</td><td><code>ProjectData | null</code></td></tr>
+      <tr><td><code>setup:checkDependencies</code></td><td>R&rarr;M</td><td>-</td><td><code>DependencyStatus[]</code></td></tr>
+      <tr><td><code>setup:installWhisper</code></td><td>R&rarr;M</td><td>-</td><td><code>{success, message}</code></td></tr>
+      <tr><td><code>setup:pullOllamaModel</code></td><td>R&rarr;M</td><td>-</td><td><code>{success, message}</code> <em>(interne, pas dans preload)</em></td></tr>
+      <tr><td><code>updater:check</code></td><td>R&rarr;M</td><td>-</td><td><code>void</code></td></tr>
+      <tr><td><code>updater:install</code></td><td>R&rarr;M</td><td>-</td><td><code>void</code></td></tr>
+      <tr><td><code>updater:status</code></td><td>M&rarr;R</td><td><code>UpdateStatus</code></td><td>event push</td></tr>
+      <tr><td><code>app:getVersion</code></td><td>R&rarr;M</td><td>-</td><td><code>string</code></td></tr>
+      <tr><td><code>logs:getInstallationId</code></td><td>R&rarr;M</td><td>-</td><td><code>string</code></td></tr>
+      <tr><td><code>logs:send</code></td><td>R&rarr;M</td><td>-</td><td><code>{success, message}</code></td></tr>
+      <tr><td><code>logs:sendProgress</code></td><td>M&rarr;R</td><td><code>{percent, message}</code></td><td>event push (progression export)</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- STORE ZUSTAND -->
+<section class="section" id="d-store">
+  <h2 class="section-title"><span class="icon">&#128202;</span> State Management (Zustand)</h2>
+  <div class="card">
+    <p>L'etat global est centralise dans un unique store Zustand (<code>src/store/useStore.ts</code>). Pas de Redux, pas de Context API complexe : un seul objet reactif accessible partout via le hook <code>useStore()</code>.</p>
+    <div class="schema">
+<span class="hl">useStore()</span>
+│
+├─ <span class="y">Donnees</span>
+│  ├─ videoFiles: VideoFile[]        <span class="g">// Videos importees avec offsets</span>
+│  ├─ transcript: TranscriptSegment[] <span class="g">// Transcription Whisper</span>
+│  ├─ segments: VideoSegment[]        <span class="g">// Segments thematiques (couleurs auto)</span>
+│  ├─ audioPaths: string[]            <span class="g">// Fichiers WAV temporaires</span>
+│  └─ history: ProjectData[]          <span class="g">// Projets recents</span>
+│
+├─ <span class="y">Etat du pipeline</span>
+│  ├─ processingStep: ProcessingStep  <span class="g">// idle|extracting-audio|transcribing|...</span>
+│  ├─ progress: number                <span class="g">// 0-100</span>
+│  └─ progressMessage: string         <span class="g">// Message affiche</span>
+│
+├─ <span class="y">Configuration</span>
+│  └─ config: AppConfig
+│     ├─ whisperModel: 'medium'       <span class="g">// tiny|base|small|medium|large</span>
+│     ├─ ollamaModel: 'qwen2.5:3b'
+│     ├─ language: 'fr'
+│     ├─ outputQuality: 23            <span class="g">// FFmpeg CRF (0-51, bas=meilleur)</span>
+│     ├─ outputFolder: null
+│     └─ context: ''                  <span class="g">// Consignes utilisateur pour l'IA</span>
+│
+└─ <span class="y">UI</span>
+   ├─ selectedSegmentId: string|null
+   ├─ currentVideoIndex: number
+   └─ isPlaying: boolean</div>
+  </div>
+
+  <div class="card">
+    <h3>Actions principales</h3>
+    <table>
+      <tr><th>Methode</th><th>Description</th></tr>
+      <tr><td><code>addVideoFile(file)</code></td><td>Ajoute une video, calcule automatiquement l'offset dans la timeline globale</td></tr>
+      <tr><td><code>removeVideoFile(index)</code></td><td>Supprime une video et recalcule tous les offsets</td></tr>
+      <tr><td><code>triggerAnalysis()</code></td><td><strong>Orchestrateur principal</strong> : lance FFmpeg &rarr; Whisper &rarr; Ollama sequentiellement</td></tr>
+      <tr><td><code>setSegments(segments)</code></td><td>Affecte les segments avec couleurs auto-assignees (palette de 8 couleurs cyclique)</td></tr>
+      <tr><td><code>updateSegment(id, updates)</code></td><td>Mise a jour partielle d'un segment (titre, bornes, etc.)</td></tr>
+      <tr><td><code>addSegment(segment)</code></td><td>Ajoute un segment avec couleur automatique</td></tr>
+      <tr><td><code>removeSegment(id)</code></td><td>Supprime un segment, deselectionne si actif</td></tr>
+      <tr><td><code>reorderSegments(segments)</code></td><td>Reordonne la liste des segments</td></tr>
+      <tr><td><code>getVideoAtTime(globalTime)</code></td><td>Retourne <code>{video, localTime, index}</code> pour un temps global</td></tr>
+      <tr><td><code>getClipsForSegment(start, end)</code></td><td>Retourne les <code>VideoClip[]</code> pour un segment (peut chevaucher plusieurs videos)</td></tr>
+      <tr><td><code>autoSave()</code></td><td>Sauvegarde automatique et rafraichissement de l'historique</td></tr>
+      <tr><td><code>loadFromHistory(data)</code></td><td>Restaure l'etat complet depuis un projet sauvegarde</td></tr>
+      <tr><td><code>reset()</code></td><td>Reinitialise tout l'etat et recharge l'historique</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Machine d'etats du pipeline</h3>
+    <div class="schema">
+  <span class="g">idle</span> ──(triggerAnalysis)──► <span class="y">extracting-audio</span> ──► <span class="y">transcribing</span> ──► <span class="y">analyzing</span> ──► <span class="g">ready</span>
+    │                                                                               │
+    │◄──────────────────────────── (reset) ──────────────────────────────────────────│
+    │                                                                               │
+    │                           <span class="r">error</span> ◄── (catch dans triggerAnalysis)              │
+    │                                                                               │
+    │                          <span class="g">ready</span> ──(export)──► <span class="y">exporting</span> ──► <span class="g">done</span>               │</div>
+  </div>
+
+  <div class="card">
+    <h3>Routage des vues (App.tsx)</h3>
+    <p>Le composant <code>App.tsx</code> affiche une vue differente selon l'etat du store :</p>
+    <table>
+      <tr><th>Condition</th><th>Vue affichee</th></tr>
+      <tr><td><code>videoFiles.length === 0</code></td><td><strong>Accueil</strong> : titre, projets recents, zone d'import</td></tr>
+      <tr><td><code>processingStep</code> en cours</td><td><strong>ProgressPanel</strong> : overlay plein ecran avec progression</td></tr>
+      <tr><td><code>segments.length > 0</code></td><td><strong>EditorLayout</strong> : editeur NLE avec panneaux draggables</td></tr>
+      <tr><td>Defaut (video chargee, pas de segments)</td><td><strong>Pre-analyse</strong> : lecteur video + panneau config IA</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- SERVICES BACKEND -->
+<section class="section" id="d-services">
+  <h2 class="section-title"><span class="icon">&#128295;</span> Services Backend</h2>
+  <div class="card">
+    <p>Les services sont des modules Node.js isoles dans <code>electron/services/</code>. Chacun a une responsabilite unique et communique avec le renderer via les handlers IPC de <code>main.ts</code>.</p>
+  </div>
+
+  <div class="card">
+    <h3>ffmpeg.ts <span class="badge badge-green">Traitement video</span></h3>
+    <p>Wrapper autour de FFmpeg/FFprobe. Gere l'initialisation des binaires (packages, npm, systeme), l'extraction audio, le decoupage et la concatenation.</p>
+    <table>
+      <tr><th>Fonction</th><th>Description</th></tr>
+      <tr><td><code>initFFmpeg()</code></td><td>Localise les binaires : packages (production) &rarr; @ffmpeg-installer (dev) &rarr; PATH systeme</td></tr>
+      <tr><td><code>checkFFmpeg()</code></td><td>Verifie la disponibilite de FFmpeg</td></tr>
+      <tr><td><code>getVideoDuration(path)</code></td><td>Recupere la duree via <code>ffprobe -print_format json</code> (spawn manuel avec <code>windowsHide: true</code>)</td></tr>
+      <tr><td><code>extractAudio(path, onProgress)</code></td><td>Convertit en WAV PCM 16kHz mono (format Whisper)</td></tr>
+      <tr><td><code>cutVideo(input, start, end, output, quality)</code></td><td>Decoupe avec libx264 + AAC, CRF ajustable</td></tr>
+      <tr><td><code>concatenateVideos(paths, output)</code></td><td>Fusionne plusieurs videos via <code>mergeToFile()</code></td></tr>
+    </table>
+    <div class="tip"><strong>windowsHide</strong> : toutes les commandes utilisent <code>windowsHide: true</code> pour empecher le flash CMD sur Windows. Un helper <code>hideWindow()</code> applique cette option sur les commandes fluent-ffmpeg.</div>
+  </div>
+
+  <div class="card">
+    <h3>whisper.ts <span class="badge badge-purple">Transcription vocale</span></h3>
+    <p>Interface avec le moteur <strong>faster-whisper</strong> via un subprocess Python. Le script <code>transcribe.py</code> est fourni avec l'application.</p>
+    <table>
+      <tr><th>Fonction</th><th>Description</th></tr>
+      <tr><td><code>loadWhisperModel(model)</code></td><td>Selectionne le modele (tiny/base/small/medium)</td></tr>
+      <tr><td><code>transcribe(audioPath, lang, onSegment, onProgress)</code></td><td>Lance la transcription. Les segments arrivent en temps reel via stderr</td></tr>
+      <tr><td><code>cancelTranscription()</code></td><td>Tue le processus Python en cours</td></tr>
+    </table>
+    <p style="margin-top:8px"><strong>Protocole stderr</strong> : le script Python communique via des prefixes sur stderr :</p>
+<pre>PROGRESS:45          → Pourcentage de progression
+STATUS:Loading model  → Message de statut
+SEGMENT:{"id":...}   → Segment transcrit (JSON)
+WHISPER_ENGINE:info   → Info moteur
+ERROR:message         → Erreur</pre>
+  </div>
+
+  <div class="card">
+    <h3>ollama.ts <span class="badge badge-amber">Analyse LLM</span></h3>
+    <p>Communique avec le serveur <strong>Ollama</strong> local (port 11434) via HTTP. Gere le demarrage automatique, l'analyse par chunks et le post-traitement des segments.</p>
+    <table>
+      <tr><th>Fonction</th><th>Description</th></tr>
+      <tr><td><code>checkOllama()</code></td><td>Teste si le serveur repond (<code>GET /api/tags</code>)</td></tr>
+      <tr><td><code>ensureOllamaRunning()</code></td><td>Demarre <code>ollama serve</code> si necessaire, poll 20x500ms</td></tr>
+      <tr><td><code>downloadAndInstallOllama(onProgress)</code></td><td>Telecharge <code>OllamaSetup.exe</code> depuis ollama.com et l'execute</td></tr>
+      <tr><td><code>listOllamaModels()</code></td><td>Liste les modeles installes</td></tr>
+      <tr><td><code>pullOllamaModel(modelName)</code></td><td>Telecharge un modele via <code>POST /api/pull</code></td></tr>
+      <tr><td><code>analyzeTranscript(transcript, context, model, onProgress)</code></td><td>Pipeline complet : resume global &rarr; chunks &rarr; analyse &rarr; nettoyage</td></tr>
+      <tr><td><code>generateGlobalSummary(transcript, model)</code></td><td>Cree un resume narratif pour contextualiser l'analyse</td></tr>
+      <tr><td><code>splitTranscriptIntoChunks(transcript)</code></td><td>Decoupe en morceaux de ~30K chars avec 800 chars d'overlap</td></tr>
+      <tr><td><code>analyzeChunk(chunk, context, summary, model, ...)</code></td><td>Analyse un chunk avec prompt strict (JSON, durees, titres). Retry x3, delai 2s.</td></tr>
+      <tr><td><code>cleanAndForceSequential(segments, duration)</code></td><td>Post-traitement : deduplication (&gt;70% overlap), couverture totale, merge courts (&lt;30s)</td></tr>
+      <tr><td><code>mergeAndDeduplicateSegments(allSegments)</code></td><td>Fusion des segments provenant de plusieurs chunks (multi-chunk)</td></tr>
+      <tr><td><code>generateSegmentTitle(transcript, model)</code></td><td>Genere un titre pour un segment via le LLM</td></tr>
+    </table>
+    <p style="margin-top:8px"><strong>Chunking</strong> : les transcriptions longues sont decoupees en morceaux de ~30 000 caracteres avec un chevauchement de 800 caracteres pour la continuite. Chaque chunk recoit le dernier segment du chunk precedent pour assurer la sequentialite.</p>
+  </div>
+
+  <div class="card">
+    <h3>model-manager.ts <span class="badge badge-blue">Gestion des modeles</span></h3>
+    <p>Telecharge les modeles IA depuis HuggingFace et verifie leur disponibilite.</p>
+    <table>
+      <tr><th>Modele</th><th>Taille</th><th>Source</th></tr>
+      <tr><td>Whisper tiny</td><td>75 Mo</td><td>huggingface.co/ggerganov/whisper.cpp</td></tr>
+      <tr><td>Whisper base</td><td>142 Mo</td><td>huggingface.co/ggerganov/whisper.cpp</td></tr>
+      <tr><td>Whisper small</td><td>466 Mo</td><td>huggingface.co/ggerganov/whisper.cpp</td></tr>
+      <tr><td>Whisper medium</td><td>1 500 Mo</td><td>huggingface.co/ggerganov/whisper.cpp</td></tr>
+      <tr><td>Qwen2.5-3B (LLM)</td><td>2 100 Mo</td><td>huggingface.co (GGUF q4_k_m)</td></tr>
+      <tr><td>Phi-3-mini (LLM)</td><td>2 300 Mo</td><td>huggingface.co (GGUF q4)</td></tr>
+    </table>
+    <p style="margin-top:8px">Les modeles sont stockes dans <code>%APPDATA%/decoupeur-video/models/whisper/</code> et <code>.../models/llm/</code>.</p>
+  </div>
+
+  <div class="card">
+    <h3>project-history.ts <span class="badge badge-green">Persistence</span></h3>
+    <p>Gere la sauvegarde automatique et manuelle des projets.</p>
+    <table>
+      <tr><th>Fonction</th><th>Description</th></tr>
+      <tr><td><code>autoSaveProject(data)</code></td><td>Sauvegarde dans <code>userData/project-history/</code>. Garde les 3 derniers projets.</td></tr>
+      <tr><td><code>getProjectHistory()</code></td><td>Lit et retourne les projets sauvegardes (tries par date)</td></tr>
+      <tr><td><code>manualSaveProject(data)</code></td><td>Ouvre un dialogue "Enregistrer sous" pour un fichier .json</td></tr>
+      <tr><td><code>manualLoadProject()</code></td><td>Ouvre un dialogue "Ouvrir" pour charger un fichier .json</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>setup.ts <span class="badge badge-blue">Verification des dependances</span></h3>
+    <p>Verifie la presence et l'operabilite des dependances systeme (FFmpeg, Python, faster-whisper, Ollama). Utilise un <strong>cache de 30 secondes</strong> pour eviter les spawns repetitifs.</p>
+    <table>
+      <tr><th>Fonction</th><th>Description</th></tr>
+      <tr><td><code>checkCommand(cmd, args)</code></td><td>Spawn une commande avec <code>windowsHide: true</code>, timeout 3s, extrait la version</td></tr>
+      <tr><td><code>checkFFmpeg()</code></td><td>Teste <code>ffmpeg -version</code> + recherche dans les chemins Windows standards</td></tr>
+      <tr><td><code>checkPython()</code></td><td>Teste <code>python</code>, <code>python3</code>, <code>py</code></td></tr>
+      <tr><td><code>checkFasterWhisper()</code></td><td>Teste <code>pip show faster-whisper</code></td></tr>
+      <tr><td><code>checkOllamaInstalled()</code></td><td>Teste la commande + tente un demarrage auto via <code>ensureOllamaRunning()</code></td></tr>
+      <tr><td><code>checkAllDependencies()</code></td><td>Execute toutes les verifications en parallele (<code>Promise.all</code>)</td></tr>
+      <tr><td><code>installFasterWhisper()</code></td><td>Execute <code>pip install faster-whisper</code></td></tr>
+      <tr><td><code>pullOllamaModel(name)</code></td><td>Execute <code>ollama pull &lt;name&gt;</code> (timeout 10 min)</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>log-sender.ts <span class="badge badge-purple">Export des logs</span></h3>
+    <p>Gere l'identification unique de chaque installation (UUID v4) et la compression des logs en ZIP pour export.</p>
+    <table>
+      <tr><th>Fonction</th><th>Description</th></tr>
+      <tr><td><code>getInstallationId()</code></td><td>Recupere ou genere l'UUID stocke dans <code>userData/installation-id.json</code></td></tr>
+      <tr><td><code>zipLogs()</code></td><td>Compresse les logs + UUID en ZIP (archiver, compression niveau 9)</td></tr>
+      <tr><td><code>exportLogs(savePath, onProgress)</code></td><td>ZIP &rarr; copie vers le chemin choisi par l'utilisateur</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>whisper-native.ts <span class="badge badge-amber">Transcription native</span></h3>
+    <p>Alternative a <code>whisper.ts</code> : transcription via une liaison native C++ (whisper.cpp WASM/GGML) au lieu d'un subprocess Python. Telecharge les modeles GGML depuis HuggingFace.</p>
+    <table>
+      <tr><th>Modele</th><th>Taille</th></tr>
+      <tr><td>tiny</td><td>75 Mo</td></tr>
+      <tr><td>base</td><td>142 Mo</td></tr>
+      <tr><td>small</td><td>466 Mo</td></tr>
+      <tr><td>medium</td><td>1 500 Mo</td></tr>
+      <tr><td>large</td><td>3 100 Mo</td></tr>
+    </table>
+    <div class="tip"><strong>Note</strong> : ce service est une implementation alternative. Le service principal <code>whisper.ts</code> (subprocess Python + faster-whisper) reste le mode par defaut.</div>
+  </div>
+
+  <div class="card">
+    <h3>llm-native.ts <span class="badge badge-amber">Inference LLM native</span></h3>
+    <p>Alternative a <code>ollama.ts</code> : inference locale directe via <strong>node-llama-cpp</strong> ou equivalent, sans serveur Ollama. Charge des modeles GGUF directement en memoire.</p>
+    <table>
+      <tr><th>Modele</th><th>Taille</th><th>Fichier</th></tr>
+      <tr><td>Qwen2.5-3B</td><td>2 100 Mo</td><td><code>qwen2.5-3b-instruct-q4_k_m.gguf</code></td></tr>
+      <tr><td>Phi-3-mini</td><td>2 300 Mo</td><td><code>Phi-3-mini-4k-instruct-q4.gguf</code></td></tr>
+    </table>
+    <div class="tip"><strong>Note</strong> : ce service est une implementation alternative. Le service principal <code>ollama.ts</code> (serveur Ollama local) reste le mode par defaut.</div>
+  </div>
+</section>
+
+<!-- COMPOSANTS UI -->
+<section class="section" id="d-composants">
+  <h2 class="section-title"><span class="icon">&#127912;</span> Composants UI</h2>
+  <div class="card">
+    <p>Les composants applicatifs sont dans <code>src/components/new/</code> (8 composants). Le dossier <code>src/components/ui/</code> contient les 4 primitives Radix UI effectivement utilisees (button, input, select, slider).</p>
+  </div>
+
+  <div class="card">
+    <h3>Hierarchie des composants</h3>
+    <div class="schema">
+<span class="hl">App.tsx</span>
+├── <span class="g">Header.tsx</span>
+│   ├── Logo + titre
+│   ├── Save/Open/Reset projet
+│   ├── Toggle theme (next-themes)
+│   └── Bouton Settings → SetupWizard
+│
+├── <span class="y">SetupWizard.tsx</span> (modal overlay)
+│   ├── Telechargement modeles (Whisper + LLM)
+│   ├── Section mise a jour
+│   ├── Section diagnostic (logs + UUID)
+│   └── Bouton documentation (ouvre docs/index.html)
+│
+├── <span class="g">UploadZone.tsx</span> (si pas de video)
+│   └── Drop zone + file picker
+│
+├── <span class="r">ProgressPanel.tsx</span> (pendant traitement)
+│   └── Barre de progression + transcription live
+│
+├── <span class="hl">EditorLayout.tsx</span> (apres analyse)
+│   ├── <span class="g">VideoPreview.tsx</span> (lecteur HTML5)
+│   │   └── Play/pause, volume, segment-aware
+│   ├── <span class="y">Timeline.tsx</span> (liste segments)
+│   │   └── Reorder, rename, delete, export
+│   └── <span class="hl">SegmentTimeline.tsx</span> (timeline graphique)
+│       └── Canvas waveform, segments colores, drag edges, zoom
+│
+└── Pre-analyse (video chargee, pas de segments)
+    ├── VideoPreview.tsx
+    └── <span class="y">AIAnalysisPanel.tsx</span>
+        └── Config modeles, langue, consignes, bouton lancer</div>
+  </div>
+
+  <div class="card">
+    <h3>Composants cles</h3>
+    <table>
+      <tr><th>Composant</th><th>Role</th><th>Store</th></tr>
+      <tr><td><code>EditorLayout</code></td><td>Layout NLE avec React Grid Layout (12 colonnes, panneaux redimensionnables/deplacables). Sauvegarde dans localStorage.</td><td>Non</td></tr>
+      <tr><td><code>SegmentTimeline</code></td><td>Timeline avec waveform Canvas (retina), segments colores, drag des bords, zoom x20, scrollbar, playhead.</td><td>Oui</td></tr>
+      <tr><td><code>VideoPreview</code></td><td>Lecteur HTML5 avec protocole <code>local-video://</code>. Mode fragment (lecture limitee au segment selectionne).</td><td>Oui</td></tr>
+      <tr><td><code>AIAnalysisPanel</code></td><td>Configuration IA : modele Whisper, LLM, langue, consignes. Verifie Ollama au mount.</td><td>Oui</td></tr>
+      <tr><td><code>ProgressPanel</code></td><td>Overlay plein ecran avec progression, messages live, transcription temps reel.</td><td>Oui</td></tr>
+      <tr><td><code>Timeline</code></td><td>Liste ordonnee des segments (Framer Motion Reorder). Export 3 formats (MP4, TXT timecodes, TXT propre).</td><td>Oui</td></tr>
+      <tr><td><code>UploadZone</code></td><td>Import drag&amp;drop / click. Valide les extensions. Recupere la duree via Electron.</td><td>Oui</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- INTERFACES TYPESCRIPT -->
+<section class="section" id="d-types">
+  <h2 class="section-title"><span class="icon">&#128208;</span> Interfaces TypeScript</h2>
+  <div class="card">
+    <p>Toutes les interfaces sont definies dans <code>src/types/index.ts</code>.</p>
+<pre><span style="color:#49d1f2">interface</span> <span style="color:#E69600">VideoFile</span> {
+  path: string       <span style="color:#7B9BAD">// Chemin complet du fichier</span>
+  name: string       <span style="color:#7B9BAD">// Nom du fichier</span>
+  duration: number   <span style="color:#7B9BAD">// Duree en secondes</span>
+  size: number       <span style="color:#7B9BAD">// Taille en octets</span>
+  offset: number     <span style="color:#7B9BAD">// Position dans la timeline globale (auto-calcule)</span>
+}
+
+<span style="color:#49d1f2">interface</span> <span style="color:#E69600">TranscriptSegment</span> {
+  id: string
+  start: number      <span style="color:#7B9BAD">// Debut en secondes</span>
+  end: number        <span style="color:#7B9BAD">// Fin en secondes</span>
+  text: string       <span style="color:#7B9BAD">// Texte transcrit</span>
+}
+
+<span style="color:#49d1f2">interface</span> <span style="color:#E69600">VideoSegment</span> {
+  id: string
+  title: string
+  start: number      <span style="color:#7B9BAD">// Debut dans la timeline globale</span>
+  end: number        <span style="color:#7B9BAD">// Fin dans la timeline globale</span>
+  transcriptSegments: TranscriptSegment[]
+  color: string      <span style="color:#7B9BAD">// Couleur hex (auto-assignee)</span>
+}
+
+<span style="color:#49d1f2">interface</span> <span style="color:#E69600">VideoClip</span> {
+  videoIndex: number
+  videoPath: string
+  start: number      <span style="color:#7B9BAD">// Temps local dans cette video</span>
+  end: number        <span style="color:#7B9BAD">// Temps local dans cette video</span>
+}
+
+<span style="color:#49d1f2">interface</span> <span style="color:#E69600">AppConfig</span> {
+  whisperModel: 'tiny' | 'base' | 'small' | 'medium' | 'large'
+  ollamaModel: string
+  language: string
+  outputQuality: number   <span style="color:#7B9BAD">// 0-51, plus bas = meilleure qualite</span>
+  outputFolder: string | null
+  context: string         <span style="color:#7B9BAD">// Consignes utilisateur pour l'IA</span>
+}
+
+<span style="color:#49d1f2">type</span> <span style="color:#E69600">ProcessingStep</span> =
+  | 'idle' | 'extracting-audio' | 'transcribing'
+  | 'analyzing' | 'ready' | 'exporting' | 'done' | 'error'
+
+<span style="color:#49d1f2">type</span> <span style="color:#E69600">UpdateStatus</span> =
+  | { status: 'checking' }
+  | { status: 'available'; version: string; releaseNotes?: string }
+  | { status: 'not-available'; version: string }
+  | { status: 'downloading'; percent: number; bytesPerSecond: number;
+      transferred: number; total: number }
+  | { status: 'downloaded'; version: string }
+  | { status: 'error'; message: string }
+
+<span style="color:#49d1f2">interface</span> <span style="color:#E69600">ModelStatus</span> {
+  whisper: { model: string; downloaded: boolean }
+  llm: { model: string; downloaded: boolean }
+}
+
+<span style="color:#49d1f2">interface</span> <span style="color:#E69600">DependencyStatus</span> {
+  name: string
+  installed: boolean
+  version?: string
+  installInstructions?: string
+}</pre>
+  </div>
+
+  <div class="card">
+    <h3>ElectronAPI (preload bridge)</h3>
+    <p>L'interface <code>ElectronAPI</code> definit toutes les methodes exposees au renderer via <code>window.electron</code> :</p>
+    <table>
+      <tr><th>Categorie</th><th>Methodes</th></tr>
+      <tr><td><strong>Dialogue</strong></td><td><code>openVideoDialog()</code>, <code>openVideosDialog()</code>, <code>selectFolderDialog()</code>, <code>openFolder()</code>, <code>getAppPath()</code>, <code>saveTextFile()</code></td></tr>
+      <tr><td><strong>Fichiers</strong></td><td><code>readFileBuffer()</code></td></tr>
+      <tr><td><strong>FFmpeg</strong></td><td><code>getVideoDuration()</code>, <code>extractAudio()</code>, <code>cutVideo()</code>, <code>concatenateVideos()</code></td></tr>
+      <tr><td><strong>Whisper</strong></td><td><code>loadWhisperModel()</code>, <code>transcribe()</code>, <code>cancelTranscription()</code></td></tr>
+      <tr><td><strong>Ollama</strong></td><td><code>checkOllama()</code>, <code>listOllamaModels()</code>, <code>analyzeTranscript()</code></td></tr>
+      <tr><td><strong>Setup</strong></td><td><code>checkDependencies()</code>, <code>installWhisper()</code>, <code>pullOllamaModel()</code>, <code>installOllama()</code>, <code>getModelStatus()</code>, <code>areModelsReady()</code></td></tr>
+      <tr><td><strong>Projets</strong></td><td><code>autoSaveProject()</code>, <code>getProjectHistory()</code>, <code>saveProject()</code>, <code>loadProject()</code></td></tr>
+      <tr><td><strong>Events</strong></td><td><code>onProgress()</code>, <code>onSegments()</code>, <code>onTranscriptSegment()</code>, <code>onModelProgress()</code>, <code>onUpdateStatus()</code>, <code>onLogSendProgress()</code></td></tr>
+      <tr><td><strong>Update</strong></td><td><code>checkForUpdates()</code>, <code>installUpdate()</code>, <code>getAppVersion()</code></td></tr>
+      <tr><td><strong>Diagnostic</strong></td><td><code>getInstallationId()</code>, <code>sendLogs()</code></td></tr>
+      <tr><td><strong>Documentation</strong></td><td><code>openDocumentation()</code></td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- LOGS -->
+<section class="section" id="d-logs">
+  <h2 class="section-title"><span class="icon">&#128203;</span> Systeme de Logs</h2>
+  <div class="card">
+    <p>Le logger remplace tous les <code>console.log</code> par des ecritures persistantes sur disque via <code>electron-log</code>.</p>
+    <table>
+      <tr><th>Parametre</th><th>Valeur</th></tr>
+      <tr><td>Chemin</td><td><code>%APPDATA%/decoupeur-video/logs/main.log</code></td></tr>
+      <tr><td>Taille max</td><td>5 Mo (rotation automatique)</td></tr>
+      <tr><td>Format</td><td><code>[2025-01-15 14:30:22.123] [info] message</code></td></tr>
+      <tr><td>Niveaux</td><td><code>debug</code> &rarr; <code>info</code> &rarr; <code>warn</code> &rarr; <code>error</code></td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Informations systeme au demarrage</h3>
+    <p>La fonction <code>logSystemInfo()</code> enregistre automatiquement au lancement :</p>
+<pre>[info] === Application Starting ===
+[info] App Version: 1.0.0
+[info] Electron: 27.3.0 | Chrome: ... | Node: ...
+[info] OS: Windows_NT 10.0.22631 (x64)
+[info] Memory: 16384 MB total, 8192 MB free
+[info] CPUs: 8x AMD Ryzen 7 5800X
+[info] User Data: C:\Users\xxx\AppData\Roaming\decoupeur-video</pre>
+  </div>
+  <div class="card">
+    <h3>Export des logs</h3>
+    <p>Le service <code>log-sender.ts</code> gere l'export :</p>
+    <ol>
+      <li>Au premier lancement, un <strong>UUID v4</strong> est genere et stocke dans <code>installation-id.json</code></li>
+      <li>L'export cree un <strong>ZIP</strong> (compression niveau 9) contenant les logs + l'UUID</li>
+      <li>L'utilisateur choisit l'emplacement via un dialogue "Enregistrer sous"</li>
+    </ol>
+<pre>clipr-logs-a1b2c3d4.zip
+├── logs/
+│   ├── main.log           # Log actuel
+│   └── main.old.log       # Log precedent (rotation)
+└── installation-id.json   # UUID unique de l'installation</pre>
+  </div>
+</section>
+
+<!-- UPDATER -->
+<section class="section" id="d-updater">
+  <h2 class="section-title"><span class="icon">&#128260;</span> Mise a jour automatique</h2>
+  <div class="card">
+    <p>Le systeme utilise <code>electron-updater</code> avec <strong>GitHub Releases</strong> comme source.</p>
+    <div class="schema">
+  App demarre
+      │
+      ▼
+  <span class="g">Attente 5 sec</span> (evite de ralentir le demarrage)
+      │
+      ▼
+  <span class="y">Verification GitHub</span>  GET .../releases/latest → latest.yml
+      │
+    ┌─┴─────────────┐
+    ▼               ▼
+<span class="g">A jour</span>        <span class="hl">MAJ disponible</span>
+               │
+               ▼
+          <span class="y">Telechargement</span> (arriere-plan, barre de progression)
+               │
+               ▼
+          <span class="g">Pret a installer</span> → Bouton "Redemarrer"
+               │
+          (clic utilisateur)
+               │
+               ▼
+          <span class="hl">quitAndInstall()</span> → Ferme, installe, relance</div>
+  </div>
+  <div class="card">
+    <h3>Configuration</h3>
+<pre>autoUpdater.autoDownload = false       // Controle manuel du telechargement
+autoUpdater.autoInstallOnAppQuit = true // Installe a la fermeture si MAJ prete
+
+// Source (package.json → build.publish)
+{
+  "provider": "github",
+  "owner": "King4Kats",
+  "repo": "Clipr"
+}</pre>
+    <div class="warn"><strong>Important</strong> : Le fichier <code>latest.yml</code> genere par electron-builder est indispensable. Sans lui, electron-updater ne peut pas detecter les mises a jour. Toujours le publier avec la release.</div>
+  </div>
+</section>
+
+<!-- TECHNOLOGIES -->
+<section class="section" id="d-tech">
+  <h2 class="section-title"><span class="icon">&#128736;&#65039;</span> Technologies</h2>
+  <div class="card">
+    <h3>Stack technique</h3>
+    <table>
+      <tr><th>Technologie</th><th>Usage</th><th>Justification</th></tr>
+      <tr><td><strong>Electron</strong></td><td>Framework desktop</td><td>Acces au systeme de fichiers, spawn de processus, integration native Windows</td></tr>
+      <tr><td><strong>React 18</strong></td><td>Interface utilisateur</td><td>Composants declaratifs, hooks, ecossysteme riche</td></tr>
+      <tr><td><strong>TypeScript</strong></td><td>Langage</td><td>Typage statique, autocompletion, detection d'erreurs au build</td></tr>
+      <tr><td><strong>Vite (electron-vite)</strong></td><td>Bundler</td><td>HMR rapide, build optimise, support natif TypeScript</td></tr>
+      <tr><td><strong>Zustand</strong></td><td>State management</td><td>API minimale, pas de boilerplate, performant, integration React native</td></tr>
+      <tr><td><strong>Tailwind CSS</strong></td><td>Styles</td><td>Utility-first, prototypage rapide, cohesion visuelle</td></tr>
+      <tr><td><strong>Radix UI</strong></td><td>Composants primitifs</td><td>Accessibles (ARIA), non-styles, composables</td></tr>
+      <tr><td><strong>Framer Motion</strong></td><td>Animations</td><td>API declarative, AnimatePresence, drag &amp; reorder</td></tr>
+      <tr><td><strong>React Grid Layout</strong></td><td>Layout editeur</td><td>Panneaux draggables et redimensionnables (NLE-like)</td></tr>
+      <tr><td><strong>next-themes</strong></td><td>Theme dark/light</td><td>Gestion automatique du theme avec persistence localStorage</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>IA &amp; Traitement</h3>
+    <table>
+      <tr><th>Technologie</th><th>Usage</th><th>Justification</th></tr>
+      <tr><td><strong>FFmpeg / FFprobe</strong></td><td>Traitement video/audio</td><td>Standard industriel, codec universel, decoupage sans reencodage possible</td></tr>
+      <tr><td><strong>faster-whisper</strong></td><td>Reconnaissance vocale</td><td>Implementation CTranslate2 de Whisper, 4x plus rapide, locale</td></tr>
+      <tr><td><strong>Ollama</strong></td><td>LLM local</td><td>Serveur LLM leger, modeles GGUF quantizes, API REST simple</td></tr>
+      <tr><td><strong>electron-log</strong></td><td>Logging</td><td>Ecriture fichier avec rotation, niveaux, horodatage</td></tr>
+      <tr><td><strong>electron-updater</strong></td><td>Mise a jour</td><td>Integration native GitHub Releases, telechargement progressif</td></tr>
+      <tr><td><strong>archiver</strong></td><td>Compression</td><td>Creation de ZIP pour l'export des logs</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Build &amp; Distribution</h3>
+<pre>npm run dev       → electron-vite dev        (developpement avec HMR)
+npm run build     → electron-vite build      (compilation TypeScript)
+                  + electron-builder          (creation installeur)
+
+Sortie : dist/
+├── Clipr-Setup-X.Y.Z.exe    (installeur NSIS Windows)
+└── latest.yml                 (metadonnees pour auto-updater)</pre>
+    <p style="margin-top:8px">L'installeur NSIS est configure en <strong>one-click</strong>, installation par utilisateur (pas d'admin requis).</p>
+  </div>
+</section>
+
+</div><!-- /contentDev -->
+
+</main>
+</div><!-- /layout -->
+
+<script>
+let currentView = 'dev';
+
+function switchView(view) {
+  currentView = view;
+  // Masquer toutes les sections
+  document.querySelectorAll('.user-section, .dev-section').forEach(el => el.classList.remove('visible'));
+  // Afficher uniquement les sections de la vue selectionnee
+  document.querySelectorAll('.' + view + '-section').forEach(el => el.classList.add('visible'));
+  // Mettre a jour les boutons du header
+  document.getElementById('btnUser').classList.toggle('active', view === 'user');
+  document.getElementById('btnDev').classList.toggle('active', view === 'dev');
+  // Scroll en haut du contenu au changement de vue
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function toggleTheme() {
+  const html = document.documentElement;
+  const next = html.dataset.theme === 'dark' ? 'light' : 'dark';
+  html.dataset.theme = next;
+  document.getElementById('themeIcon').innerHTML = next === 'dark'
+    ? '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'
+    : '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+}
+
+// Scroll spy - ne highlight que les sections de la vue active
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      // Verifier que la section appartient a la vue courante
+      const prefix = currentView === 'user' ? 'u-' : 'd-';
+      if (!e.target.id.startsWith(prefix)) return;
+      // Retirer le highlight uniquement des liens de la vue active
+      const activeNav = document.getElementById(currentView === 'user' ? 'sidebarUser' : 'sidebarDev');
+      if (activeNav) activeNav.querySelectorAll('a').forEach(a => a.classList.remove('active'));
+      const link = document.querySelector('.sidebar a[href="#' + e.target.id + '"]');
+      if (link) link.classList.add('active');
+    }
+  });
+}, { rootMargin: '-80px 0px -60% 0px' });
+document.querySelectorAll('.section[id]').forEach(s => observer.observe(s));
+
+// Initialisation : s'assurer que seule la vue par defaut est visible
+document.addEventListener('DOMContentLoaded', () => switchView('dev'));
+</script>
+</body>
+</html>

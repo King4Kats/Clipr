@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-server
+out
+release
+.git
+.claude
+models
+*.log
+.env*
