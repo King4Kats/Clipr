@@ -169,6 +169,15 @@ const api = {
   // Launch server-side background analysis
   launchAnalysis: (projectId: string, config: any) =>
     post(`/api/project/${projectId}/analyze`, { config }),
+  // Sharing
+  shareProject: (projectId: string, username: string, role: 'viewer' | 'editor' = 'viewer') =>
+    post(`/api/project/${projectId}/share`, { username, role }),
+  unshareProject: (projectId: string, userId: string) =>
+    del(`/api/project/${projectId}/share/${userId}`),
+  getProjectShares: (projectId: string) => get<any[]>(`/api/project/${projectId}/shares`),
+  getSharedProjects: () => get<any[]>('/api/project/shared'),
+  searchUsers: (query: string) => get<any[]>(`/api/users/search?q=${encodeURIComponent(query)}`),
+
   exportProject: (data: any) => post<{ downloadUrl: string }>('/api/project/export', data),
   importProject: async (file: File) => {
     const formData = new FormData()
