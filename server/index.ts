@@ -243,7 +243,9 @@ app.post('/api/upload', requireAuth, upload.array('videos', 20), async (req, res
     const results = []
     for (const file of files) {
       const duration = await ffmpegService.getVideoDuration(file.path)
-      results.push({ id: file.filename, path: file.path, name: file.originalname, duration, size: file.size })
+      // Multer decodes originalname as latin1 — re-encode to UTF-8 for accented characters
+      const name = Buffer.from(file.originalname, 'latin1').toString('utf-8')
+      results.push({ id: file.filename, path: file.path, name, duration, size: file.size })
     }
     res.json(results)
   } catch (err: any) { res.status(500).json({ error: err.message }) }
