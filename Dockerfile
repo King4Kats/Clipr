@@ -26,9 +26,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Installer faster-whisper dans un venv
+# Installer faster-whisper dans un venv (avec support large-v3)
 RUN python3 -m venv /opt/whisper-venv \
-    && /opt/whisper-venv/bin/pip install --no-cache-dir faster-whisper
+    && /opt/whisper-venv/bin/pip install --no-cache-dir faster-whisper torch
 ENV PATH="/opt/whisper-venv/bin:$PATH"
 
 # Installer Docker CLI (pour self-rebuild)
