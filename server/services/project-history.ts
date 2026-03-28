@@ -4,6 +4,19 @@ import { randomUUID } from 'crypto'
 
 const MAX_PROJECTS_PER_USER = 6
 
+// Fix mojibake: detect and repair latin1-decoded UTF-8 strings (e.g. "rescapÃ©e" → "rescapée")
+function fixMojibake(str: string): string {
+  try {
+    // Check if the string contains typical mojibake patterns (Ã followed by another char)
+    if (/[\xC0-\xDF][\x80-\xBF]/.test(str) || /\xC3[\x80-\xBF]/.test(str)) {
+      const fixed = Buffer.from(str, 'latin1').toString('utf-8')
+      // Verify the result is valid and different
+      if (fixed !== str && !fixed.includes('\uFFFD')) return fixed
+    }
+  } catch { /* ignore, return original */ }
+  return str
+}
+
 export interface ProjectData {
   videoFiles: any[]
   transcript: any[]
@@ -44,10 +57,18 @@ export function getProjectHistory(userId?: string): ProjectRecord[] {
     ).all(MAX_PROJECTS_PER_USER)
   }
 
-  return rows.map(row => ({
-    ...row,
-    data: JSON.parse(row.data)
-  }))
+  return rows.map(row => {
+    const data = JSON.parse(row.data)
+    // Fix mojibake in videoFiles names
+    if (data.videoFiles) {
+      data.videoFiles = data.videoFiles.map((vf: any) => ({
+        ...vf,
+        name: vf.name ? fixMojibake(vf.name) : vf.name
+      }))
+    }
+    if (data.projectName) data.projectName = fixMojibake(data.projectName)
+    return { ...row, name: fixMojibake(row.name), data }
+  })
 }
 
 // ── List ALL projects (admin) ──
@@ -63,6 +84,7 @@ export function getAllProjects(): ProjectRecord[] {
 
   return rows.map(row => ({
     ...row,
+    name: fixMojibake(row.name),
     data: JSON.parse(row.data)
   }))
 }
