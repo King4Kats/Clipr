@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "@/store/useStore";
 import { useAuthStore } from "@/store/useAuthStore";
+import api from "@/api";
 
 import Header from "@/components/new/Header";
 import UploadZone from "@/components/new/UploadZone";
@@ -69,7 +70,7 @@ function App() {
       if (!setupComplete) setShowSetup(true);
       setSetupChecked(true);
       await loadHistory();
-      try { setSharedProjects(await import('@/api').then(m => m.default.getSharedProjects())) } catch {}
+      try { setSharedProjects(await api.getSharedProjects()) } catch {}
     };
     checkFirstRun();
 
@@ -77,7 +78,7 @@ function App() {
     const interval = setInterval(async () => {
       if (!useStore.getState().activeProjectId) {
         loadHistory();
-        try { setSharedProjects(await import('@/api').then(m => m.default.getSharedProjects())) } catch {}
+        try { setSharedProjects(await api.getSharedProjects()) } catch {}
       }
     }, 10000);
     return () => clearInterval(interval);

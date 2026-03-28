@@ -3,7 +3,8 @@ import { createServer } from 'http'
 import { WebSocketServer, WebSocket } from 'ws'
 import multer from 'multer'
 import cors from 'cors'
-import { join, basename, extname } from 'path'
+import rateLimit from 'express-rate-limit'
+import { join, basename, extname, resolve } from 'path'
 import { existsSync, mkdirSync, createReadStream, statSync, readFileSync, writeFileSync } from 'fs'
 import { execSync, exec } from 'child_process'
 import { logger } from './logger.js'
@@ -31,8 +32,20 @@ for (const dir of [DATA_DIR, UPLOAD_DIR, EXPORT_DIR]) {
 const app = express()
 const server = createServer(app)
 
-app.use(cors())
-app.use(express.json({ limit: '50mb' }))
+// CORS: restrict to same origin in production
+const ALLOWED_ORIGINS = process.env.CORS_ORIGINS?.split(',') || []
+app.use(cors(ALLOWED_ORIGINS.length > 0 ? { origin: ALLOWED_ORIGINS } : undefined))
+app.use(express.json({ limit: '10mb' }))
+
+// Rate limiting on auth routes
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: 'Trop de tentatives, réessayez dans 15 minutes' } })
+
+// ── Path safety helper ──
+function safePath(base: string, userPath: string): string | null {
+  const resolved = resolve(base, userPath)
+  if (!resolved.startsWith(resolve(base))) return null
+  return resolved
+}
 
 // Servir le frontend build
 const distPath = join(__dirname, '..', 'dist')
@@ -48,19 +61,29 @@ const wss = new WebSocketServer({ server, path: '/ws' })
 interface WsClient {
   ws: WebSocket
   projectId: string | null
+  userId: string | null
 }
 
 const clients = new Set<WsClient>()
 
 wss.on('connection', (ws) => {
-  const client: WsClient = { ws, projectId: null }
+  const client: WsClient = { ws, projectId: null, userId: null }
   clients.add(client)
 
   ws.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw.toString())
-      // Client subscribes to a project channel: { type: 'subscribe', projectId: '...' }
-      if (msg.type === 'subscribe' && msg.projectId) {
+      // Authenticate WebSocket with JWT token
+      if (msg.type === 'auth' && msg.token) {
+        try {
+          const payload = authService.verifyToken(msg.token)
+          client.userId = payload.userId
+        } catch {
+          ws.send(JSON.stringify({ type: 'auth:error', message: 'Token invalide' }))
+        }
+      }
+      // Subscribe to project channel (requires auth)
+      if (msg.type === 'subscribe' && msg.projectId && client.userId) {
         client.projectId = msg.projectId
       }
       if (msg.type === 'unsubscribe') {
@@ -88,20 +111,37 @@ function broadcastToProject(projectId: string, type: string, data: any) {
   })
 }
 
-// ── Upload (multer) ──
+// ── Upload (multer) with file type validation ──
+const ALLOWED_VIDEO_MIMES = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', 'video/mp2t']
+const ALLOWED_EXTENSIONS = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.mts']
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => cb(null, `${Date.now()}_${file.originalname}`)
+  filename: (_req, file, cb) => {
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+    cb(null, `${Date.now()}_${safeName}`)
+  }
 })
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 * 1024 } }) // 10GB max
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 * 1024 }, // 5GB max
+  fileFilter: (_req, file, cb) => {
+    const ext = extname(file.originalname).toLowerCase()
+    if (ALLOWED_VIDEO_MIMES.includes(file.mimetype) || ALLOWED_EXTENSIONS.includes(ext)) {
+      cb(null, true)
+    } else {
+      cb(new Error('Type de fichier non autorisé. Formats acceptés: MP4, MOV, AVI, MKV, WebM, MTS'))
+    }
+  }
+})
 
 // ── Routes API ──
 
 // Health
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: Date.now() }))
 
-// ── Auth ──
-app.post('/api/auth/register', (req, res) => {
+// ── Auth (rate-limited) ──
+app.post('/api/auth/register', authLimiter, (req, res) => {
   try {
     const { username, email, password } = req.body
     const result = authService.register(username, email, password)
@@ -109,7 +149,7 @@ app.post('/api/auth/register', (req, res) => {
   } catch (err: any) { res.status(400).json({ error: err.message }) }
 })
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', authLimiter, (req, res) => {
   try {
     const { login, password } = req.body
     const result = authService.login(login, password)
@@ -141,7 +181,7 @@ app.get('/api/admin/system', requireAuth, requireAdmin, async (_req, res) => {
 
   let diskInfo = { total: 0, used: 0, free: 0 }
   try {
-    const df = execSync(`df -B1 ${DATA_DIR} | tail -1`).toString().trim().split(/\s+/)
+    const df = execSync('df -B1 ' + JSON.stringify(DATA_DIR)).toString().trim().split('\n').pop()!.split(/\s+/)
     diskInfo = { total: parseInt(df[1]) || 0, used: parseInt(df[2]) || 0, free: parseInt(df[3]) || 0 }
   } catch { /* ignore */ }
 
@@ -184,8 +224,8 @@ app.get('/api/version', (_req, res) => {
   } catch { res.json({ version: 'unknown' }) }
 })
 
-// Upload video
-app.post('/api/upload', upload.array('videos', 20), async (req, res) => {
+// Upload video (auth required)
+app.post('/api/upload', requireAuth, upload.array('videos', 20), async (req, res) => {
   try {
     const files = req.files as Express.Multer.File[]
     if (!files || files.length === 0) return res.status(400).json({ error: 'Aucun fichier' })
@@ -199,10 +239,10 @@ app.post('/api/upload', upload.array('videos', 20), async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Stream video/audio files
-app.get('/api/files/:filename', (req, res) => {
-  const filePath = join(UPLOAD_DIR, req.params.filename)
-  if (!existsSync(filePath)) return res.status(404).json({ error: 'Fichier non trouve' })
+// Stream video/audio files (auth required, path-safe)
+app.get('/api/files/:filename', requireAuth, (req, res) => {
+  const filePath = safePath(UPLOAD_DIR, req.params.filename)
+  if (!filePath || !existsSync(filePath)) return res.status(404).json({ error: 'Fichier non trouve' })
 
   const stat = statSync(filePath)
   const ext = extname(filePath).toLowerCase()
@@ -235,11 +275,11 @@ app.get('/api/files/:filename', (req, res) => {
   }
 })
 
-// Serve temp/data files (audio extracts etc.)
-app.get('/api/data-files/*', (req, res) => {
-  const relativePath = req.params[0]
-  const filePath = join(DATA_DIR, relativePath)
-  if (!existsSync(filePath) || !filePath.startsWith(DATA_DIR)) return res.status(404).json({ error: 'Not found' })
+// Serve temp/data files (auth required, path-safe)
+app.get('/api/data-files/*', requireAuth, (req, res) => {
+  const relativePath = (req.params as any)[0] as string
+  const filePath = safePath(DATA_DIR, relativePath)
+  if (!filePath || !existsSync(filePath)) return res.status(404).json({ error: 'Not found' })
 
   const stat = statSync(filePath)
   const ext = extname(filePath).toLowerCase()
@@ -248,16 +288,16 @@ app.get('/api/data-files/*', (req, res) => {
   createReadStream(filePath).pipe(res)
 })
 
-// FFmpeg duration
-app.post('/api/ffmpeg/duration', async (req, res) => {
+// FFmpeg duration (auth required)
+app.post('/api/ffmpeg/duration', requireAuth, async (req, res) => {
   try {
     const duration = await ffmpegService.getVideoDuration(req.body.videoPath)
     res.json({ duration })
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// FFmpeg extract audio
-app.post('/api/ffmpeg/extract-audio', async (req, res) => {
+// FFmpeg extract audio (auth required)
+app.post('/api/ffmpeg/extract-audio', requireAuth, async (req, res) => {
   try {
     const audioPath = await ffmpegService.extractAudio(req.body.videoPath, (percent) => {
       broadcast('progress', { progress: percent * 0.3, message: 'Extraction audio...' })
@@ -266,8 +306,8 @@ app.post('/api/ffmpeg/extract-audio', async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// FFmpeg cut
-app.post('/api/ffmpeg/cut', async (req, res) => {
+// FFmpeg cut (auth required)
+app.post('/api/ffmpeg/cut', requireAuth, async (req, res) => {
   try {
     const { input, start, end, output } = req.body
     await ffmpegService.cutVideo(input, start, end, output)
@@ -275,16 +315,16 @@ app.post('/api/ffmpeg/cut', async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// FFmpeg concatenate
-app.post('/api/ffmpeg/concatenate', async (req, res) => {
+// FFmpeg concatenate (auth required)
+app.post('/api/ffmpeg/concatenate', requireAuth, async (req, res) => {
   try {
     await ffmpegService.concatenateVideos(req.body.inputPaths, req.body.output)
     res.json({ success: true })
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Export segment(s) as video
-app.post('/api/export/segment', async (req, res) => {
+// Export segment(s) as video (auth required)
+app.post('/api/export/segment', requireAuth, async (req, res) => {
   try {
     const { clips, title, index } = req.body
     const safeTitle = title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_').substring(0, 50)
@@ -308,25 +348,27 @@ app.post('/api/export/segment', async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Download exported file
-app.get('/api/export/download/:filename', (req, res) => {
-  const filePath = join(EXPORT_DIR, req.params.filename)
-  if (!existsSync(filePath)) return res.status(404).json({ error: 'Fichier non trouve' })
+// Download exported file (auth required, path-safe)
+app.get('/api/export/download/:filename', requireAuth, (req, res) => {
+  const filePath = safePath(EXPORT_DIR, req.params.filename)
+  if (!filePath || !existsSync(filePath)) return res.status(404).json({ error: 'Fichier non trouve' })
   res.download(filePath)
 })
 
-// Export text
-app.post('/api/export/text', (req, res) => {
+// Export text (auth required, path-safe)
+app.post('/api/export/text', requireAuth, (req, res) => {
   try {
     const { content, filename } = req.body
-    const filePath = join(EXPORT_DIR, filename)
+    const safeFilename = basename(filename) // Strip any path components
+    const filePath = safePath(EXPORT_DIR, safeFilename)
+    if (!filePath) return res.status(400).json({ error: 'Nom de fichier invalide' })
     writeFileSync(filePath, content, 'utf-8')
-    res.json({ success: true, downloadUrl: `/api/export/download/${filename}` })
+    res.json({ success: true, downloadUrl: `/api/export/download/${safeFilename}` })
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Whisper transcribe
-app.post('/api/whisper/transcribe', async (req, res) => {
+// Whisper transcribe (auth required)
+app.post('/api/whisper/transcribe', requireAuth, async (req, res) => {
   try {
     const { audioPath, language, model, initialPrompt } = req.body
     if (model) await whisperService.loadWhisperModel(model)
@@ -340,34 +382,34 @@ app.post('/api/whisper/transcribe', async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Whisper cancel
-app.post('/api/whisper/cancel', (_req, res) => {
+// Whisper cancel (auth required)
+app.post('/api/whisper/cancel', requireAuth, (_req, res) => {
   whisperService.cancelTranscription()
   res.json({ success: true })
 })
 
-// Ollama check
-app.get('/api/ollama/check', async (_req, res) => {
+// Ollama check (auth required)
+app.get('/api/ollama/check', requireAuth, async (_req, res) => {
   const running = await ollamaService.checkOllama()
   res.json({ running })
 })
 
-// Ollama models
-app.get('/api/ollama/models', async (_req, res) => {
+// Ollama models (auth required)
+app.get('/api/ollama/models', requireAuth, async (_req, res) => {
   const models = await ollamaService.listOllamaModels()
   res.json({ models })
 })
 
-// Ollama pull
-app.post('/api/ollama/pull', async (req, res) => {
+// Ollama pull (auth required)
+app.post('/api/ollama/pull', requireAuth, async (req, res) => {
   try {
     const success = await ollamaService.pullOllamaModel(req.body.model)
     res.json({ success, message: success ? 'Modele telecharge' : 'Echec du telechargement' })
   } catch (err: any) { res.status(500).json({ success: false, message: err.message }) }
 })
 
-// Ollama analyze
-app.post('/api/ollama/analyze', async (req, res) => {
+// Ollama analyze (auth required)
+app.post('/api/ollama/analyze', requireAuth, async (req, res) => {
   try {
     const { transcript, context, model } = req.body
     const result = await ollamaService.analyzeTranscript(transcript, context, model, (ci, tc, sf, msg) => {
@@ -391,11 +433,14 @@ app.post('/api/project/create', requireAuth, (req, res) => {
   } catch (err: any) { res.status(400).json({ error: err.message }) }
 })
 
-// Project save (with id)
+// Project save (with ownership check)
 app.post('/api/project/save', requireAuth, (req, res) => {
   try {
     const { id, ...data } = req.body
     if (id) {
+      // Verify ownership or editor access
+      const { access, role } = sharingService.hasAccess(id, req.user!.userId)
+      if (!access || role === 'viewer') return res.status(403).json({ error: 'Accès refusé' })
       projectService.saveProject(id, data)
       res.json({ success: true, id })
     } else {
@@ -405,11 +450,13 @@ app.post('/api/project/save', requireAuth, (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Project auto-save
+// Project auto-save (with ownership check)
 app.post('/api/project/autosave', requireAuth, (req, res) => {
   try {
     const { id, ...data } = req.body
     if (id) {
+      const { access, role } = sharingService.hasAccess(id, req.user!.userId)
+      if (!access || role === 'viewer') return res.status(403).json({ error: 'Accès refusé' })
       projectService.autoSaveProject(id, data)
     } else {
       projectService.saveLegacyProject(data, req.user!.userId)
@@ -428,25 +475,31 @@ app.get('/api/project/load/:id', requireAuth, (req, res) => {
   else res.status(404).json({ error: 'Projet non trouve' })
 })
 
-// Project rename
+// Project rename (owner only)
 app.patch('/api/project/:id/rename', requireAuth, (req, res) => {
   try {
+    const project = projectService.getProject(req.params.id, req.user!.userId)
+    if (!project) return res.status(404).json({ error: 'Projet non trouvé' })
     projectService.renameProject(req.params.id, req.body.name)
     res.json({ success: true })
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Project delete (soft)
+// Project delete — owner only
 app.delete('/api/project/:id', requireAuth, (req, res) => {
   try {
+    const project = projectService.getProject(req.params.id, req.user!.userId)
+    if (!project) return res.status(404).json({ error: 'Projet non trouvé' })
     projectService.deleteProject(req.params.id)
     res.json({ success: true })
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Project status update
+// Project status update (owner only)
 app.patch('/api/project/:id/status', requireAuth, (req, res) => {
   try {
+    const project = projectService.getProject(req.params.id, req.user!.userId)
+    if (!project) return res.status(404).json({ error: 'Projet non trouvé' })
     projectService.updateProjectStatus(req.params.id, req.body.status)
     res.json({ success: true })
   } catch (err: any) { res.status(500).json({ error: err.message }) }
@@ -648,16 +701,16 @@ app.post('/api/project/:id/analyze', requireAuth, async (req, res) => {
   })()
 })
 
-// Project export (download JSON)
-app.post('/api/project/export', (req, res) => {
+// Project export (auth required)
+app.post('/api/project/export', requireAuth, (req, res) => {
   const filename = `projet-${new Date().toISOString().split('T')[0]}.json`
   const filePath = join(EXPORT_DIR, filename)
   writeFileSync(filePath, JSON.stringify(req.body, null, 2), 'utf-8')
   res.json({ downloadUrl: `/api/export/download/${filename}` })
 })
 
-// Project import (upload JSON)
-app.post('/api/project/import', upload.single('project'), (req, res) => {
+// Project import (auth required)
+app.post('/api/project/import', requireAuth, upload.single('project'), (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Aucun fichier' })
     const content = readFileSync(req.file.path, 'utf-8')
@@ -666,8 +719,8 @@ app.post('/api/project/import', upload.single('project'), (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Setup dependencies check
-app.get('/api/setup/dependencies', async (_req, res) => {
+// Setup dependencies check (auth required)
+app.get('/api/setup/dependencies', requireAuth, async (_req, res) => {
   const deps = []
 
   // FFmpeg
@@ -689,14 +742,14 @@ app.get('/api/setup/dependencies', async (_req, res) => {
   res.json(deps)
 })
 
-// Logs export
-app.get('/api/logs/export', (_req, res) => {
+// Logs export (admin only)
+app.get('/api/logs/export', requireAuth, requireAdmin, (_req, res) => {
   if (existsSync(logger.logFile)) res.download(logger.logFile)
   else res.status(404).json({ error: 'Aucun log' })
 })
 
-// Update check
-app.get('/api/update/check', (_req, res) => {
+// Update check (admin only)
+app.get('/api/update/check', requireAuth, requireAdmin, (_req, res) => {
   try {
     const repoDir = existsSync('/repo/.git') ? '/repo' : process.cwd()
     execSync('git fetch origin', { cwd: repoDir, timeout: 30000 })
@@ -713,8 +766,8 @@ app.get('/api/update/check', (_req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Update apply
-app.post('/api/update', (_req, res) => {
+// Update apply (admin only)
+app.post('/api/update', requireAuth, requireAdmin, (_req, res) => {
   res.json({ success: true, message: 'Mise a jour en cours...' })
 
   const repoDir = existsSync('/repo/.git') ? '/repo' : process.cwd()

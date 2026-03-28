@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Share2, UserPlus, Trash2, Search, Crown, Eye, Pencil } from 'lucide-react'
+import { X, Share2, UserPlus, Trash2, Search, Eye, Pencil } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import api from '@/api'

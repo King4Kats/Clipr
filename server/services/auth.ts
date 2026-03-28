@@ -4,7 +4,7 @@ import { getDb } from './database.js'
 import { logger } from '../logger.js'
 import { randomUUID } from 'crypto'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'clipr-secret-change-in-production'
+const JWT_SECRET = process.env.JWT_SECRET || require('crypto').randomBytes(32).toString('hex')
 const JWT_EXPIRES_IN = '7d'
 
 export interface User {
