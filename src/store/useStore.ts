@@ -78,16 +78,7 @@ interface AppState {
   autoSave: () => Promise<void>
 }
 
-const DEFAULT_WHISPER_PROMPT = `Patrimoine immatériel, patrimoine culturel, tradition orale, savoir-faire, mémoire collective.
-Vendée, Bretagne, Pays de la Loire, bocage vendéen, marais breton, marais poitevin, pays de Retz.
-Maraîchin, poitevin-saintongeais, gallo, breton, patois vendéen.
-Bourrine, maraîchine, métairie, closerie, longère, chaumière, toiture en chaume.
-Sabotier, chaumier, bourrelier, tonnelier, tisserand, forgeron, maréchal-ferrant, vannier, charron, meulier, saunier, paludier.
-Fest-noz, fest-deiz, veillée, assemblée, frairie, pardon, fête patronale.
-Chants de marais, chants à répondre, complainte, gwerz, kan ha diskan, ronde, gavotte, avant-deux, maraîchine.
-Vielle à roue, bombarde, biniou, accordéon diatonique, épinette.
-Transhumance, embouche, pêche à pied, marais salant, sel, brioche vendéenne, préfou, mogette, jambon de Vendée, gâche, galette.
-Bourrine du marais, écomusée, collectage, informateur, enquête ethnographique.`
+const DEFAULT_WHISPER_PROMPT = `Entretien sur le patrimoine culturel de Vendée et de Bretagne. On parle du bocage, des métairies, closeries et borderies, du marais poitevin avec ses conches, biefs et rigoles, de la bourrine et du bourrinage. Les paludiers récoltent la fleur de sel dans les œillets, vasières, cobiers et adernes avec le las et la lousse, formant des mulons sur le trémet. En musique traditionnelle, le kan ha diskan avec kaner et diskaner anime les festoù-noz, avec gavotte, dañs-tro, ton simpl, tamm kreizh. La maraîchine et l'avant-deux sont les danses vendéennes. Les gwerzioù et sonioù accompagnent binioù kozh et bombarde dans le bagad. L'artisanat comprend le sabotier, le bourrelier, le tonnelier, le chaumier, le vannier et le charron. En architecture, longère, penty, malouinière, chaumière. Les pardons et troménies sont des traditions bretonnes. Gastronomie : préfou, mogette, brioche vendéenne, gâche, fouace, tourtisseaux, kouign-amann, krampouezh, far breton, kig ha farz, galette de sarrasin, chouchen. Toponymes en Plou-, Lan-, Tré-, Ker-, Loc-. La pigouille propulse la plate dans la Venise Verte.`
 
 const defaultConfig: AppConfig = {
   whisperModel: 'large-v3',
