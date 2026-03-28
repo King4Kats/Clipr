@@ -1,6 +1,6 @@
 /**
  * API.TS : Client API HTTP + WebSocket
- * Remplace window.electron (IPC Electron) par des appels HTTP/WS vers le backend Express.
+ * Supporte les channels WebSocket par projet pour le suivi en temps réel.
  */
 
 const API_BASE = ''  // meme origin
@@ -10,10 +10,18 @@ type WsCallback = (data: any) => void
 const wsCallbacks: Record<string, WsCallback[]> = {}
 let ws: WebSocket | null = null
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let currentSubscribedProjectId: string | null = null
 
 function connectWs() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   ws = new WebSocket(`${protocol}//${window.location.host}/ws`)
+
+  ws.onopen = () => {
+    // Re-subscribe to project channel after reconnect
+    if (currentSubscribedProjectId) {
+      wsSend({ type: 'subscribe', projectId: currentSubscribedProjectId })
+    }
+  }
 
   ws.onmessage = (event) => {
     try {
@@ -33,10 +41,27 @@ function connectWs() {
   ws.onerror = () => ws?.close()
 }
 
+function wsSend(msg: any) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(msg))
+  }
+}
+
 function onWsEvent(type: string, callback: WsCallback): () => void {
   if (!wsCallbacks[type]) wsCallbacks[type] = []
   wsCallbacks[type].push(callback)
   return () => { wsCallbacks[type] = wsCallbacks[type].filter(cb => cb !== callback) }
+}
+
+// Subscribe to project-specific WebSocket events
+function subscribeToProject(projectId: string) {
+  currentSubscribedProjectId = projectId
+  wsSend({ type: 'subscribe', projectId })
+}
+
+function unsubscribeFromProject() {
+  currentSubscribedProjectId = null
+  wsSend({ type: 'unsubscribe' })
 }
 
 connectWs()
@@ -93,12 +118,10 @@ function downloadFile(url: string, filename: string) {
   document.body.removeChild(a)
 }
 
-// ── API compatible avec l'ancienne interface ElectronAPI ──
+// ── API ──
 const api = {
-  // Upload (remplace dialog:openVideos — gere via <input> dans UploadZone)
   uploadFiles,
 
-  // Video streaming URL (remplace local-video://)
   getVideoUrl: (fileId: string) => `${API_BASE}/api/files/${fileId}`,
   getDataFileUrl: (relativePath: string) => `${API_BASE}/api/data-files/${relativePath}`,
 
@@ -135,6 +158,9 @@ const api = {
   renameProject: (id: string, name: string) => patch(`/api/project/${id}/rename`, { name }),
   deleteProject: (id: string) => del(`/api/project/${id}`),
   updateProjectStatus: (id: string, status: string) => patch(`/api/project/${id}/status`, { status }),
+  // Launch server-side background analysis
+  launchAnalysis: (projectId: string, config: any) =>
+    post(`/api/project/${projectId}/analyze`, { config }),
   exportProject: (data: any) => post<{ downloadUrl: string }>('/api/project/export', data),
   importProject: async (file: File) => {
     const formData = new FormData()
@@ -155,16 +181,21 @@ const api = {
   // Logs
   exportLogs: () => downloadFile('/api/logs/export', 'clipr-logs.log'),
 
-  // Events (WebSocket)
-  onProgress: (cb: (data: { progress: number; message: string }) => void) => onWsEvent('progress', cb),
+  // WebSocket events
+  onProgress: (cb: (data: any) => void) => onWsEvent('progress', cb),
   onTranscriptSegment: (cb: (segment: any) => void) => onWsEvent('transcript:segment', cb),
-  onModelProgress: (cb: (data: { type: string; progress: number; message: string }) => void) => onWsEvent('model:progress', cb),
+  onModelProgress: (cb: (data: any) => void) => onWsEvent('model:progress', cb),
+  onAnalysisComplete: (cb: (data: any) => void) => onWsEvent('analysis:complete', cb),
+  onAnalysisError: (cb: (data: any) => void) => onWsEvent('analysis:error', cb),
+
+  // WebSocket project subscription
+  subscribeToProject,
+  unsubscribeFromProject,
 
   // Documentation
   openDocumentation: () => { window.open('/docs/', '_blank') }
 }
 
-// Expose comme window.electron pour compatibilite avec le code existant
 ;(window as any).electron = api
 
 export default api

@@ -38,18 +38,50 @@ if (existsSync(distPath)) app.use(express.static(distPath))
 const docsPath = join(__dirname, '..', 'docs')
 if (existsSync(docsPath)) app.use('/docs', express.static(docsPath))
 
-// ── WebSocket ──
+// ── WebSocket (project-scoped channels) ──
 const wss = new WebSocketServer({ server, path: '/ws' })
-const clients = new Set<WebSocket>()
+
+interface WsClient {
+  ws: WebSocket
+  projectId: string | null
+}
+
+const clients = new Set<WsClient>()
 
 wss.on('connection', (ws) => {
-  clients.add(ws)
-  ws.on('close', () => clients.delete(ws))
+  const client: WsClient = { ws, projectId: null }
+  clients.add(client)
+
+  ws.on('message', (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString())
+      // Client subscribes to a project channel: { type: 'subscribe', projectId: '...' }
+      if (msg.type === 'subscribe' && msg.projectId) {
+        client.projectId = msg.projectId
+      }
+      if (msg.type === 'unsubscribe') {
+        client.projectId = null
+      }
+    } catch {}
+  })
+
+  ws.on('close', () => clients.delete(client))
 })
 
+// Broadcast to ALL clients (legacy / global events)
 function broadcast(type: string, data: any) {
   const msg = JSON.stringify({ type, ...data })
-  clients.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(msg) })
+  clients.forEach(c => { if (c.ws.readyState === WebSocket.OPEN) c.ws.send(msg) })
+}
+
+// Broadcast to clients subscribed to a specific project
+function broadcastToProject(projectId: string, type: string, data: any) {
+  const msg = JSON.stringify({ type, projectId, ...data })
+  clients.forEach(c => {
+    if (c.ws.readyState === WebSocket.OPEN && c.projectId === projectId) {
+      c.ws.send(msg)
+    }
+  })
 }
 
 // ── Upload (multer) ──
@@ -335,6 +367,154 @@ app.patch('/api/project/:id/status', (req, res) => {
     projectService.updateProjectStatus(req.params.id, req.body.status)
     res.json({ success: true })
   } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// ── Server-side AI Analysis (background processing) ──
+// Runs the full pipeline: extract audio → transcribe → analyze → save
+// Client can navigate away — results saved to DB server-side
+app.post('/api/project/:id/analyze', async (req, res) => {
+  const projectId = req.params.id
+  const project = projectService.getProject(projectId)
+  if (!project) return res.status(404).json({ error: 'Projet non trouve' })
+
+  const { config } = req.body
+  const data = project.data
+
+  if (!data.videoFiles || data.videoFiles.length === 0) {
+    return res.status(400).json({ error: 'Aucune video dans le projet' })
+  }
+
+  // Respond immediately — analysis runs in background
+  res.json({ success: true, message: 'Analyse lancee en arriere-plan' })
+
+  // Mark project as processing
+  projectService.updateProjectStatus(projectId, 'processing')
+
+  // Background pipeline
+  ;(async () => {
+    try {
+      const videoFiles = data.videoFiles
+      const whisperModel = config?.whisperModel || 'large-v3'
+      const whisperPrompt = config?.whisperPrompt || ''
+      const ollamaModel = config?.ollamaModel || 'mistral-small:22b'
+      const language = config?.language || 'fr'
+      const context = config?.context || ''
+
+      // 1. Extract audio
+      broadcastToProject(projectId, 'progress', { step: 'extracting-audio', progress: 0, message: 'Extraction des pistes audio...' })
+      const audioPaths: string[] = []
+
+      for (let i = 0; i < videoFiles.length; i++) {
+        const audioPath = await ffmpegService.extractAudio(videoFiles[i].path, (percent) => {
+          broadcastToProject(projectId, 'progress', {
+            step: 'extracting-audio',
+            progress: ((i + percent / 100) / videoFiles.length) * 100,
+            message: `Extraction audio ${i + 1}/${videoFiles.length}...`
+          })
+        })
+        audioPaths.push(audioPath)
+      }
+
+      // Auto-save audio paths
+      projectService.saveProject(projectId, { ...data, audioPaths, config })
+
+      // 2. Transcribe
+      broadcastToProject(projectId, 'progress', { step: 'transcribing', progress: 0, message: 'Transcription de la voix...' })
+
+      await whisperService.loadWhisperModel(whisperModel)
+      const allTranscriptSegments: any[] = []
+
+      for (let i = 0; i < audioPaths.length; i++) {
+        broadcastToProject(projectId, 'progress', {
+          step: 'transcribing',
+          progress: (i / audioPaths.length) * 100,
+          message: `Transcription video ${i + 1}/${audioPaths.length}...`
+        })
+
+        const segments = await whisperService.transcribe(
+          audioPaths[i], language,
+          (segment) => {
+            const offset = videoFiles[i]?.offset || 0
+            const adjusted = { ...segment, start: segment.start + offset, end: segment.end + offset }
+            broadcastToProject(projectId, 'transcript:segment', adjusted)
+          },
+          (percent) => {
+            broadcastToProject(projectId, 'progress', {
+              step: 'transcribing',
+              progress: ((i + percent / 100) / audioPaths.length) * 100,
+              message: `Transcription video ${i + 1}/${audioPaths.length}...`
+            })
+          },
+          whisperPrompt
+        )
+
+        const offset = videoFiles[i]?.offset || 0
+        const adjusted = segments.map((seg: any) => ({
+          ...seg, start: seg.start + offset, end: seg.end + offset
+        }))
+        allTranscriptSegments.push(...adjusted)
+      }
+
+      // Auto-save transcript
+      projectService.saveProject(projectId, { ...data, audioPaths, transcript: allTranscriptSegments, config })
+
+      // 3. Analyze with LLM
+      broadcastToProject(projectId, 'progress', { step: 'analyzing', progress: 0, message: 'Decoupe intelligente par l\'IA...' })
+
+      const fullText = allTranscriptSegments
+        .map((t: any) => `[${t.start.toFixed(1)}s] ${t.text}`)
+        .join('\n')
+
+      const result = await ollamaService.analyzeTranscript(fullText, context, ollamaModel, (ci, tc, _sf, msg) => {
+        broadcastToProject(projectId, 'progress', {
+          step: 'analyzing',
+          progress: (ci / tc) * 100,
+          message: msg || 'Analyse thematique...'
+        })
+      })
+
+      const finalSegments = (result?.segments || []).map((s: any) => ({
+        ...s,
+        id: Math.random().toString(36).substring(2, 11),
+        transcriptSegments: [],
+        color: ''
+      }))
+
+      // 4. Save final results to DB
+      const finalData = {
+        ...data,
+        audioPaths,
+        transcript: allTranscriptSegments,
+        segments: finalSegments,
+        config,
+        projectName: data.projectName || project.name
+      }
+
+      projectService.saveProject(projectId, finalData)
+      projectService.updateProjectStatus(projectId, 'done')
+
+      broadcastToProject(projectId, 'analysis:complete', {
+        step: 'done',
+        progress: 100,
+        message: 'Analyse terminee !',
+        segments: finalSegments,
+        transcript: allTranscriptSegments,
+        audioPaths
+      })
+
+      logger.info(`[Analysis] Project ${projectId} completed: ${finalSegments.length} segments`)
+
+    } catch (err: any) {
+      logger.error(`[Analysis] Project ${projectId} failed:`, err)
+      projectService.updateProjectStatus(projectId, 'draft')
+
+      broadcastToProject(projectId, 'analysis:error', {
+        step: 'error',
+        progress: 0,
+        message: `Echec: ${err.message}`
+      })
+    }
+  })()
 })
 
 // Project export (download JSON)
