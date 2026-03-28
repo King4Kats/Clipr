@@ -8,10 +8,12 @@
  */
 
 import { useState, useEffect } from "react";
-import { Brain, Sparkles, Settings2, MessageSquareText } from "lucide-react";
+import { Brain, Sparkles, Settings2, MessageSquareText, Lock } from "lucide-react";
 import { motion } from "framer-motion";
 import { useStore } from "@/store/useStore";
+import { useAuthStore } from "@/store/useAuthStore";
 import { Button } from "@/components/ui/button";
+import api from "@/api";
 import {
   Select,
   SelectTrigger,
@@ -31,12 +33,15 @@ const AIAnalysisPanel = () => {
     progressMessage,
   } = useStore();
 
-  // --- Etat local : disponibilité des modèles Ollama ---
+  const { user } = useAuthStore();
+
+  // --- Etat local ---
   const [modelsReady, setModelsReady] = useState<boolean | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [ollamaStatus, setOllamaStatus] = useState<string>("Vérification...");
+  const [aiLock, setAiLock] = useState<{ locked: boolean; lock: any }>({ locked: false, lock: null });
 
-  // --- Effet : vérifie la connexion Ollama et récupère les modèles au montage ---
+  // --- Effet : vérifie Ollama + statut AI lock ---
   useEffect(() => {
     const checkModels = async () => {
       try {
@@ -58,7 +63,18 @@ const AIAnalysisPanel = () => {
         setOllamaStatus("Erreur Ollama");
       }
     };
+    const checkAiLock = async () => {
+      try {
+        const status = await api.getAiStatus();
+        setAiLock(status);
+      } catch { /* ignore */ }
+    };
     checkModels();
+    checkAiLock();
+
+    // Poll AI lock status every 15s
+    const interval = setInterval(checkAiLock, 15000);
+    return () => clearInterval(interval);
   }, []);
 
   // Détermine si un traitement est en cours (empêche les interactions)
@@ -92,6 +108,16 @@ const AIAnalysisPanel = () => {
           {ollamaStatus}
         </div>
       </div>
+
+      {/* AI Lock banner */}
+      {aiLock.locked && aiLock.lock?.user_id !== user?.id && (
+        <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+          <Lock className="w-4 h-4 text-amber-500 shrink-0" />
+          <p className="text-[11px] text-amber-400 font-medium">
+            IA utilisée par <span className="font-bold">{aiLock.lock?.username}</span> sur "{aiLock.lock?.project_name}"
+          </p>
+        </div>
+      )}
 
       {/* --- Zone de configuration scrollable --- */}
       <div className="space-y-6 flex-1 overflow-y-auto pr-2 custom-scrollbar">
@@ -230,12 +256,21 @@ const AIAnalysisPanel = () => {
         ) : (
           <Button
             onClick={handleStart}
-            disabled={videoFiles.length === 0 || !modelsReady}
+            disabled={videoFiles.length === 0 || !modelsReady || (aiLock.locked && aiLock.lock?.user_id !== user?.id)}
             className="w-full h-11 bg-primary hover:bg-primary/90 text-primary-foreground font-bold uppercase tracking-wide rounded-lg"
           >
             <span className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4" />
-              Lancer l'analyse
+              {aiLock.locked && aiLock.lock?.user_id !== user?.id ? (
+                <>
+                  <Lock className="w-4 h-4" />
+                  IA indisponible
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  Lancer l'analyse
+                </>
+              )}
             </span>
           </Button>
         )}

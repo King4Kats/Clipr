@@ -50,6 +50,16 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+    CREATE TABLE IF NOT EXISTS ai_locks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (project_id) REFERENCES projects(id)
+    );
   `)
 
   // Migration: add user_id column if missing (for existing DBs)
