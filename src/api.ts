@@ -134,8 +134,14 @@ function downloadFile(url: string, filename: string) {
 const api = {
   uploadFiles,
 
-  getVideoUrl: (fileId: string) => `${API_BASE}/api/files/${fileId}`,
-  getDataFileUrl: (relativePath: string) => `${API_BASE}/api/data-files/${relativePath}`,
+  getVideoUrl: (fileId: string) => {
+    const token = localStorage.getItem(AUTH_STORAGE_KEY)
+    return `${API_BASE}/api/files/${fileId}${token ? `?token=${token}` : ''}`
+  },
+  getDataFileUrl: (relativePath: string) => {
+    const token = localStorage.getItem(AUTH_STORAGE_KEY)
+    return `${API_BASE}/api/data-files/${relativePath}${token ? `?token=${token}` : ''}`
+  },
 
   // FFmpeg
   getVideoDuration: (videoPath: string) => post<{ duration: number }>('/api/ffmpeg/duration', { videoPath }).then(r => r.duration),
