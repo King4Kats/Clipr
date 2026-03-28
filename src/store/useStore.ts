@@ -82,7 +82,7 @@ const DEFAULT_WHISPER_PROMPT = `Entretien sur le patrimoine culturel de Vendée 
 
 const defaultConfig: AppConfig = {
   whisperModel: 'large-v3',
-  ollamaModel: 'mixtral:8x7b',
+  ollamaModel: 'mistral-small:22b',
   language: 'fr',
   outputQuality: 23,
   outputFolder: null,
