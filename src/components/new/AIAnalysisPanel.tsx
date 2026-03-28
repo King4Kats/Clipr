@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Brain, Sparkles, Settings2, MessageSquareText, Lock } from "lucide-react";
+import { Brain, Sparkles, Settings2, MessageSquareText, Lock, HelpCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { useStore } from "@/store/useStore";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -21,6 +21,15 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/ui/select";
+
+const InfoTip = ({ text }: { text: string }) => (
+  <span className="relative group/tip inline-flex">
+    <HelpCircle className="w-3 h-3 text-muted-foreground/50 cursor-help" />
+    <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-popover border border-border rounded-lg text-[10px] text-foreground leading-relaxed w-56 shadow-lg opacity-0 pointer-events-none group-hover/tip:opacity-100 group-hover/tip:pointer-events-auto transition-opacity z-50">
+      {text}
+    </span>
+  </span>
+);
 
 const AIAnalysisPanel = () => {
   // --- Etat global depuis le store (vidéos, config, progression) ---
@@ -130,7 +139,7 @@ const AIAnalysisPanel = () => {
           <div className="flex flex-col gap-3">
             {/* Modele LLM */}
             <div className="bg-secondary/30 p-3 rounded-lg border border-border">
-              <span className="text-[9px] font-bold text-muted-foreground uppercase block mb-1.5">Modèle LLM</span>
+              <span className="text-[9px] font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5">Modèle LLM <InfoTip text="L'IA qui analyse la transcription et cree les chapitres thematiques. Plus le modele est gros, meilleure est l'analyse mais plus c'est lent." /></span>
               <Select
                 value={config.ollamaModel}
                 onValueChange={(v) => updateConfig({ ollamaModel: v })}
@@ -157,7 +166,7 @@ const AIAnalysisPanel = () => {
             <div className="grid grid-cols-2 gap-3">
               {/* Langue */}
               <div className="bg-secondary/30 p-3 rounded-lg border border-border">
-                <span className="text-[9px] font-bold text-muted-foreground uppercase block mb-1.5">Langue</span>
+                <span className="text-[9px] font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5">Langue <InfoTip text="La langue principale parlee dans la video. Aide Whisper a mieux reconnaitre les mots." /></span>
                 <Select
                   value={config.language}
                   onValueChange={(v) => updateConfig({ language: v })}
@@ -175,7 +184,7 @@ const AIAnalysisPanel = () => {
 
               {/* Whisper */}
               <div className="bg-secondary/30 p-3 rounded-lg border border-border">
-                <span className="text-[9px] font-bold text-muted-foreground uppercase block mb-1.5">Whisper</span>
+                <span className="text-[9px] font-bold text-muted-foreground uppercase mb-1.5 flex items-center gap-1.5">Whisper <InfoTip text="Le modele de reconnaissance vocale. Large V3 = meilleure qualite (accents, patois). Large V3 Turbo = plus rapide mais legerement moins precis." /></span>
                 <Select
                   value={config.whisperModel}
                   onValueChange={(v) => updateConfig({ whisperModel: v as any })}
@@ -200,7 +209,7 @@ const AIAnalysisPanel = () => {
         {/* Zone de texte : consignes de découpage personnalisées */}
         <div className="space-y-3">
           <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-            <Settings2 className="w-3.5 h-3.5" /> Consignes de découpage
+            <Settings2 className="w-3.5 h-3.5" /> Consignes de découpage <InfoTip text="Dites a l'IA comment decouper votre video. Ex: 'Fais un chapitre par theme aborde', 'Ignore les silences', 'Concentre-toi sur les anecdotes'..." />
           </label>
           <textarea
             value={config.context}
@@ -213,7 +222,7 @@ const AIAnalysisPanel = () => {
         {/* Zone de texte : vocabulaire de domaine pour Whisper */}
         <div className="space-y-3">
           <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-            <MessageSquareText className="w-3.5 h-3.5" /> Vocabulaire Whisper
+            <MessageSquareText className="w-3.5 h-3.5" /> Vocabulaire Whisper <InfoTip text="Ajoutez ici les mots rares que Whisper pourrait mal reconnaitre : noms propres, noms de lieux, patois, termes techniques, mots en langue regionale... Cela ameliore beaucoup la precision de la transcription." />
           </label>
           <textarea
             value={config.whisperPrompt}
