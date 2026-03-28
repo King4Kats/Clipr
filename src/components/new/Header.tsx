@@ -7,7 +7,7 @@
  */
 
 import { useState } from "react";
-import { Settings, Save, RotateCcw, Sun, Moon, BookOpen, Pencil, Check, X, Home, LogOut, User } from "lucide-react";
+import { Settings, Save, RotateCcw, Sun, Moon, BookOpen, Pencil, Check, X, Home, LogOut, User, Shield } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useTheme } from "next-themes";
@@ -16,9 +16,10 @@ import logo from "@/assets/Clipr.svg";
 
 interface HeaderProps {
   onOpenSetup?: () => void;
+  onOpenAdmin?: () => void;
 }
 
-const Header = ({ onOpenSetup }: HeaderProps) => {
+const Header = ({ onOpenSetup, onOpenAdmin }: HeaderProps) => {
   const { videoFiles, processingStep, reset, saveProject, activeProjectId, activeProjectName, renameProject } = useStore();
   const { user, logout } = useAuthStore();
   const { theme, setTheme } = useTheme();
@@ -168,6 +169,19 @@ const Header = ({ onOpenSetup }: HeaderProps) => {
           >
             <Settings className="w-4 h-4 text-muted-foreground" />
           </Button>
+
+          {/* Admin button */}
+          {user?.role === 'admin' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onOpenAdmin}
+              className="w-8 h-8 p-0 rounded-lg hover:bg-primary/10 transition-colors"
+              title="Administration"
+            >
+              <Shield className="w-4 h-4 text-primary" />
+            </Button>
+          )}
 
           {/* User info & logout */}
           <div className="flex items-center gap-1.5 border-l border-border pl-3 ml-1">

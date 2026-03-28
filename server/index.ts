@@ -132,6 +132,43 @@ app.get('/api/admin/projects', requireAuth, requireAdmin, (_req, res) => {
   res.json(projectService.getAllProjects())
 })
 
+// Admin: system health (disk, services, AI lock)
+app.get('/api/admin/system', requireAuth, requireAdmin, async (_req, res) => {
+  const ollamaOk = await ollamaService.checkOllama()
+  const ffmpegOk = await ffmpegService.checkFFmpeg()
+  const lock = aiLockService.getActiveLock()
+
+  let diskInfo = { total: 0, used: 0, free: 0 }
+  try {
+    const df = execSync(`df -B1 ${DATA_DIR} | tail -1`).toString().trim().split(/\s+/)
+    diskInfo = { total: parseInt(df[1]) || 0, used: parseInt(df[2]) || 0, free: parseInt(df[3]) || 0 }
+  } catch { /* ignore */ }
+
+  const db = require('./services/database.js').getDb()
+  const projectCount = (db.prepare('SELECT COUNT(*) as cnt FROM projects WHERE deleted_at IS NULL').get() as any).cnt
+  const userCount = (db.prepare('SELECT COUNT(*) as cnt FROM users').get() as any).cnt
+
+  res.json({
+    services: { ollama: ollamaOk, ffmpeg: ffmpegOk },
+    aiLock: lock,
+    disk: diskInfo,
+    counts: { projects: projectCount, users: userCount }
+  })
+})
+
+// Admin: recent logs (last N lines)
+app.get('/api/admin/logs', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const lines = parseInt(req.query.lines as string) || 100
+    const content = readFileSync(logger.logFile, 'utf-8')
+    const allLines = content.split('\n').filter(l => l.trim())
+    const recent = allLines.slice(-lines)
+    res.json({ lines: recent, total: allLines.length })
+  } catch {
+    res.json({ lines: [], total: 0 })
+  }
+})
+
 // AI Lock status — any authenticated user can check
 app.get('/api/ai/status', requireAuth, (_req, res) => {
   const lock = aiLockService.getActiveLock()
