@@ -124,6 +124,31 @@
     .flow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; }
     .flow-item { background:var(--card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 14px; font-size:0.82rem; font-weight:500; }
     .flow-arrow { color:var(--primary); font-weight:700; font-size:1.1rem; }
+
+    /* SCREENSHOTS / UI MOCKUPS */
+    .screenshot { margin:16px 0; border-radius:var(--radius); overflow:hidden; border:1px solid var(--border); box-shadow:var(--shadow); }
+    .screenshot img { width:100%; display:block; }
+    .screenshot-caption { padding:8px 14px; background:var(--bg-secondary); font-size:0.78rem; color:var(--text-muted); font-style:italic; }
+    .ui-mockup { margin:16px 0; border-radius:var(--radius); border:1px solid var(--border); background:var(--code-bg); overflow:hidden; box-shadow:var(--shadow); }
+    .ui-mockup-bar { display:flex; align-items:center; gap:8px; padding:8px 14px; background:rgba(255,255,255,0.05); border-bottom:1px solid rgba(255,255,255,0.08); }
+    .ui-mockup-dot { width:8px; height:8px; border-radius:50%; }
+    .ui-mockup-dot.r { background:#ff5f57; } .ui-mockup-dot.y { background:#febc2e; } .ui-mockup-dot.g { background:#28c840; }
+    .ui-mockup-url { font-size:0.7rem; color:rgba(255,255,255,0.4); font-family:var(--mono); margin-left:8px; }
+    .ui-mockup-body { padding:20px; color:#B8C5D0; font-size:0.82rem; line-height:1.8; }
+    .ui-mockup-body .ui-el { display:inline-block; padding:3px 10px; border-radius:6px; font-size:0.75rem; font-weight:600; margin:2px 4px; }
+    .ui-el-btn { background:rgba(32,178,217,0.25); color:#3DC4E8; border:1px solid rgba(32,178,217,0.3); }
+    .ui-el-input { background:rgba(255,255,255,0.06); color:#7B9BAD; border:1px solid rgba(255,255,255,0.1); min-width:120px; }
+    .ui-el-card { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 14px; margin:6px 0; display:block; }
+    .ui-el-badge { display:inline-block; padding:1px 7px; border-radius:10px; font-size:0.68rem; font-weight:700; }
+    .ui-el-badge.ia { background:rgba(168,85,247,0.2); color:#A855F7; }
+    .ui-el-badge.manual { background:rgba(32,178,217,0.2); color:#20B2D9; }
+    .ui-el-badge.draft { background:rgba(230,150,0,0.2); color:#E69600; }
+    .ui-el-badge.done { background:rgba(34,197,94,0.2); color:#22C55E; }
+    .ui-el-badge.admin { background:rgba(230,57,70,0.2); color:#E63946; }
+    .ui-mockup-label { font-size:0.7rem; color:rgba(255,255,255,0.3); text-transform:uppercase; letter-spacing:1px; margin:12px 0 4px; }
+    .ui-mockup-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:4px 0; }
+    .ui-mockup-divider { border:none; border-top:1px dashed rgba(255,255,255,0.08); margin:12px 0; }
+    .ui-anno { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:var(--primary); color:#fff; font-size:0.65rem; font-weight:800; margin-right:4px; flex-shrink:0; }
   </style>
 </head>
 <body>
@@ -216,8 +241,10 @@
   <h2 class="section-title">Creer son compte</h2>
   <div class="card">
     <p>A la premiere ouverture de Clipr, vous arrivez sur un ecran de connexion.</p>
+    <div class="screenshot"><img src="screenshots/01-login.jpg" alt="Ecran de connexion Clipr"><div class="screenshot-caption">Ecran de connexion avec nom d'utilisateur et mot de passe</div></div>
     <p><span class="step-num">1</span> Cliquez sur <strong>S'inscrire</strong></p>
     <p><span class="step-num">2</span> Choisissez un <strong>nom d'utilisateur</strong>, votre <strong>email</strong> et un <strong>mot de passe</strong></p>
+    <div class="screenshot"><img src="screenshots/02-register.jpg" alt="Ecran d'inscription Clipr"><div class="screenshot-caption">Formulaire d'inscription — le premier inscrit devient admin</div></div>
     <p><span class="step-num">3</span> C'est fait ! Vous etes connecte.</p>
     <div class="tip">Le tout premier compte cree devient automatiquement <strong>administrateur</strong>. Les suivants sont des comptes utilisateurs classiques.</div>
   </div>
@@ -228,11 +255,14 @@
   <div class="card">
     <h3>La page d'accueil</h3>
     <p>C'est votre tableau de bord. Vous y retrouvez tous vos projets (jusqu'a 6), et les projets que d'autres utilisateurs ont partage avec vous.</p>
+    <div class="screenshot"><img src="screenshots/03-home.jpg" alt="Page d'accueil Clipr"><div class="screenshot-caption">Page d'accueil avec vos projets, le bouton + Nouveau Projet et la zone d'upload</div></div>
     <p>Chaque carte de projet affiche :</p>
     <ul>
-      <li>Le <strong>nom</strong> du projet</li>
-      <li>Son <strong>type</strong> : <span class="badge badge-purple">IA</span> ou <span class="badge badge-blue">Manuel</span></li>
-      <li>Son <strong>statut</strong> : <span class="badge badge-amber">Brouillon</span>, <span class="badge badge-amber">En cours</span> ou <span class="badge badge-green">Termine</span></li>
+      <li><span class="step-num">1</span> Le <strong>nom</strong> du projet</li>
+      <li><span class="step-num">2</span> Son <strong>type</strong> : <span class="badge badge-purple">IA</span> ou <span class="badge badge-blue">Manuel</span></li>
+      <li><span class="step-num">3</span> Son <strong>statut</strong> : <span class="badge badge-amber">Brouillon</span>, <span class="badge badge-amber">En cours</span> ou <span class="badge badge-green">Termine</span></li>
+      <li><span class="step-num">4</span> Le compteur de projets (<strong>X/6</strong>) et le bouton <strong>+ Nouveau</strong> en haut a droite</li>
+      <li><span class="step-num">5</span> La <strong>zone d'upload</strong> en bas pour deposer directement une video</li>
     </ul>
   </div>
   <div class="card">
@@ -245,6 +275,7 @@
   </div>
   <div class="card">
     <h3>Actions rapides</h3>
+    <div class="screenshot"><img src="screenshots/04-home-hover.jpg" alt="Actions au survol"><div class="screenshot-caption">Survolez un projet pour voir les actions rapides</div></div>
     <p>Survolez une carte de projet pour voir les icones d'action :</p>
     <table>
       <tr><td>&#9998;</td><td><strong>Renommer</strong> le projet</td></tr>
@@ -261,12 +292,14 @@
     <h3>Comment ca marche ?</h3>
     <p>L'IA va ecouter votre video, transcrire tout ce qui est dit, puis decouper automatiquement le contenu en chapitres thematiques avec des titres.</p>
     <p><span class="step-num">1</span> <strong>Importez</strong> une ou plusieurs videos dans votre projet</p>
+    <div class="screenshot"><img src="screenshots/05-choix-mode.jpg" alt="Choix du mode"><div class="screenshot-caption">Choisissez entre l'analyse IA automatique ou la decoupe manuelle</div></div>
     <p><span class="step-num">2</span> Choisissez le mode <strong>Analyse IA</strong></p>
     <p><span class="step-num">3</span> Dans le panneau a droite, vous pouvez ajuster :</p>
     <ul>
       <li><strong>Consignes de decoupe</strong> — Decrivez ce que vous attendez. Par exemple : <em>"Concentre-toi sur les anecdotes personnelles"</em> ou <em>"Cree un chapitre par theme aborde"</em></li>
       <li><strong>Vocabulaire</strong> — Si votre video contient des mots rares, du patois, des noms de lieux... ajoutez-les ici pour que la transcription soit plus fidele</li>
     </ul>
+    <div class="screenshot"><img src="screenshots/06-panneau-ia.jpg" alt="Panneau IA"><div class="screenshot-caption">Le panneau IA avec les options de modele, langue, consignes et vocabulaire</div></div>
     <p><span class="step-num">4</span> Cliquez <strong>Lancer l'analyse</strong></p>
     <div class="tip"><strong>Pas besoin de rester sur la page !</strong> L'analyse tourne en arriere-plan. Vous pouvez revenir a l'accueil, travailler sur un autre projet, ou meme fermer votre navigateur. Vos resultats seront la quand vous reviendrez.</div>
   </div>
@@ -375,6 +408,7 @@
   <h2 class="section-title">Espace administrateur</h2>
   <div class="card">
     <p>Si vous etes administrateur (le premier compte cree), vous avez acces a un espace de supervision via l'icone <strong>bouclier</strong> dans la barre du haut.</p>
+    <div class="screenshot"><img src="screenshots/09-admin-overview.jpg" alt="Dashboard admin"><div class="screenshot-caption">Le tableau de bord administrateur avec les statistiques et l'etat des services</div></div>
     <h3>Ce que vous pouvez voir</h3>
     <ul>
       <li><strong>Vue d'ensemble</strong> — Nombre d'utilisateurs, de projets, etat des services et de l'IA</li>
