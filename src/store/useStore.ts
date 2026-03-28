@@ -97,7 +97,7 @@ const defaultConfig: AppConfig = {
   outputQuality: 23,
   outputFolder: null,
   context: '',
-  whisperPrompt: DEFAULT_WHISPER_PROMPT
+  whisperPrompt: ''
 }
 
 const SEGMENT_COLORS = [
