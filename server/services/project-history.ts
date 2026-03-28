@@ -2,7 +2,7 @@ import { getDb } from './database.js'
 import { logger } from '../logger.js'
 import { randomUUID } from 'crypto'
 
-const MAX_PROJECTS = 6
+const MAX_PROJECTS_PER_USER = 6
 
 export interface ProjectData {
   videoFiles: any[]
@@ -16,6 +16,7 @@ export interface ProjectData {
 
 export interface ProjectRecord {
   id: string
+  user_id: string | null
   name: string
   type: 'manual' | 'ai'
   status: 'draft' | 'processing' | 'done'
@@ -24,14 +25,41 @@ export interface ProjectRecord {
   updated_at: string
 }
 
-// ── List active projects (not deleted), max 6, newest first ──
-export function getProjectHistory(): ProjectRecord[] {
+// ── List active projects for a user, max 6, newest first ──
+export function getProjectHistory(userId?: string): ProjectRecord[] {
+  const db = getDb()
+  let rows: any[]
+
+  if (userId) {
+    rows = db.prepare(
+      `SELECT id, user_id, name, type, status, data, created_at, updated_at
+       FROM projects WHERE deleted_at IS NULL AND user_id = ?
+       ORDER BY updated_at DESC LIMIT ?`
+    ).all(userId, MAX_PROJECTS_PER_USER)
+  } else {
+    rows = db.prepare(
+      `SELECT id, user_id, name, type, status, data, created_at, updated_at
+       FROM projects WHERE deleted_at IS NULL AND user_id IS NULL
+       ORDER BY updated_at DESC LIMIT ?`
+    ).all(MAX_PROJECTS_PER_USER)
+  }
+
+  return rows.map(row => ({
+    ...row,
+    data: JSON.parse(row.data)
+  }))
+}
+
+// ── List ALL projects (admin) ──
+export function getAllProjects(): ProjectRecord[] {
   const db = getDb()
   const rows = db.prepare(
-    `SELECT id, name, type, status, data, created_at, updated_at
-     FROM projects WHERE deleted_at IS NULL
-     ORDER BY updated_at DESC LIMIT ?`
-  ).all(MAX_PROJECTS) as any[]
+    `SELECT p.id, p.user_id, p.name, p.type, p.status, p.data, p.created_at, p.updated_at,
+            u.username as owner_username
+     FROM projects p LEFT JOIN users u ON p.user_id = u.id
+     WHERE p.deleted_at IS NULL
+     ORDER BY p.updated_at DESC`
+  ).all() as any[]
 
   return rows.map(row => ({
     ...row,
@@ -40,27 +68,44 @@ export function getProjectHistory(): ProjectRecord[] {
 }
 
 // ── Get single project by id ──
-export function getProject(id: string): ProjectRecord | null {
+export function getProject(id: string, userId?: string): ProjectRecord | null {
   const db = getDb()
-  const row = db.prepare(
-    `SELECT id, name, type, status, data, created_at, updated_at
-     FROM projects WHERE id = ? AND deleted_at IS NULL`
-  ).get(id) as any
+  let row: any
+
+  if (userId) {
+    row = db.prepare(
+      `SELECT id, user_id, name, type, status, data, created_at, updated_at
+       FROM projects WHERE id = ? AND user_id = ? AND deleted_at IS NULL`
+    ).get(id, userId)
+  } else {
+    row = db.prepare(
+      `SELECT id, user_id, name, type, status, data, created_at, updated_at
+       FROM projects WHERE id = ? AND deleted_at IS NULL`
+    ).get(id)
+  }
+
   if (!row) return null
   return { ...row, data: JSON.parse(row.data) }
 }
 
 // ── Create a new project ──
-export function createProject(name: string, type: 'manual' | 'ai' = 'manual'): ProjectRecord {
+export function createProject(name: string, type: 'manual' | 'ai' = 'manual', userId?: string): ProjectRecord {
   const db = getDb()
 
-  // Check active project count
-  const count = (db.prepare(
-    `SELECT COUNT(*) as cnt FROM projects WHERE deleted_at IS NULL`
-  ).get() as any).cnt
+  // Check active project count for user
+  let count: number
+  if (userId) {
+    count = (db.prepare(
+      `SELECT COUNT(*) as cnt FROM projects WHERE deleted_at IS NULL AND user_id = ?`
+    ).get(userId) as any).cnt
+  } else {
+    count = (db.prepare(
+      `SELECT COUNT(*) as cnt FROM projects WHERE deleted_at IS NULL AND user_id IS NULL`
+    ).get() as any).cnt
+  }
 
-  if (count >= MAX_PROJECTS) {
-    throw new Error(`Limite de ${MAX_PROJECTS} projets atteinte. Supprimez un projet avant d'en créer un nouveau.`)
+  if (count >= MAX_PROJECTS_PER_USER) {
+    throw new Error(`Limite de ${MAX_PROJECTS_PER_USER} projets atteinte. Supprimez un projet avant d'en créer un nouveau.`)
   }
 
   const id = randomUUID()
@@ -76,12 +121,12 @@ export function createProject(name: string, type: 'manual' | 'ai' = 'manual'): P
   }
 
   db.prepare(
-    `INSERT INTO projects (id, name, type, status, data, created_at, updated_at)
-     VALUES (?, ?, ?, 'draft', ?, ?, ?)`
-  ).run(id, name, type, JSON.stringify(emptyData), now, now)
+    `INSERT INTO projects (id, user_id, name, type, status, data, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)`
+  ).run(id, userId || null, name, type, JSON.stringify(emptyData), now, now)
 
-  logger.info(`Project created: ${id} "${name}" (${type})`)
-  return { id, name, type, status: 'draft', data: emptyData, created_at: now, updated_at: now }
+  logger.info(`Project created: ${id} "${name}" (${type}) for user ${userId || 'anonymous'}`)
+  return { id, user_id: userId || null, name, type, status: 'draft', data: emptyData, created_at: now, updated_at: now }
 }
 
 // ── Save/update project data ──
@@ -97,7 +142,7 @@ export function saveProject(id: string, data: ProjectData): void {
   ).run(JSON.stringify(data), now, JSON.stringify(data), id)
 }
 
-// ── Auto-save (same as save but also called during processing) ──
+// ── Auto-save ──
 export function autoSaveProject(id: string, data: ProjectData): void {
   saveProject(id, data)
 }
@@ -131,26 +176,29 @@ export function updateProjectStatus(id: string, status: 'draft' | 'processing' |
   ).run(status, now, id)
 }
 
-// ── Legacy compat: save without project id (creates new project) ──
-export function saveLegacyProject(data: ProjectData): string {
+// ── Legacy compat: save without project id ──
+export function saveLegacyProject(data: ProjectData, userId?: string): string {
   const name = data.projectName || 'Projet Sans Nom'
   const type = data.segments && data.segments.length > 0 ? 'ai' : 'manual'
 
   try {
-    const project = createProject(name, type as 'manual' | 'ai')
+    const project = createProject(name, type as 'manual' | 'ai', userId)
     saveProject(project.id, data)
     return project.id
   } catch {
-    // If at limit, overwrite the oldest
     const db = getDb()
+    const condition = userId
+      ? { sql: 'deleted_at IS NULL AND user_id = ?', params: [userId] }
+      : { sql: 'deleted_at IS NULL AND user_id IS NULL', params: [] }
+
     const oldest = db.prepare(
-      `SELECT id FROM projects WHERE deleted_at IS NULL ORDER BY updated_at ASC LIMIT 1`
-    ).get() as any
+      `SELECT id FROM projects WHERE ${condition.sql} ORDER BY updated_at ASC LIMIT 1`
+    ).get(...condition.params) as any
+
     if (oldest) {
       const now = new Date().toISOString()
       db.prepare(
-        `UPDATE projects SET name = ?, type = ?, data = ?, updated_at = ?
-         WHERE id = ?`
+        `UPDATE projects SET name = ?, type = ?, data = ?, updated_at = ? WHERE id = ?`
       ).run(name, type, JSON.stringify(data), now, oldest.id)
       return oldest.id
     }
@@ -158,7 +206,7 @@ export function saveLegacyProject(data: ProjectData): string {
   }
 }
 
-// ── Load project (legacy compat) ──
+// ── Load project ──
 export function loadProject(id: string): ProjectData | null {
   const record = getProject(id)
   return record ? record.data : null
