@@ -16,6 +16,10 @@ RUN npm run build:client && npm run build:server
 FROM node:20-slim AS runtime
 WORKDIR /app
 
+# Force UTF-8 locale
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
 # Installer les dependances systeme
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
