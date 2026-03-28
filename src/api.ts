@@ -23,6 +23,9 @@ function connectWs() {
   ws = new WebSocket(`${protocol}//${window.location.host}/ws`)
 
   ws.onopen = () => {
+    // Authenticate WebSocket connection
+    const token = localStorage.getItem(AUTH_STORAGE_KEY)
+    if (token) wsSend({ type: 'auth', token })
     // Re-subscribe to project channel after reconnect
     if (currentSubscribedProjectId) {
       wsSend({ type: 'subscribe', projectId: currentSubscribedProjectId })
@@ -62,6 +65,9 @@ function onWsEvent(type: string, callback: WsCallback): () => void {
 // Subscribe to project-specific WebSocket events
 function subscribeToProject(projectId: string) {
   currentSubscribedProjectId = projectId
+  // Ensure auth before subscribing
+  const token = localStorage.getItem(AUTH_STORAGE_KEY)
+  if (token) wsSend({ type: 'auth', token })
   wsSend({ type: 'subscribe', projectId })
 }
 
