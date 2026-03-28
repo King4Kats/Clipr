@@ -296,6 +296,12 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       // Créer un projet en base si pas encore fait
       if (!state.activeProjectId) {
+        // Sauvegarder l'état avant createProject (qui reset le store)
+        const savedVideoFiles = [...state.videoFiles]
+        const savedAudioPaths = [...state.audioPaths]
+        const savedAudioPath = state.audioPath
+        const savedConfig = { ...state.config }
+
         const projectName = state.activeProjectName || state.videoFiles[0]?.name || 'Projet Sans Nom'
         // Sauvegarder l'état actuel avant createProject (qui reset le store)
         const savedVideoFiles = [...state.videoFiles]

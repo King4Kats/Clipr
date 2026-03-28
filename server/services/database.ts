@@ -15,6 +15,7 @@ export function getDb(): Database.Database {
     db = new Database(DB_PATH)
     db.pragma('journal_mode = WAL')
     db.pragma('foreign_keys = ON')
+    db.pragma('encoding = "UTF-8"')
     initSchema()
     logger.info(`SQLite database initialized at ${DB_PATH}`)
   }
