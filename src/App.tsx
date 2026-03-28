@@ -20,12 +20,13 @@ import VideoPreview from "@/components/new/VideoPreview";
 import EditorLayout from "@/components/new/EditorLayout";
 import SetupWizard from "@/components/SetupWizard";
 import AuthScreen from "@/components/AuthScreen";
+import AdminDashboard from "@/components/AdminDashboard";
 
 import { motion, AnimatePresence } from "framer-motion";
 import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check } from "lucide-react";
 
 function App() {
-  const { isAuthenticated, isLoading: authLoading, checkAuth } = useAuthStore();
+  const { isAuthenticated, isLoading: authLoading, checkAuth, user } = useAuthStore();
 
   const {
     videoFiles,
@@ -46,6 +47,7 @@ function App() {
 
   const [showSetup, setShowSetup] = useState(false);
   const [setupChecked, setSetupChecked] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
 
@@ -365,11 +367,15 @@ function App() {
         {showSetup && <SetupWizard onComplete={handleSetupComplete} />}
       </AnimatePresence>
 
-      <Header onOpenSetup={() => setShowSetup(true)} />
+      <Header onOpenSetup={() => setShowSetup(true)} onOpenAdmin={() => setShowAdmin(true)} />
 
-      <main className={segments.length > 0 ? "" : "max-w-7xl mx-auto px-6 py-8"}>
-        {renderContent()}
-      </main>
+      {showAdmin && user?.role === 'admin' ? (
+        <AdminDashboard onBack={() => setShowAdmin(false)} />
+      ) : (
+        <main className={segments.length > 0 ? "" : "max-w-7xl mx-auto px-6 py-8"}>
+          {renderContent()}
+        </main>
+      )}
     </div>
   );
 }
