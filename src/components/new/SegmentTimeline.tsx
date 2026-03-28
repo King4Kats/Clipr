@@ -490,16 +490,51 @@ const SegmentTimeline = () => {
           );
         })}
 
-        {/* Playhead Line */}
+        {/* Playhead Line (draggable) */}
         {(() => {
           const left = timeToPercent(currentTime);
           if (left < 0 || left > 100) return null;
+
+          const handlePlayheadDrag = (e: React.MouseEvent) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const container = containerRef.current;
+            if (!container) return;
+
+            const onMove = (ev: MouseEvent) => {
+              const time = pixelToTime(ev.clientX);
+              const clampedTime = Math.max(0, Math.min(time, totalDuration));
+              const video = document.querySelector("video") as HTMLVideoElement;
+              if (video) {
+                const state = useStore.getState();
+                const videoInfo = state.getVideoAtTime(clampedTime);
+                if (videoInfo) video.currentTime = videoInfo.localTime;
+              }
+            };
+
+            const onUp = () => {
+              document.removeEventListener("mousemove", onMove);
+              document.removeEventListener("mouseup", onUp);
+              document.body.style.cursor = "";
+              document.body.style.userSelect = "";
+            };
+
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none";
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+          };
+
           return (
             <div
-              className="absolute top-0 bottom-0 z-30 pointer-events-none"
-              style={{ left: `${left}%` }}
+              className="absolute top-0 bottom-0 z-40 cursor-col-resize"
+              style={{ left: `${left}%`, transform: 'translateX(-50%)', width: '12px' }}
+              onMouseDown={handlePlayheadDrag}
             >
-              <div className="w-0.5 h-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.6)]" />
+              {/* Tête du playhead */}
+              <div className="w-3 h-3 bg-white rounded-full shadow-lg mx-auto -mt-1" />
+              {/* Ligne */}
+              <div className="w-0.5 mx-auto bg-white shadow-[0_0_8px_rgba(255,255,255,0.6)]" style={{ height: 'calc(100% - 8px)' }} />
             </div>
           );
         })()}
