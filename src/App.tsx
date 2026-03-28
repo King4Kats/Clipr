@@ -369,7 +369,7 @@ function App() {
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-8 text-center">
             <h2 className="text-2xl font-bold text-foreground">Comment souhaitez-vous travailler ?</h2>
             <p className="text-sm text-muted-foreground mt-2">
-              {videoFiles.length} vidéo{videoFiles.length > 1 ? 's' : ''} importée{videoFiles.length > 1 ? 's' : ''} — {Math.round(useStore.getState().getTotalDuration())}s
+              {videoFiles.length} vidéo{videoFiles.length > 1 ? 's' : ''} importée{videoFiles.length > 1 ? 's' : ''} — {(() => { const t = Math.round(useStore.getState().getTotalDuration()); const h = Math.floor(t/3600); const m = Math.floor((t%3600)/60); const s = t%60; return h > 0 ? `${h}h${String(m).padStart(2,'0')}m${String(s).padStart(2,'0')}s` : m > 0 ? `${m}m${String(s).padStart(2,'0')}s` : `${s}s`; })()}
             </p>
           </motion.div>
 

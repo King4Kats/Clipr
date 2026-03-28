@@ -22,14 +22,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const InfoTip = ({ text }: { text: string }) => (
-  <span className="relative group/tip inline-flex">
-    <HelpCircle className="w-3 h-3 text-muted-foreground/50 cursor-help" />
-    <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-popover border border-border rounded-lg text-[10px] text-foreground leading-relaxed w-56 shadow-lg opacity-0 pointer-events-none group-hover/tip:opacity-100 group-hover/tip:pointer-events-auto transition-opacity z-50">
-      {text}
+const InfoTip = ({ text }: { text: string }) => {
+  const [show, setShow] = useState(false);
+  return (
+    <span className="relative inline-flex" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+      <HelpCircle className="w-3.5 h-3.5 text-muted-foreground/60 cursor-help hover:text-primary transition-colors" />
+      {show && (
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-popover border border-border rounded-lg text-[11px] text-foreground leading-relaxed w-60 shadow-xl z-50">
+          {text}
+        </span>
+      )}
     </span>
-  </span>
-);
+  );
+};
 
 const AIAnalysisPanel = () => {
   // --- Etat global depuis le store (vidéos, config, progression) ---
