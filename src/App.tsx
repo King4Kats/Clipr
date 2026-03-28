@@ -29,6 +29,9 @@ function App() {
     segments,
     addTranscriptSegment,
     setProcessing,
+    setSegments,
+    setTranscript,
+    setAudioPaths,
     history,
     loadHistory,
     loadFromHistory,
@@ -50,6 +53,12 @@ function App() {
       await loadHistory();
     };
     checkFirstRun();
+
+    // Poll history every 10s to update processing status on home page
+    const interval = setInterval(() => {
+      if (!useStore.getState().activeProjectId) loadHistory();
+    }, 10000);
+    return () => clearInterval(interval);
   }, [loadHistory]);
 
   const handleSetupComplete = () => {
@@ -57,21 +66,43 @@ function App() {
     setShowSetup(false);
   };
 
+  // Écoute les événements WebSocket du serveur (project-scoped)
   useEffect(() => {
     if (!(window as any).electron) return;
-    const unsubProgress = (window as any).electron.onProgress(({ progress, message }: any) => {
-      setProcessing(processingStep, progress, message);
+
+    // Progress updates (extraction, transcription, analysis)
+    const unsubProgress = (window as any).electron.onProgress((data: any) => {
+      const step = data.step || processingStep;
+      setProcessing(step, data.progress, data.message);
     });
 
+    // Transcript segments streamed in real-time
     const unsubSegment = (window as any).electron.onTranscriptSegment((segment: any) => {
       addTranscriptSegment(segment as any);
+    });
+
+    // Analysis completed server-side — load results
+    const unsubComplete = (window as any).electron.onAnalysisComplete((data: any) => {
+      if (data.segments) setSegments(data.segments);
+      if (data.transcript) setTranscript(data.transcript);
+      if (data.audioPaths) setAudioPaths(data.audioPaths);
+      setProcessing('done', 100, 'Analyse terminée !');
+      loadHistory();
+    });
+
+    // Analysis failed server-side
+    const unsubError = (window as any).electron.onAnalysisError((data: any) => {
+      setProcessing('error', 0, data.message || 'Erreur d\'analyse');
+      loadHistory();
     });
 
     return () => {
       unsubProgress();
       unsubSegment();
+      unsubComplete();
+      unsubError();
     };
-  }, [processingStep, setProcessing, addTranscriptSegment]);
+  }, [processingStep, setProcessing, addTranscriptSegment, setSegments, setTranscript, setAudioPaths, loadHistory]);
 
   const handleStartRename = (e: React.MouseEvent, id: string, currentName: string) => {
     e.stopPropagation();
@@ -148,7 +179,9 @@ function App() {
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: i * 0.05 }}
                   onClick={() => editingId !== project.id && loadFromHistory(project)}
-                  className="group relative p-4 bg-card hover:bg-secondary/50 border border-border rounded-xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg"
+                  className={`group relative p-4 bg-card hover:bg-secondary/50 border rounded-xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg ${
+                    project.status === 'processing' ? 'border-amber-500/50 animate-pulse' : 'border-border'
+                  }`}
                 >
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors shrink-0">
