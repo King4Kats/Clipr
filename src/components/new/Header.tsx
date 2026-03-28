@@ -1,12 +1,13 @@
 /**
  * HEADER.TSX : Barre de navigation principale
  *
- * Affiche le logo, les informations du projet en cours, et les actions :
+ * Affiche le logo, le nom du projet actif (éditable), et les actions :
  * ouvrir/sauvegarder un projet, réinitialiser, basculer le thème clair/sombre,
  * et accéder aux paramètres. Se fixe en haut de l'écran (sticky).
  */
 
-import { Settings, Save, FolderOpen, RotateCcw, Sun, Moon, BookOpen } from "lucide-react";
+import { useState } from "react";
+import { Settings, Save, RotateCcw, Sun, Moon, BookOpen, Pencil, Check, X, Home } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -17,21 +18,37 @@ interface HeaderProps {
 }
 
 const Header = ({ onOpenSetup }: HeaderProps) => {
-  // --- Etat global et utilitaires ---
-  const { videoFiles, processingStep, reset, saveProject, loadProject } = useStore();
+  const { videoFiles, processingStep, reset, saveProject, activeProjectId, activeProjectName, renameProject } = useStore();
   const { theme, setTheme } = useTheme();
 
-  // Drapeaux dérivés de l'état
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [tempName, setTempName] = useState("");
+
   const hasVideos = videoFiles.length > 0;
+  const hasProject = !!activeProjectId;
   const isProcessing =
     processingStep !== "idle" && processingStep !== "ready" && processingStep !== "done";
 
-  // Bascule entre thème clair et sombre
   const toggleTheme = () => {
     setTheme(theme === "dark" ? "light" : "dark");
   };
 
-  // --- Rendu JSX ---
+  const handleStartRename = () => {
+    setTempName(activeProjectName || '');
+    setIsRenaming(true);
+  };
+
+  const handleConfirmRename = async () => {
+    if (activeProjectId && tempName.trim()) {
+      await renameProject(activeProjectId, tempName.trim());
+    }
+    setIsRenaming(false);
+  };
+
+  const handleCancelRename = () => {
+    setIsRenaming(false);
+  };
+
   return (
     <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
@@ -43,64 +60,79 @@ const Header = ({ onOpenSetup }: HeaderProps) => {
           <span className="text-xl font-bold tracking-tight text-foreground">Clipr</span>
         </div>
 
-        {/* Informations du projet en cours ou indicateur de traitement */}
+        {/* Informations du projet en cours */}
         <div className="flex-1 px-8">
           {isProcessing ? (
             <div className="flex items-center gap-2 text-primary animate-pulse text-sm font-medium">
               <RotateCcw className="w-4 h-4 animate-spin-slow" />
               <span>Analyse ou traitement en cours...</span>
             </div>
-          ) : hasVideos ? (
-            <div className="text-sm text-muted-foreground truncate max-w-md">
-              <span className="font-semibold text-foreground">Projet:</span>{" "}
-              {videoFiles.length === 1 ? videoFiles[0].name : `${videoFiles.length} vidéos`}
+          ) : hasProject ? (
+            <div className="flex items-center gap-2">
+              {isRenaming ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    value={tempName}
+                    onChange={(e) => setTempName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleConfirmRename();
+                      if (e.key === 'Escape') handleCancelRename();
+                    }}
+                    className="text-sm font-semibold text-foreground bg-secondary border border-primary/30 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-primary w-48"
+                    autoFocus
+                  />
+                  <button onClick={handleConfirmRename} className="p-1 text-green-500 hover:text-green-400"><Check className="w-4 h-4" /></button>
+                  <button onClick={handleCancelRename} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 group cursor-pointer" onClick={handleStartRename}>
+                  <span className="text-sm font-semibold text-foreground truncate max-w-md">
+                    {activeProjectName || 'Projet Sans Nom'}
+                  </span>
+                  <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+              )}
+              {hasVideos && !isRenaming && (
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  {videoFiles.length === 1 ? videoFiles[0].name : `${videoFiles.length} vidéos`}
+                </span>
+              )}
             </div>
           ) : null}
         </div>
 
-        {/* Barre d'actions : gestion de projet, thème, paramètres */}
+        {/* Barre d'actions */}
         <div className="flex items-center gap-2">
-          {/* Actions projet : ouvrir, sauvegarder, réinitialiser */}
           <div className="flex items-center gap-1 border-r border-border pr-3 mr-1">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={loadProject}
-              className="h-8 gap-2"
-              title="Ouvrir un projet"
-            >
-              <FolderOpen className="w-4 h-4" />
-              <span className="hidden sm:inline">Ouvrir</span>
-            </Button>
+            {/* Retour accueil */}
+            {hasProject && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={reset}
+                disabled={isProcessing}
+                className="h-8 gap-2"
+                title="Retour à l'accueil"
+              >
+                <Home className="w-4 h-4" />
+                <span className="hidden sm:inline">Accueil</span>
+              </Button>
+            )}
 
             {hasVideos && (
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={saveProject}
-                  className="h-8 gap-2 text-primary hover:text-primary transition-colors"
-                  title="Sauvegarder"
-                >
-                  <Save className="w-4 h-4" />
-                  <span className="hidden sm:inline">Sauver</span>
-                </Button>
-
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={reset}
-                  disabled={isProcessing}
-                  className="h-8 text-muted-foreground hover:text-destructive transition-colors px-2"
-                  title="Nouveau projet / Reset"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </Button>
-              </>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={saveProject}
+                className="h-8 gap-2 text-primary hover:text-primary transition-colors"
+                title="Sauvegarder"
+              >
+                <Save className="w-4 h-4" />
+                <span className="hidden sm:inline">Sauver</span>
+              </Button>
             )}
           </div>
 
-          {/* Bascule du thème clair/sombre */}
           <Button
             variant="ghost"
             size="sm"
@@ -115,7 +147,6 @@ const Header = ({ onOpenSetup }: HeaderProps) => {
             )}
           </Button>
 
-          {/* Documentation */}
           <Button
             variant="ghost"
             size="sm"
@@ -126,7 +157,6 @@ const Header = ({ onOpenSetup }: HeaderProps) => {
             <BookOpen className="w-4 h-4 text-muted-foreground" />
           </Button>
 
-          {/* Bouton parametres / configuration IA */}
           <Button
             variant="ghost"
             size="sm"

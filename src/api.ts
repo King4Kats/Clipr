@@ -58,6 +58,22 @@ async function post<T = any>(path: string, body?: any): Promise<T> {
   return res.json()
 }
 
+async function patch<T = any>(path: string, body?: any): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  })
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+  return res.json()
+}
+
+async function del<T = any>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+  return res.json()
+}
+
 // ── Upload helper ──
 async function uploadFiles(files: File[]): Promise<any[]> {
   const formData = new FormData()
@@ -111,8 +127,14 @@ const api = {
 
   // Project
   getProjectHistory: () => get<any[]>('/api/project/history'),
+  createProject: (name: string, type: 'manual' | 'ai' = 'manual') =>
+    post<any>('/api/project/create', { name, type }),
   autoSaveProject: (data: any) => post('/api/project/autosave', data),
-  saveProject: (data: any) => post<{ fileName: string }>('/api/project/save', data).then(r => r.fileName),
+  saveProject: (data: any) => post<{ id: string }>('/api/project/save', data).then(r => r.id),
+  loadProjectById: (id: string) => get<any>(`/api/project/load/${id}`),
+  renameProject: (id: string, name: string) => patch(`/api/project/${id}/rename`, { name }),
+  deleteProject: (id: string) => del(`/api/project/${id}`),
+  updateProjectStatus: (id: string, status: string) => patch(`/api/project/${id}/status`, { status }),
   exportProject: (data: any) => post<{ downloadUrl: string }>('/api/project/export', data),
   importProject: async (file: File) => {
     const formData = new FormData()

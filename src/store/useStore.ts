@@ -4,13 +4,17 @@ import api from '../api'
 
 /**
  * USESTORE.TS : Gestion de l'état global (Store Zustand)
- * 
- * Centralise l'état réactif de l'application : gestion des fichiers vidéo,
- * stockage des transcriptions Whisper, configuration des modèles et suivi
- * du workflow de traitement. Permet une synchronisation inter-composants fluide.
+ *
+ * Centralise l'état réactif de l'application : gestion multi-projets,
+ * fichiers vidéo, transcriptions Whisper, configuration des modèles
+ * et suivi du workflow de traitement.
  */
 
 interface AppState {
+  // Projet actif
+  activeProjectId: string | null
+  activeProjectName: string
+
   // Videos (support multi-vidéos)
   videoFiles: VideoFile[]
   addVideoFile: (file: Omit<VideoFile, 'offset'>) => void
@@ -74,8 +78,14 @@ interface AppState {
   loadHistory: () => Promise<void>
   saveProject: () => Promise<void>
   loadProject: () => Promise<void>
-  loadFromHistory: (projectData: any) => void
+  loadFromHistory: (projectRecord: any) => void
   autoSave: () => Promise<void>
+
+  // Nouvelles actions multi-projets
+  createProject: (name: string, type?: 'manual' | 'ai') => Promise<string | null>
+  renameProject: (id: string, name: string) => Promise<void>
+  deleteProject: (id: string) => Promise<void>
+  switchProject: (projectRecord: any) => void
 }
 
 const DEFAULT_WHISPER_PROMPT = `Entretien sur le patrimoine culturel de Vendée et de Bretagne. On parle du bocage, des métairies, closeries et borderies, du marais poitevin avec ses conches, biefs et rigoles, de la bourrine et du bourrinage. Les paludiers récoltent la fleur de sel dans les œillets, vasières, cobiers et adernes avec le las et la lousse, formant des mulons sur le trémet. En musique traditionnelle, le kan ha diskan avec kaner et diskaner anime les festoù-noz, avec gavotte, dañs-tro, ton simpl, tamm kreizh. La maraîchine et l'avant-deux sont les danses vendéennes. Les gwerzioù et sonioù accompagnent binioù kozh et bombarde dans le bagad. L'artisanat comprend le sabotier, le bourrelier, le tonnelier, le chaumier, le vannier et le charron. En architecture, longère, penty, malouinière, chaumière. Les pardons et troménies sont des traditions bretonnes. Gastronomie : préfou, mogette, brioche vendéenne, gâche, fouace, tourtisseaux, kouign-amann, krampouezh, far breton, kig ha farz, galette de sarrasin, chouchen. Toponymes en Plou-, Lan-, Tré-, Ker-, Loc-. La pigouille propulse la plate dans la Venise Verte.`
@@ -102,12 +112,15 @@ const SEGMENT_COLORS = [
 ]
 
 export const useStore = create<AppState>((set, get) => ({
+  // --- Projet actif ---
+  activeProjectId: null,
+  activeProjectName: '',
+
   // --- Gestion de la collection de fichiers vidéo ---
   videoFiles: [],
 
   addVideoFile: (file) => {
     const current = get().videoFiles
-    // Calcul de l'offset global du nouveau fichier basé sur la durée cumulée des fichiers existants
     const offset = current.reduce((sum, v) => sum + v.duration, 0)
     const newFile: VideoFile = { ...file, offset }
     const newFiles = [...current, newFile]
@@ -121,7 +134,6 @@ export const useStore = create<AppState>((set, get) => ({
   removeVideoFile: (index) => {
     const current = get().videoFiles
     const newFiles = current.filter((_, i) => i !== index)
-    // Recalcul des offsets globaux pour maintenir une timeline cohérente après suppression
     let offset = 0
     const withOffsets = newFiles.map((f) => {
       const updated = { ...f, offset }
@@ -142,16 +154,14 @@ export const useStore = create<AppState>((set, get) => ({
     return files.reduce((sum, v) => sum + v.duration, 0)
   },
 
-  // --- Fin Gestion de la collection ---
-
-  // --- Stockage de la Transcription (Segments audio fins) ---
+  // --- Stockage de la Transcription ---
   transcript: [],
   addTranscriptSegment: (segment) =>
     set((state) => ({ transcript: [...state.transcript, segment] })),
   setTranscript: (segments) => set({ transcript: segments }),
   clearTranscript: () => set({ transcript: [] }),
 
-  // --- Gestion des Segments Thématiques (Découpages logiques) ---
+  // --- Gestion des Segments Thématiques ---
   segments: [],
   setSegments: (segments) =>
     set({
@@ -204,7 +214,7 @@ export const useStore = create<AppState>((set, get) => ({
     })
   },
 
-  // Nouvelles propriétés pour compatibilité
+  // Propriétés pour compatibilité
   videoFile: null,
   audioPath: null,
 
@@ -241,37 +251,21 @@ export const useStore = create<AppState>((set, get) => ({
   isPlaying: false,
   setIsPlaying: (playing) => set({ isPlaying: playing }),
 
-  /**
-   * Identifie quelle vidéo appartient à un point temporel donné sur la timeline cumulée.
-   */
   getVideoAtTime: (globalTime) => {
     const files = get().videoFiles
     for (let i = 0; i < files.length; i++) {
       const video = files[i]
       if (globalTime >= video.offset && globalTime < video.offset + video.duration) {
-        return {
-          video,
-          localTime: globalTime - video.offset,
-          index: i
-        }
+        return { video, localTime: globalTime - video.offset, index: i }
       }
     }
-    // Cas limite : retourne la dernière vidéo si on dépasse la durée totale
     if (files.length > 0) {
       const last = files[files.length - 1]
-      return {
-        video: last,
-        localTime: last.duration,
-        index: files.length - 1
-      }
+      return { video: last, localTime: last.duration, index: files.length - 1 }
     }
     return null
   },
 
-  /**
-   * Calcule les sous-découpes (clips) nécessaires pour un segment thématique,
-   * car un segment peut s'étendre sur plusieurs fichiers vidéo physiques.
-   */
   getClipsForSegment: (start, end) => {
     const files = get().videoFiles
     const clips: VideoClip[] = []
@@ -281,20 +275,12 @@ export const useStore = create<AppState>((set, get) => ({
       const videoStart = video.offset
       const videoEnd = video.offset + video.duration
 
-      // Le segment chevauche cette vidéo ?
       if (start < videoEnd && end > videoStart) {
         const clipStart = Math.max(0, start - videoStart)
         const clipEnd = Math.min(video.duration, end - videoStart)
-
-        clips.push({
-          videoIndex: i,
-          videoPath: video.path,
-          start: clipStart,
-          end: clipEnd
-        })
+        clips.push({ videoIndex: i, videoPath: video.path, start: clipStart, end: clipEnd })
       }
     }
-
     return clips
   },
 
@@ -320,7 +306,6 @@ export const useStore = create<AppState>((set, get) => ({
 
       state.setAudioPaths(newAudioPaths)
 
-      // Transcription de TOUTES les vidéos avec ajustement des timestamps
       state.setProcessing('transcribing', 0, 'Transcription de la voix...')
       state.clearTranscript()
 
@@ -336,7 +321,6 @@ export const useStore = create<AppState>((set, get) => ({
         const segments = await api.transcribe(newAudioPaths[i], state.config.language, state.config.whisperModel, state.config.whisperPrompt) as any[]
         const offset = state.videoFiles[i]?.offset || 0
 
-        // Ajuster les timestamps avec l'offset global de la vidéo
         const adjustedSegments = segments.map((seg: any) => ({
           ...seg,
           start: seg.start + offset,
@@ -346,11 +330,8 @@ export const useStore = create<AppState>((set, get) => ({
         allTranscriptSegments.push(...adjustedSegments)
       }
 
-      // Mettre à jour le store avec tous les segments transcrits
       state.setTranscript(allTranscriptSegments)
 
-      // Analyse sémantique via LLM — on inclut les timestamps pour que le LLM
-      // puisse produire des découpages avec des temps exacts
       state.setProcessing('analyzing', 0, 'Découpage intelligent par l\'IA...')
       const fullText = allTranscriptSegments
         .map((t: any) => `[${t.start.toFixed(1)}s] ${t.text}`)
@@ -361,7 +342,7 @@ export const useStore = create<AppState>((set, get) => ({
         state.setSegments(result.segments.map((s: any) => ({
           ...s,
           id: Math.random().toString(36).substring(2, 11),
-          transcriptSegments: [] // Optionnel: associer les phrases
+          transcriptSegments: []
         })))
       }
 
@@ -373,9 +354,11 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  // Reset
+  // Reset — retour à l'écran d'accueil (décharge le projet actif)
   reset: () => {
     set({
+      activeProjectId: null,
+      activeProjectName: '',
       videoFiles: [],
       transcript: [],
       segments: [],
@@ -387,7 +370,6 @@ export const useStore = create<AppState>((set, get) => ({
       videoFile: null,
       selectedSegmentId: null
     })
-    // Recharger l'historique pour que les projets récents soient à jour
     get().loadHistory()
   },
 
@@ -402,24 +384,26 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   loadProject: async () => {
-    // En mode web, on charge depuis l'historique directement
-    // Le chargement de fichier se fait via import dans le Header
     const history = await api.getProjectHistory()
     if (history.length > 0) {
       get().loadFromHistory(history[0])
     }
   },
 
-  loadFromHistory: (projectData) => {
-    const audioPaths = projectData.audioPaths || []
+  // Charge un projet depuis un enregistrement de l'historique (ProjectRecord du backend)
+  loadFromHistory: (projectRecord) => {
+    const data = projectRecord.data || projectRecord
+    const audioPaths = data.audioPaths || []
     set({
-      videoFiles: projectData.videoFiles || [],
-      transcript: projectData.transcript || [],
-      segments: projectData.segments || [],
+      activeProjectId: projectRecord.id || null,
+      activeProjectName: projectRecord.name || data.projectName || '',
+      videoFiles: data.videoFiles || [],
+      transcript: data.transcript || [],
+      segments: data.segments || [],
       audioPaths: audioPaths,
       audioPath: audioPaths.length > 0 ? audioPaths[0] : null,
-      config: { ...get().config, ...projectData.config },
-      videoFile: projectData.videoFiles && projectData.videoFiles.length > 0 ? projectData.videoFiles[0] : null,
+      config: { ...get().config, ...data.config },
+      videoFile: data.videoFiles && data.videoFiles.length > 0 ? data.videoFiles[0] : null,
       processingStep: 'ready',
       progress: 100,
       progressMessage: 'Projet chargé'
@@ -428,35 +412,100 @@ export const useStore = create<AppState>((set, get) => ({
 
   saveProject: async () => {
     const state = get()
-    if (state.videoFiles.length === 0) return
+    if (state.videoFiles.length === 0 && !state.activeProjectId) return
 
-    const projectData = {
+    const projectData: any = {
       videoFiles: state.videoFiles,
       transcript: state.transcript,
       segments: state.segments,
       audioPaths: state.audioPaths,
       config: state.config,
-      projectName: state.videoFiles[0].name
+      projectName: state.activeProjectName || (state.videoFiles[0]?.name ?? 'Projet Sans Nom')
     }
-    const fileName = await api.saveProject(projectData)
-    if (fileName) {
-      console.log('Projet sauvegarde:', fileName)
+
+    if (state.activeProjectId) {
+      projectData.id = state.activeProjectId
+    }
+
+    const id = await api.saveProject(projectData)
+    if (id && !state.activeProjectId) {
+      set({ activeProjectId: id })
     }
   },
 
   autoSave: async () => {
     const state = get()
-    if (state.videoFiles.length === 0) return
+    if (state.videoFiles.length === 0 && !state.activeProjectId) return
 
-    const projectData = {
+    const projectData: any = {
       videoFiles: state.videoFiles,
       transcript: state.transcript,
       segments: state.segments,
       audioPaths: state.audioPaths,
       config: state.config,
-      projectName: state.videoFiles[0].name
+      projectName: state.activeProjectName || (state.videoFiles[0]?.name ?? 'Projet Sans Nom')
     }
+
+    if (state.activeProjectId) {
+      projectData.id = state.activeProjectId
+    }
+
     await api.autoSaveProject(projectData)
     await get().loadHistory()
+  },
+
+  // --- Nouvelles actions multi-projets ---
+
+  createProject: async (name, type = 'manual') => {
+    try {
+      const project = await api.createProject(name, type)
+      set({
+        activeProjectId: project.id,
+        activeProjectName: project.name,
+        videoFiles: [],
+        transcript: [],
+        segments: [],
+        processingStep: 'idle',
+        progress: 0,
+        progressMessage: '',
+        audioPaths: [],
+        audioPath: null,
+        videoFile: null,
+        selectedSegmentId: null
+      })
+      await get().loadHistory()
+      return project.id
+    } catch (e: any) {
+      console.error('Erreur création projet:', e)
+      return null
+    }
+  },
+
+  renameProject: async (id, name) => {
+    await api.renameProject(id, name)
+    const state = get()
+    if (state.activeProjectId === id) {
+      set({ activeProjectName: name })
+    }
+    await get().loadHistory()
+  },
+
+  deleteProject: async (id) => {
+    await api.deleteProject(id)
+    const state = get()
+    if (state.activeProjectId === id) {
+      get().reset()
+    } else {
+      await get().loadHistory()
+    }
+  },
+
+  switchProject: (projectRecord) => {
+    // Sauvegarder le projet actif avant de switcher
+    const state = get()
+    if (state.activeProjectId && state.videoFiles.length > 0) {
+      state.autoSave()
+    }
+    get().loadFromHistory(projectRecord)
   }
 }))
