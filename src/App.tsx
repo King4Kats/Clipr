@@ -26,7 +26,8 @@ import AdminDashboard from "@/components/AdminDashboard";
 import ShareDialog from "@/components/ShareDialog";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check, Share2, Users } from "lucide-react";
+import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check, Share2, Users, Brain, Scissors } from "lucide-react";
+import logo from "@/assets/Clipr.svg";
 
 function App() {
   const { isAuthenticated, isLoading: authLoading, checkAuth, user } = useAuthStore();
@@ -56,6 +57,7 @@ function App() {
   const [sharingProjectId, setSharingProjectId] = useState<string | null>(null);
   const [sharingProjectName, setSharingProjectName] = useState("");
   const [sharedProjects, setSharedProjects] = useState<any[]>([]);
+  const [projectMode, setProjectMode] = useState<'choose' | 'ai' | 'manual' | null>(null);
 
   // Check auth on mount
   useEffect(() => {
@@ -154,6 +156,7 @@ function App() {
   };
 
   const handleNewProject = async () => {
+    setProjectMode(null);
     await createProject('Nouveau Projet', 'manual');
   };
 
@@ -165,8 +168,9 @@ function App() {
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-12 text-center"
+            className="mb-12 text-center flex flex-col items-center gap-4"
           >
+            <img src={logo} alt="Clipr" className="w-24 h-24" />
             <h1 className="text-4xl font-black text-foreground tracking-tight">Clipr</h1>
           </motion.div>
 
@@ -359,39 +363,101 @@ function App() {
       return <EditorLayout />;
     }
 
-    // ── Vue pré-analyse ──
-    return (
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 mt-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
-        <div className="lg:col-span-3 space-y-6">
-          <VideoPreview />
-        </div>
-
-        <div className="space-y-6">
-          <AIAnalysisPanel />
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6 }}
-            className="bg-card rounded-xl border border-border p-5 shadow-sm"
-          >
-            <h2 className="text-sm font-semibold text-foreground mb-4">Statistiques</h2>
-            <div className="space-y-3 font-mono">
-              {[
-                { label: "Vidéo(s)", value: videoFiles.length },
-                { label: "Séquences", value: segments.length },
-                { label: "Durée totale", value: useStore.getState().getTotalDuration().toFixed(0) + "s" },
-              ].map((stat) => (
-                <div key={stat.label} className="flex items-center justify-between text-[11px]">
-                  <span className="text-muted-foreground uppercase">{stat.label}</span>
-                  <span className="font-bold text-primary">{stat.value}</span>
-                </div>
-              ))}
-            </div>
+    // ── Choix du mode : IA ou Manuel ──
+    if (projectMode === null || projectMode === 'choose') {
+      return (
+        <div className="max-w-3xl mx-auto w-full pt-12">
+          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-8 text-center">
+            <h2 className="text-2xl font-bold text-foreground">Comment souhaitez-vous travailler ?</h2>
+            <p className="text-sm text-muted-foreground mt-2">
+              {videoFiles.length} vidéo{videoFiles.length > 1 ? 's' : ''} importée{videoFiles.length > 1 ? 's' : ''} — {Math.round(useStore.getState().getTotalDuration())}s
+            </p>
           </motion.div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            {/* Mode IA */}
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.1 }}
+              onClick={() => setProjectMode('ai')}
+              className="group p-8 bg-card border-2 border-border hover:border-primary/50 rounded-2xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-xl text-center"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-5 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                <Brain className="w-8 h-8 text-primary group-hover:text-primary-foreground" />
+              </div>
+              <h3 className="text-lg font-bold text-foreground mb-2">Analyse IA</h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                L'IA transcrit la voix et découpe automatiquement la vidéo en segments thématiques. Idéal pour les interviews longues.
+              </p>
+            </motion.div>
+
+            {/* Mode Manuel */}
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.2 }}
+              onClick={() => setProjectMode('manual')}
+              className="group p-8 bg-card border-2 border-border hover:border-primary/50 rounded-2xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-xl text-center"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-5 group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                <Scissors className="w-8 h-8 text-primary group-hover:text-primary-foreground" />
+              </div>
+              <h3 className="text-lg font-bold text-foreground mb-2">Découpe manuelle</h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Créez et ajustez vos segments manuellement sur la timeline. Contrôle total sur le découpage.
+              </p>
+            </motion.div>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
+
+    // ── Mode IA : vue pré-analyse ──
+    if (projectMode === 'ai') {
+      return (
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 mt-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className="lg:col-span-3 space-y-6">
+            <VideoPreview />
+          </div>
+
+          <div className="space-y-6">
+            <AIAnalysisPanel />
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6 }}
+              className="bg-card rounded-xl border border-border p-5 shadow-sm"
+            >
+              <h2 className="text-sm font-semibold text-foreground mb-4">Statistiques</h2>
+              <div className="space-y-3 font-mono">
+                {[
+                  { label: "Vidéo(s)", value: videoFiles.length },
+                  { label: "Séquences", value: segments.length },
+                  { label: "Durée totale", value: useStore.getState().getTotalDuration().toFixed(0) + "s" },
+                ].map((stat) => (
+                  <div key={stat.label} className="flex items-center justify-between text-[11px]">
+                    <span className="text-muted-foreground uppercase">{stat.label}</span>
+                    <span className="font-bold text-primary">{stat.value}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+
+            <button
+              onClick={() => setProjectMode('choose')}
+              className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-2"
+            >
+              ← Changer de mode
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Mode Manuel : éditeur direct (avec segments vides) ──
+    return <EditorLayout />;
   };
 
   // Auth loading
