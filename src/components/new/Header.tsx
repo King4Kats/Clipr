@@ -7,8 +7,9 @@
  */
 
 import { useState } from "react";
-import { Settings, Save, RotateCcw, Sun, Moon, BookOpen, Pencil, Check, X, Home } from "lucide-react";
+import { Settings, Save, RotateCcw, Sun, Moon, BookOpen, Pencil, Check, X, Home, LogOut, User } from "lucide-react";
 import { useStore } from "@/store/useStore";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import logo from "@/assets/Clipr.svg";
@@ -19,6 +20,7 @@ interface HeaderProps {
 
 const Header = ({ onOpenSetup }: HeaderProps) => {
   const { videoFiles, processingStep, reset, saveProject, activeProjectId, activeProjectName, renameProject } = useStore();
+  const { user, logout } = useAuthStore();
   const { theme, setTheme } = useTheme();
 
   const [isRenaming, setIsRenaming] = useState(false);
@@ -166,6 +168,26 @@ const Header = ({ onOpenSetup }: HeaderProps) => {
           >
             <Settings className="w-4 h-4 text-muted-foreground" />
           </Button>
+
+          {/* User info & logout */}
+          <div className="flex items-center gap-1.5 border-l border-border pl-3 ml-1">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <User className="w-3.5 h-3.5" />
+              <span className="font-medium hidden sm:inline">{user?.username}</span>
+              {user?.role === 'admin' && (
+                <span className="text-[8px] font-bold uppercase bg-primary/10 text-primary px-1 py-0.5 rounded">Admin</span>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={logout}
+              className="w-8 h-8 p-0 rounded-lg hover:bg-destructive/10 hover:text-destructive transition-colors"
+              title="Déconnexion"
+            >
+              <LogOut className="w-4 h-4 text-muted-foreground" />
+            </Button>
+          </div>
         </div>
       </div>
     </header>

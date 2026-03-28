@@ -12,6 +12,8 @@ import * as ffmpegService from './services/ffmpeg.js'
 import * as whisperService from './services/whisper.js'
 import * as ollamaService from './services/ollama.js'
 import * as projectService from './services/project-history.js'
+import * as authService from './services/auth.js'
+import { requireAuth, requireAdmin, optionalAuth } from './middleware/auth.js'
 
 // ── Config ──
 const PORT = parseInt(process.env.PORT || '3000')
@@ -95,6 +97,39 @@ const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 * 1024 } }
 
 // Health
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: Date.now() }))
+
+// ── Auth ──
+app.post('/api/auth/register', (req, res) => {
+  try {
+    const { username, email, password } = req.body
+    const result = authService.register(username, email, password)
+    res.json(result)
+  } catch (err: any) { res.status(400).json({ error: err.message }) }
+})
+
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const { login, password } = req.body
+    const result = authService.login(login, password)
+    res.json(result)
+  } catch (err: any) { res.status(401).json({ error: err.message }) }
+})
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  const user = authService.getUserById(req.user!.userId)
+  if (user) res.json(user)
+  else res.status(404).json({ error: 'Utilisateur non trouvé' })
+})
+
+// Admin: list all users
+app.get('/api/admin/users', requireAuth, requireAdmin, (_req, res) => {
+  res.json(authService.listUsers())
+})
+
+// Admin: list all projects
+app.get('/api/admin/projects', requireAuth, requireAdmin, (_req, res) => {
+  res.json(projectService.getAllProjects())
+})
 
 // Version
 app.get('/api/version', (_req, res) => {
@@ -297,56 +332,56 @@ app.post('/api/ollama/analyze', async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Project list (active projects, max 6)
-app.get('/api/project/history', (_req, res) => {
-  res.json(projectService.getProjectHistory())
+// Project list (active projects, max 6) — auth-protected
+app.get('/api/project/history', requireAuth, (req, res) => {
+  res.json(projectService.getProjectHistory(req.user!.userId))
 })
 
 // Project create
-app.post('/api/project/create', (req, res) => {
+app.post('/api/project/create', requireAuth, (req, res) => {
   try {
     const { name, type } = req.body
-    const project = projectService.createProject(name || 'Projet Sans Nom', type || 'manual')
+    const project = projectService.createProject(name || 'Projet Sans Nom', type || 'manual', req.user!.userId)
     res.json(project)
   } catch (err: any) { res.status(400).json({ error: err.message }) }
 })
 
 // Project save (with id)
-app.post('/api/project/save', (req, res) => {
+app.post('/api/project/save', requireAuth, (req, res) => {
   try {
     const { id, ...data } = req.body
     if (id) {
       projectService.saveProject(id, data)
       res.json({ success: true, id })
     } else {
-      const newId = projectService.saveLegacyProject(data)
+      const newId = projectService.saveLegacyProject(data, req.user!.userId)
       res.json({ success: true, id: newId })
     }
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
 // Project auto-save
-app.post('/api/project/autosave', (req, res) => {
+app.post('/api/project/autosave', requireAuth, (req, res) => {
   try {
     const { id, ...data } = req.body
     if (id) {
       projectService.autoSaveProject(id, data)
     } else {
-      projectService.saveLegacyProject(data)
+      projectService.saveLegacyProject(data, req.user!.userId)
     }
     res.json({ success: true })
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
 // Project load by id
-app.get('/api/project/load/:id', (req, res) => {
-  const project = projectService.getProject(req.params.id)
+app.get('/api/project/load/:id', requireAuth, (req, res) => {
+  const project = projectService.getProject(req.params.id, req.user!.userId)
   if (project) res.json(project)
   else res.status(404).json({ error: 'Projet non trouve' })
 })
 
 // Project rename
-app.patch('/api/project/:id/rename', (req, res) => {
+app.patch('/api/project/:id/rename', requireAuth, (req, res) => {
   try {
     projectService.renameProject(req.params.id, req.body.name)
     res.json({ success: true })
@@ -354,7 +389,7 @@ app.patch('/api/project/:id/rename', (req, res) => {
 })
 
 // Project delete (soft)
-app.delete('/api/project/:id', (req, res) => {
+app.delete('/api/project/:id', requireAuth, (req, res) => {
   try {
     projectService.deleteProject(req.params.id)
     res.json({ success: true })
@@ -362,7 +397,7 @@ app.delete('/api/project/:id', (req, res) => {
 })
 
 // Project status update
-app.patch('/api/project/:id/status', (req, res) => {
+app.patch('/api/project/:id/status', requireAuth, (req, res) => {
   try {
     projectService.updateProjectStatus(req.params.id, req.body.status)
     res.json({ success: true })
@@ -370,11 +405,9 @@ app.patch('/api/project/:id/status', (req, res) => {
 })
 
 // ── Server-side AI Analysis (background processing) ──
-// Runs the full pipeline: extract audio → transcribe → analyze → save
-// Client can navigate away — results saved to DB server-side
-app.post('/api/project/:id/analyze', async (req, res) => {
+app.post('/api/project/:id/analyze', requireAuth, async (req, res) => {
   const projectId = req.params.id
-  const project = projectService.getProject(projectId)
+  const project = projectService.getProject(projectId, req.user!.userId)
   if (!project) return res.status(404).json({ error: 'Projet non trouve' })
 
   const { config } = req.body
