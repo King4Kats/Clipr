@@ -6,7 +6,7 @@
  * et accéder aux paramètres. Se fixe en haut de l'écran (sticky).
  */
 
-import { Settings, Save, FolderOpen, RotateCcw, Sun, Moon } from "lucide-react";
+import { Settings, Save, FolderOpen, RotateCcw, Sun, Moon, BookOpen } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -115,13 +115,24 @@ const Header = ({ onOpenSetup }: HeaderProps) => {
             )}
           </Button>
 
-          {/* Bouton paramètres / configuration IA */}
+          {/* Documentation */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => window.open('/docs/', '_blank')}
+            className="w-8 h-8 p-0 rounded-lg hover:bg-secondary/80 transition-colors"
+            title="Documentation"
+          >
+            <BookOpen className="w-4 h-4 text-muted-foreground" />
+          </Button>
+
+          {/* Bouton parametres / configuration IA */}
           <Button
             variant="ghost"
             size="sm"
             onClick={onOpenSetup}
             className="w-8 h-8 p-0 rounded-lg hover:bg-secondary/80 transition-colors"
-            title="Configuration IA & Paramètres"
+            title="Configuration IA & Parametres"
           >
             <Settings className="w-4 h-4 text-muted-foreground" />
           </Button>

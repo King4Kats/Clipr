@@ -4,14 +4,7 @@
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
-    "outDir": "dist-electron",
-    "rootDir": ".",
-    "baseUrl": ".",
-    "paths": {
-      "@electron/*": ["electron/*"]
-    }
+    "allowSyntheticDefaultImports": true
   },
-  "include": ["vite.config.ts", "electron/**/*"]
+  "include": ["vite.config.ts"]
 }

@@ -40,9 +40,9 @@ const AIAnalysisPanel = () => {
   useEffect(() => {
     const checkModels = async () => {
       try {
-        const running = await window.electron.checkOllama();
+        const running = await (window as any).electron.checkOllama();
         if (running) {
-          const models = await window.electron.listOllamaModels();
+          const models = await (window as any).electron.listOllamaModels();
           setAvailableModels(models);
           setModelsReady(models.length > 0);
           setOllamaStatus(models.length > 0 ? "Ollama prêt" : "Aucun modèle trouvé");

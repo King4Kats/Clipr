@@ -64,14 +64,14 @@ function App() {
     setShowSetup(false);
   };
 
-  // ─── Effet : écoute des événements IPC du processus principal Electron ───
-  // Reçoit les mises à jour de progression et les segments de transcription en temps réel
+  // ─── Effet : ecoute des evenements WebSocket du serveur ───
   useEffect(() => {
-    const unsubProgress = window.electron.onProgress(({ progress, message }) => {
+    if (!(window as any).electron) return;
+    const unsubProgress = (window as any).electron.onProgress(({ progress, message }: any) => {
       setProcessing(processingStep, progress, message);
     });
 
-    const unsubSegment = window.electron.onTranscriptSegment((segment) => {
+    const unsubSegment = (window as any).electron.onTranscriptSegment((segment: any) => {
       addTranscriptSegment(segment as any);
     });
 

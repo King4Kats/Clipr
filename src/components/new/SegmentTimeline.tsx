@@ -104,7 +104,11 @@ const SegmentTimeline = () => {
     const loadAudio = async () => {
       setLoading(true);
       try {
-        const arrayBuffer = await window.electron.readFileBuffer(audioPath);
+        // En mode web, charger l'audio via HTTP
+        const dataDir = audioPath.includes('/data/') ? audioPath.split('/data/')[1] : audioPath;
+        const url = `/api/data-files/${dataDir}`;
+        const response = await fetch(url);
+        const arrayBuffer = await response.arrayBuffer();
         const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
         const decoded = await audioCtx.decodeAudioData(arrayBuffer);
         setAudioBuffer(decoded);

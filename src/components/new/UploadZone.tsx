@@ -1,92 +1,72 @@
 /**
- * UPLOADZONE.TSX : Zone d'importation vidéo (drag & drop)
- *
- * Composant d'upload permettant à l'utilisateur d'importer des vidéos
- * soit par glisser-déposer, soit via un dialogue de sélection de fichiers.
- * Valide les extensions vidéo et récupère la durée via FFmpeg.
+ * UPLOADZONE.TSX : Zone d'importation video (drag & drop + input file)
+ * Version web : utilise <input type="file"> + upload multipart vers /api/upload
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Upload, Film, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useStore } from "@/store/useStore";
+import api from "@/api";
+
+const VIDEO_EXTENSIONS = ["mp4", "avi", "mov", "mkv", "mts", "webm"];
 
 const UploadZone = () => {
-  // --- Etat local : indicateurs de drag & chargement ---
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { addVideoFile, setProcessing } = useStore();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Traite les fichiers sélectionnés : récupère la durée via FFmpeg et les ajoute au store
   const handleFiles = useCallback(
-    async (filePaths: string[]) => {
+    async (files: File[]) => {
+      const valid = files.filter(f => {
+        const ext = f.name.split(".").pop()?.toLowerCase();
+        return ext && VIDEO_EXTENSIONS.includes(ext);
+      });
+      if (valid.length === 0) return;
+
       setIsLoading(true);
       try {
-        for (const filePath of filePaths) {
-          const duration = await window.electron.getVideoDuration(filePath);
-          const name = filePath.split(/[\\/]/).pop() || "video";
-
+        const results = await api.uploadFiles(valid);
+        for (const r of results) {
           addVideoFile({
-            path: filePath,
-            name,
-            duration,
-            size: 0,
-          });
+            path: r.path,
+            name: r.name,
+            duration: r.duration,
+            size: r.size,
+            id: r.id, // ID serveur pour l'URL
+          } as any);
         }
         setProcessing("idle", 0, "");
       } catch (error) {
-        console.error("Erreur chargement vidéo:", error);
-        setProcessing("error", 0, "Erreur lors du chargement de la vidéo");
+        console.error("Erreur upload:", error);
+        setProcessing("error", 0, "Erreur lors du chargement de la video");
       }
       setIsLoading(false);
     },
     [addVideoFile, setProcessing]
   );
 
-  // Ouvre le dialogue natif de sélection de fichiers vidéo
-  const handleClick = async () => {
-    const filePaths = await window.electron.openVideosDialog();
-    if (filePaths && filePaths.length > 0) {
-      handleFiles(filePaths);
+  const handleClick = () => fileInputRef.current?.click();
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleFiles(Array.from(e.target.files));
+      e.target.value = ""; // reset pour permettre re-selection du meme fichier
     }
   };
 
-  // --- Gestionnaires de drag & drop ---
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); };
 
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  };
-
-  // Valide les extensions vidéo autorisées et traite les fichiers déposés
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      const videoExtensions = ["mp4", "avi", "mov", "mkv", "mts", "webm"];
-      const validPaths: string[] = [];
-
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i] as File & { path: string };
-        const ext = file.name.split(".").pop()?.toLowerCase();
-        if (ext && videoExtensions.includes(ext) && file.path) {
-          validPaths.push(file.path);
-        }
-      }
-
-      if (validPaths.length > 0) {
-        handleFiles(validPaths);
-      }
+    if (e.dataTransfer.files.length > 0) {
+      handleFiles(Array.from(e.dataTransfer.files));
     }
   };
 
-  // --- Rendu : zone d'upload avec indicateurs visuels ---
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -98,33 +78,41 @@ const UploadZone = () => {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept=".mp4,.avi,.mov,.mkv,.mts,.webm"
+        onChange={handleFileInput}
+        className="hidden"
+      />
       <div
         className={`border-2 border-dashed rounded-lg p-10 text-center transition-all duration-300 bg-card/50 ${isDragging
-            ? "border-primary glow bg-primary/5 scale-[1.02]"
-            : "border-border hover:border-primary hover:glow"
-          }`}
+          ? "border-primary glow bg-primary/5 scale-[1.02]"
+          : "border-border hover:border-primary hover:glow"
+        }`}
       >
         <div className="flex flex-col items-center gap-4">
           <div className="relative">
             <div
               className={`w-16 h-16 rounded-full bg-secondary flex items-center justify-center transition-colors ${isDragging || isLoading ? "bg-primary/20" : "group-hover:bg-primary/10"
-                }`}
+              }`}
             >
               {isLoading ? (
                 <Loader2 className="w-7 h-7 text-primary animate-spin" />
               ) : (
                 <Upload
                   className={`w-7 h-7 transition-colors ${isDragging ? "text-primary" : "text-muted-foreground group-hover:text-primary"
-                    }`}
+                  }`}
                 />
               )}
             </div>
           </div>
           <div>
             <p className="text-foreground font-medium text-lg">
-              {isLoading ? "Chargement de la vidéo..." : "Déposer une interview ici"}
+              {isLoading ? "Chargement de la video..." : "Deposer une interview ici"}
             </p>
-            <p className="text-muted-foreground text-sm mt-1">MP4, MOV, AVI • Automatiquement prêt pour l'IA</p>
+            <p className="text-muted-foreground text-sm mt-1">MP4, MOV, AVI — Automatiquement pret pour l'IA</p>
           </div>
           {!isLoading && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">

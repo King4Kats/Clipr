@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { VideoFile, VideoSegment, TranscriptSegment, ProcessingStep, AppConfig, VideoClip } from '../types'
+import api from '../api'
 
 /**
  * USESTORE.TS : Gestion de l'état global (Store Zustand)
@@ -309,7 +310,7 @@ export const useStore = create<AppState>((set, get) => ({
       const newAudioPaths: string[] = []
 
       for (let i = 0; i < state.videoFiles.length; i++) {
-        const path = await window.electron.extractAudio(state.videoFiles[i].path)
+        const path = await api.extractAudio(state.videoFiles[i].path)
         newAudioPaths.push(path)
         state.setProcessing('extracting-audio', ((i + 1) / state.videoFiles.length) * 100, `Audio ${i + 1}/${state.videoFiles.length} extrait`)
       }
@@ -329,7 +330,7 @@ export const useStore = create<AppState>((set, get) => ({
           `Transcription vidéo ${i + 1}/${newAudioPaths.length}...`
         )
 
-        const segments = await window.electron.transcribe(newAudioPaths[i], state.config.language) as any[]
+        const segments = await api.transcribe(newAudioPaths[i], state.config.language, state.config.whisperModel) as any[]
         const offset = state.videoFiles[i]?.offset || 0
 
         // Ajuster les timestamps avec l'offset global de la vidéo
@@ -351,7 +352,7 @@ export const useStore = create<AppState>((set, get) => ({
       const fullText = allTranscriptSegments
         .map((t: any) => `[${t.start.toFixed(1)}s] ${t.text}`)
         .join('\n')
-      const result = await window.electron.analyzeTranscript(fullText, state.config.context, state.config.ollamaModel)
+      const result = await api.analyzeTranscript(fullText, state.config.context, state.config.ollamaModel)
 
       if (result && result.segments) {
         state.setSegments(result.segments.map((s: any) => ({
@@ -391,14 +392,18 @@ export const useStore = create<AppState>((set, get) => ({
   history: [],
 
   loadHistory: async () => {
-    const history = await window.electron.getProjectHistory()
-    set({ history })
+    try {
+      const history = await api.getProjectHistory()
+      set({ history })
+    } catch { /* ignore if server not ready */ }
   },
 
   loadProject: async () => {
-    const projectData = await window.electron.loadProject()
-    if (projectData) {
-      get().loadFromHistory(projectData)
+    // En mode web, on charge depuis l'historique directement
+    // Le chargement de fichier se fait via import dans le Header
+    const history = await api.getProjectHistory()
+    if (history.length > 0) {
+      get().loadFromHistory(history[0])
     }
   },
 
@@ -430,9 +435,9 @@ export const useStore = create<AppState>((set, get) => ({
       config: state.config,
       projectName: state.videoFiles[0].name
     }
-    const path = await window.electron.saveProject(projectData)
-    if (path) {
-      console.log('Projet sauvegardé avec succès :', path)
+    const fileName = await api.saveProject(projectData)
+    if (fileName) {
+      console.log('Projet sauvegarde:', fileName)
     }
   },
 
@@ -448,7 +453,7 @@ export const useStore = create<AppState>((set, get) => ({
       config: state.config,
       projectName: state.videoFiles[0].name
     }
-    await window.electron.autoSaveProject(projectData)
+    await api.autoSaveProject(projectData)
     await get().loadHistory()
   }
 }))

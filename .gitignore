@@ -5,6 +5,10 @@ node_modules/
 out/
 release/
 dist/
+dist-server/
+
+# Runtime data
+data/
 
 # AI models (downloaded at runtime)
 models/

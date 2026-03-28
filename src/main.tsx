@@ -9,6 +9,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { ThemeProvider } from 'next-themes'
+import './api'  // Initialise le client API (expose window.electron)
 import App from './App'
 import './index.css'
 

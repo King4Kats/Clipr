@@ -228,7 +228,7 @@ const VideoPreview = () => {
                 <video
                     key={videoFile.path}
                     ref={videoRef}
-                    src={`local-video://${encodeURIComponent(videoFile.path)}`}
+                    src={`/api/files/${(videoFile as any).id || encodeURIComponent(videoFile.path.split('/').pop() || videoFile.path.split('\\').pop() || '')}`}
                     className="w-full h-full object-contain cursor-pointer"
                     onClick={togglePlay}
                     playsInline

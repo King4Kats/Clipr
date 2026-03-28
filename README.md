@@ -5,229 +5,210 @@
 <h1 align="center">Clipr</h1>
 
 <p align="center">
-  <strong>Decoupage video intelligent par intelligence artificielle</strong>
+  <strong>Application web Docker pour segmenter automatiquement des vidéos longues en extraits thématiques grâce à l'IA locale</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-006B9F?style=flat-square" alt="Version">
-  <img src="https://img.shields.io/badge/license-GPL--3.0-489caa?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/platform-Windows-0078D6?style=flat-square&logo=windows" alt="Platform">
-  <img src="https://img.shields.io/badge/Electron-27-47848F?style=flat-square&logo=electron" alt="Electron">
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker" alt="Docker">
+  <img src="https://img.shields.io/badge/Node.js-18+-339933?style=flat-square&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react" alt="React">
-  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Whisper-local-FF6F00?style=flat-square" alt="Whisper">
+  <img src="https://img.shields.io/badge/Ollama-LLM-000000?style=flat-square" alt="Ollama">
 </p>
 
 ---
 
-## A propos
+## 📋 Table des matières
 
-**Clipr** est une application de bureau qui analyse automatiquement vos videos grace a l'intelligence artificielle. Importez un cours, une conference, un podcast video — Clipr ecoute le contenu, identifie les sujets et propose un decoupage en segments thematiques.
+- [Architecture](#-architecture-docker)
+- [Prérequis](#-prérequis)
+- [Installation](#-installation)
+- [Configuration](#%EF%B8%8F-configuration)
+- [Utilisation](#-utilisation)
+- [Commandes Docker](#-commandes-docker)
+- [Architecture technique](#-architecture-technique)
+- [Développement](#-développement)
+- [Licence](#-licence)
 
-**Tout se passe en local sur votre machine.** Aucune donnee n'est envoyee sur Internet.
+---
 
-### Comment ca marche
+## 🏗 Architecture Docker
 
 ```
-Video importee
+┌─────────────────────────────────────────────────────────────┐
+│                      docker-compose                         │
+│                                                             │
+│  ┌─────────────────────┐  ┌──────────────┐  ┌───────────┐  │
+│  │       clipr          │  │    ollama     │  │   caddy   │  │
+│  │                      │  │              │  │           │  │
+│  │  Node.js (Express)   │  │  LLM local   │  │  Reverse  │  │
+│  │  FFmpeg              │  │  GPU         │  │  Proxy    │  │
+│  │  Python              │  │              │  │  HTTPS    │  │
+│  │  faster-whisper      │  │              │  │           │  │
+│  │                      │  │  :11434      │  │  :443     │  │
+│  │  :3000               │  │              │  │  :80      │  │
+│  └─────────────────────┘  └──────────────┘  └───────────┘  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+| Service | Rôle | Port |
+|---------|------|------|
+| **clipr** | Backend Express + transcription Whisper + FFmpeg | `3000` |
+| **ollama** | Serveur LLM local (accélération GPU) | `11434` |
+| **caddy** | Reverse proxy avec HTTPS automatique | `80` / `443` |
+
+---
+
+## ✅ Prérequis
+
+- **Docker** >= 20.10
+- **Docker Compose** >= 2.0
+- **GPU NVIDIA** recommandé pour Ollama (CUDA) — fonctionne aussi en CPU, mais plus lentement
+
+---
+
+## 🚀 Installation
+
+### Installation rapide (une commande)
+
+```bash
+bash <(curl -s https://raw.githubusercontent.com/King4Kats/Clipr/main/install.sh)
+```
+
+### Installation manuelle
+
+```bash
+# Cloner le dépôt
+git clone https://github.com/King4Kats/Clipr.git
+cd Clipr
+
+# Lancer les conteneurs
+docker compose up -d
+```
+
+L'application est ensuite accessible sur **http://localhost:3000**.
+
+---
+
+## ⚙️ Configuration
+
+### Nom de domaine (HTTPS)
+
+Définir la variable d'environnement `CLIPR_DOMAIN` pour configurer le domaine dans Caddy :
+
+```bash
+export CLIPR_DOMAIN=clipr.mondomaine.fr
+```
+
+Ou modifier directement le fichier `caddy/Caddyfile` :
+
+```
+clipr.mondomaine.fr {
+    reverse_proxy clipr:3000
+}
+```
+
+### Modèles Ollama
+
+Les modèles LLM se gèrent directement depuis l'interface de Clipr :
+
+1. Ouvrir l'application
+2. Accéder aux **Paramètres** (icône engrenage)
+3. Sélectionner et télécharger le modèle souhaité
+
+---
+
+## 🎬 Utilisation
+
+1. **Ouvrir** l'application : `http://localhost:3000`
+2. **Importer** une vidéo (drag & drop ou sélection de fichier)
+3. **Analyse automatique** : extraction audio → transcription Whisper → segmentation thématique par LLM
+4. **Ajuster** les segments dans l'éditeur interactif
+5. **Exporter** les extraits (MP4, timecodes TXT, transcription)
+
+---
+
+## 🐳 Commandes Docker
+
+| Commande | Description |
+|----------|-------------|
+| `docker compose up -d` | Démarrer tous les services |
+| `docker compose down` | Arrêter tous les services |
+| `docker compose logs -f` | Suivre les logs en temps réel |
+| `docker compose logs -f clipr` | Logs du service Clipr uniquement |
+| `docker compose restart` | Redémarrer les services |
+| `docker compose build --no-cache` | Reconstruire les images sans cache |
+| `docker compose pull && docker compose up -d` | Mettre à jour et relancer |
+
+---
+
+## 🔧 Architecture technique
+
+### Backend — `server/`
+
+- **Express.js** : API REST + serveur de fichiers statiques
+- **WebSocket** : communication temps réel (progression, transcription live)
+- **FFmpeg** : extraction audio, découpe et export des segments vidéo
+- **faster-whisper** (Python) : transcription vocale locale
+- **Ollama** (HTTP) : analyse sémantique et segmentation thématique via LLM
+
+### Frontend — `src/`
+
+- **React 18** + **TypeScript**
+- **Zustand** : gestion d'état global (`src/store/useStore.ts`)
+- **Tailwind CSS** : styles utilitaires
+- Composants principaux dans `src/components/new/`
+
+### Flux de traitement
+
+```
+Vidéo importée
   │
   ├─ 1. Extraction audio (FFmpeg)
   │     └─ Conversion en WAV 16kHz mono
   │
-  ├─ 2. Transcription (Whisper)
-  │     └─ Reconnaissance vocale locale, segments en temps reel
+  ├─ 2. Transcription (faster-whisper)
+  │     └─ Reconnaissance vocale locale, segments horodatés
   │
-  ├─ 3. Analyse thematique (LLM Ollama)
-  │     └─ Decoupe intelligente en segments titres
+  ├─ 3. Analyse thématique (Ollama LLM)
+  │     └─ Découpe intelligente en segments titrés
   │
-  └─ 4. Editeur interactif
+  └─ 4. Éditeur interactif
         └─ Ajustement, renommage, export
 ```
 
 ---
 
-## Fonctionnalites
+## 💻 Développement
 
-- **Import multi-videos** — Glissez-deposez une ou plusieurs videos (MP4, MKV, AVI, MOV, WEBM)
-- **Transcription automatique** — Reconnaissance vocale locale via Whisper (tiny, base, small, medium)
-- **Decoupe IA** — Un LLM local (Ollama) identifie les themes et propose des segments
-- **Editeur NLE** — Timeline avec waveform, segments colores, panneaux redimensionnables et deplacables
-- **3 formats d'export** — Videos decoupees (MP4), timecodes (TXT), texte propre (TXT)
-- **Sauvegarde de projets** — Auto-save + sauvegarde/chargement manuel (.json)
-- **Mise a jour automatique** — Verification et installation depuis GitHub Releases
-- **Documentation integree** — Guide utilisateur + kit developpeur accessible depuis l'app
-- **Theme clair / sombre** — Interface adaptative
-
----
-
-## Stack technique
-
-| Categorie | Technologies |
-|-----------|-------------|
-| **Desktop** | Electron 27, electron-vite, electron-builder (NSIS) |
-| **Frontend** | React 18, TypeScript 5, Zustand, Tailwind CSS, Radix UI, Framer Motion |
-| **Layout** | React Grid Layout (panneaux draggables), react-resizable-panels |
-| **Video** | FFmpeg / FFprobe (fluent-ffmpeg) |
-| **IA locale** | faster-whisper (Python subprocess), Ollama (HTTP REST, port 11434) |
-| **Modeles** | Whisper GGML (HuggingFace), Qwen2.5-3B / Phi-3-mini (GGUF) |
-| **Logs** | electron-log (rotation 5 Mo), archiver (export ZIP) |
-| **MAJ** | electron-updater + GitHub Releases |
-
----
-
-## Installation
-
-### Utilisateur
-
-1. **Telecharger** le fichier `Clipr-Setup-X.Y.Z.exe` depuis les [Releases](https://github.com/King4Kats/Clipr/releases)
-2. **Lancer** l'installeur — installation automatique, sans droits administrateur
-3. **Premier lancement** — l'assistant telecharge les modeles IA (~2.2 Go au total)
-
-### Developpeur
-
-**Prerequisites** : Node.js 18+ et npm
+### Lancer en mode développement (hors Docker)
 
 ```bash
-# Cloner le repo
-git clone https://github.com/King4Kats/Clipr.git
-cd Clipr
-
-# Installer les dependances
+# Installer les dépendances
 npm install
 
-# Lancer en mode developpement (HMR)
+# Lancer client + serveur en parallèle (HMR)
 npm run dev
 
-# Build + installeur Windows
+# Build de production
 npm run build
 ```
 
 | Commande | Description |
 |----------|-------------|
-| `npm run dev` | Developpement avec Hot Module Replacement |
-| `npm run build` | Compilation TypeScript + creation installeur NSIS |
-| `npm run preview` | Previsualisation du build |
-| `npm run test` | Lancer les tests (Vitest) |
+| `npm run dev` | Développement avec Hot Module Replacement (client + serveur) |
+| `npm run build` | Compilation TypeScript + build de production |
 
 ---
 
-## Structure du projet
+## 📄 Licence
 
-```
-Clipr/
-├── electron/                  # Processus principal (Node.js)
-│   ├── main.ts               # Point d'entree, handlers IPC
-│   ├── preload.ts             # Bridge securise (ContextBridge)
-│   └── services/
-│       ├── ffmpeg.ts          # Extraction audio, decoupe, concatenation
-│       ├── whisper.ts         # Transcription vocale (subprocess Python)
-│       ├── ollama.ts          # Analyse LLM (serveur Ollama local)
-│       ├── model-manager.ts   # Telechargement modeles IA
-│       ├── project-history.ts # Sauvegarde/chargement projets
-│       ├── setup.ts           # Verification des dependances
-│       ├── logger.ts          # Logging persistant (electron-log)
-│       ├── log-sender.ts      # Export ZIP des logs
-│       ├── updater.ts         # Mise a jour automatique
-│       ├── whisper-native.ts  # Transcription native (alternatif)
-│       └── llm-native.ts     # Inference LLM native (alternatif)
-│
-├── src/                       # Processus renderer (React)
-│   ├── App.tsx                # Composant racine, routage par etat
-│   ├── store/useStore.ts      # Etat global Zustand
-│   ├── types/index.ts         # Interfaces TypeScript
-│   ├── components/
-│   │   ├── SetupWizard.tsx    # Assistant de configuration
-│   │   ├── new/               # Composants applicatifs
-│   │   │   ├── Header.tsx
-│   │   │   ├── UploadZone.tsx
-│   │   │   ├── AIAnalysisPanel.tsx
-│   │   │   ├── ProgressPanel.tsx
-│   │   │   ├── VideoPreview.tsx
-│   │   │   ├── EditorLayout.tsx
-│   │   │   ├── Timeline.tsx
-│   │   │   ├── SegmentTimeline.tsx
-│   │   │   └── Mascot.tsx
-│   │   └── ui/                # Primitives Radix UI (shadcn/ui)
-│   └── assets/
-│       ├── Clipr.svg          # Logo
-│       └── Clipr.ico          # Icone Windows
-│
-├── docs/                      # Documentation HTML
-└── models/                    # Modeles IA (telecharges au runtime)
-```
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Processus Principal                    │
-│                    (electron/main.ts)                    │
-│                                                         │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐  │
-│  │ ffmpeg   │ │ whisper  │ │ ollama   │ │  model-   │  │
-│  │   .ts    │ │   .ts    │ │   .ts    │ │ manager   │  │
-│  └──────────┘ └──────────┘ └──────────┘ └───────────┘  │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐  │
-│  │ logger   │ │ updater  │ │  setup   │ │  project  │  │
-│  │   .ts    │ │   .ts    │ │   .ts    │ │ history   │  │
-│  └──────────┘ └──────────┘ └──────────┘ └───────────┘  │
-│                                                         │
-│              preload.ts (ContextBridge)                  │
-│         41 canaux IPC (36 invoke + 5 events)            │
-└────────────────────────┬────────────────────────────────┘
-                         │ window.electron.*
-┌────────────────────────┴────────────────────────────────┐
-│                   Processus Renderer                     │
-│                       (React 18)                         │
-│                                                         │
-│  ┌─────────────────────────────────────────────────┐    │
-│  │              useStore (Zustand)                  │    │
-│  │  videoFiles, transcript, segments, config, ...  │    │
-│  └─────────────────────────────────────────────────┘    │
-│                                                         │
-│  App.tsx                                                │
-│  ├── Header          ├── ProgressPanel                  │
-│  ├── UploadZone      ├── EditorLayout                   │
-│  ├── SetupWizard     │   ├── VideoPreview               │
-│  └── AIAnalysisPanel │   ├── Timeline                   │
-│                      │   └── SegmentTimeline             │
-└─────────────────────────────────────────────────────────┘
-```
-
----
-
-## English
-
-**Clipr** is a desktop application that automatically analyzes videos using local AI. It extracts audio, transcribes speech with Whisper, and uses a local LLM (Ollama) to segment content by topic — all running offline on your machine.
-
-### Features
-
-- Multi-video import (drag & drop)
-- Local speech-to-text transcription (Whisper)
-- AI-powered thematic segmentation (Ollama LLM)
-- NLE-style editor with waveform timeline, colored segments, draggable panels
-- Export as MP4 clips, TXT timecodes, or clean transcript
-- Auto-save, manual project management
-- Auto-updates via GitHub Releases
-
-### Quick start
-
-```bash
-git clone https://github.com/King4Kats/Clipr.git
-cd Clipr && npm install && npm run dev
-```
-
-Or download the latest installer from [Releases](https://github.com/King4Kats/Clipr/releases).
-
----
-
-## License
-
-Ce projet est distribue sous licence **GPL-3.0**. Voir le fichier [LICENSE](LICENSE) pour plus de details.
+Ce projet est distribué sous licence **MIT**. Voir le fichier [LICENSE](LICENSE) pour les détails.
 
 ---
 
 <p align="center">
-  <sub>Fait avec  ❤️ par <a href="https://github.com/King4Kats">King4Kats</a></sub>
+  <sub>Fait avec ❤️ par <a href="https://github.com/King4Kats">King4Kats</a></sub>
 </p>
