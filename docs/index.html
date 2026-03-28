@@ -144,22 +144,20 @@
 <div class="layout">
 <nav class="sidebar" id="sidebar">
   <div class="user-section" id="sidebarUser">
-    <div class="sidebar-label">Demarrage</div>
-    <a href="#u-bienvenue">Bienvenue</a>
-    <a href="#u-installation">Installation</a>
-    <a href="#u-compte">Creer un compte</a>
-    <div class="sidebar-label">Projets</div>
-    <a href="#u-projets">Gestion des projets</a>
+    <div class="sidebar-label">Premiers pas</div>
+    <a href="#u-bienvenue">C'est quoi Clipr ?</a>
+    <a href="#u-compte">Creer son compte</a>
+    <div class="sidebar-label">Utilisation</div>
+    <a href="#u-projets">Gerer ses projets</a>
     <a href="#u-analyse">Analyse IA</a>
-    <a href="#u-manuel">Projet manuel</a>
-    <a href="#u-editeur">Editeur</a>
+    <a href="#u-manuel">Decoupe manuelle</a>
+    <a href="#u-editeur">L'editeur</a>
     <a href="#u-exporter">Exporter</a>
-    <div class="sidebar-label">Collaboration</div>
-    <a href="#u-partage">Partage</a>
-    <a href="#u-lock">Verrouillage IA</a>
-    <div class="sidebar-label">Admin</div>
-    <a href="#u-admin">Dashboard admin</a>
-    <a href="#u-config">Configuration</a>
+    <div class="sidebar-label">Equipe</div>
+    <a href="#u-partage">Partager un projet</a>
+    <a href="#u-lock">L'IA est occupee ?</a>
+    <a href="#u-admin">Espace admin</a>
+    <a href="#u-config">Reglages</a>
   </div>
   <div class="dev-section visible" id="sidebarDev">
     <div class="sidebar-label">Architecture</div>
@@ -187,158 +185,214 @@
 <section class="section" id="u-bienvenue">
   <h2 class="section-title">Bienvenue sur Clipr</h2>
   <div class="card">
-    <h3>Plateforme de segmentation video par IA locale</h3>
-    <p>Clipr segmente automatiquement des videos longues en extraits thematiques. Toutes les donnees restent sur votre serveur.</p>
+    <h3>A quoi sert Clipr ?</h3>
+    <p>Clipr vous aide a <strong>decouper des videos longues</strong> (interviews, reportages, conferences...) en <strong>extraits thematiques</strong>.</p>
+    <p>Deux facons de travailler :</p>
     <ul>
-      <li><strong>Multi-projets</strong> : jusqu'a 6 projets simultanes</li>
-      <li><strong>Analyse en arriere-plan</strong> : lancez l'IA et continuez a travailler</li>
-      <li><strong>Multi-utilisateurs</strong> : comptes avec authentification JWT</li>
-      <li><strong>Collaboration</strong> : partagez vos projets (lecteur/editeur)</li>
-      <li><strong>Administration</strong> : dashboard complet pour superviser l'instance</li>
+      <li><strong>Analyse IA</strong> — L'intelligence artificielle ecoute la video, transcrit les paroles et cree automatiquement des chapitres thematiques. Ideal pour gagner du temps sur des videos longues.</li>
+      <li><strong>Decoupe manuelle</strong> — Vous creez vos propres segments sur la timeline, a la main. Controle total.</li>
     </ul>
-  </div>
-</section>
-
-<section class="section" id="u-installation">
-  <h2 class="section-title">Installation</h2>
-  <div class="card">
-    <h3>Prerequis</h3>
-    <ul>
-      <li>Docker >= 20.10 et Docker Compose >= 2.0</li>
-      <li>GPU recommande (NVIDIA CUDA ou AMD ROCm)</li>
-      <li>~20 GB d'espace disque</li>
-    </ul>
+    <div class="tip">Vous pouvez meme lancer une analyse IA sur un projet et travailler manuellement sur un autre en attendant !</div>
   </div>
   <div class="card">
-    <h3>Lancement</h3>
-    <pre>git clone https://github.com/King4Kats/Clipr.git
-cd Clipr
-docker compose up -d</pre>
-    <p>Accessible sur <code>http://localhost:3000</code></p>
+    <h3>En resume</h3>
+    <ul>
+      <li>Jusqu'a <strong>6 projets</strong> en parallele</li>
+      <li>L'IA travaille <strong>en arriere-plan</strong> : pas besoin de rester sur la page</li>
+      <li>Chaque utilisateur a <strong>son propre espace</strong></li>
+      <li>Possibilite de <strong>partager</strong> un projet avec des collegues</li>
+      <li>Export en <strong>video MP4</strong>, texte ou fichier projet</li>
+    </ul>
   </div>
 </section>
 
 <section class="section" id="u-compte">
-  <h2 class="section-title">Creer un compte</h2>
+  <h2 class="section-title">Creer son compte</h2>
   <div class="card">
-    <ol>
-      <li>Ouvrir l'application</li>
-      <li>Cliquer <strong>S'inscrire</strong></li>
-      <li>Remplir : nom d'utilisateur, email, mot de passe</li>
-    </ol>
-    <div class="tip">Le premier utilisateur inscrit devient automatiquement <strong>administrateur</strong>.</div>
+    <p>A la premiere ouverture de Clipr, vous arrivez sur un ecran de connexion.</p>
+    <p><span class="step-num">1</span> Cliquez sur <strong>S'inscrire</strong></p>
+    <p><span class="step-num">2</span> Choisissez un <strong>nom d'utilisateur</strong>, votre <strong>email</strong> et un <strong>mot de passe</strong></p>
+    <p><span class="step-num">3</span> C'est fait ! Vous etes connecte.</p>
+    <div class="tip">Le tout premier compte cree devient automatiquement <strong>administrateur</strong>. Les suivants sont des comptes utilisateurs classiques.</div>
   </div>
 </section>
 
 <section class="section" id="u-projets">
-  <h2 class="section-title">Gestion des projets</h2>
+  <h2 class="section-title">Gerer ses projets</h2>
   <div class="card">
-    <h3>Page d'accueil</h3>
-    <p>Grille de projets (max 6) avec badges type (IA/Manuel) et statut (Brouillon/En cours/Termine).</p>
+    <h3>La page d'accueil</h3>
+    <p>C'est votre tableau de bord. Vous y retrouvez tous vos projets (jusqu'a 6), et les projets que d'autres utilisateurs ont partage avec vous.</p>
+    <p>Chaque carte de projet affiche :</p>
+    <ul>
+      <li>Le <strong>nom</strong> du projet</li>
+      <li>Son <strong>type</strong> : <span class="badge badge-purple">IA</span> ou <span class="badge badge-blue">Manuel</span></li>
+      <li>Son <strong>statut</strong> : <span class="badge badge-amber">Brouillon</span>, <span class="badge badge-amber">En cours</span> ou <span class="badge badge-green">Termine</span></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Creer un nouveau projet</h3>
+    <p>Deux manieres de commencer :</p>
+    <ul>
+      <li>Cliquer sur la carte <strong>+ Nouveau Projet</strong></li>
+      <li>Ou <strong>glisser-deposer une video</strong> directement dans la zone d'upload en bas de page</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Actions rapides</h3>
+    <p>Survolez une carte de projet pour voir les icones d'action :</p>
     <table>
-      <tr><th>Action</th><th>Comment</th></tr>
-      <tr><td>Creer</td><td>Bouton <strong>+ Nouveau</strong> ou carte en pointilles</td></tr>
-      <tr><td>Ouvrir</td><td>Cliquer sur la carte</td></tr>
-      <tr><td>Renommer</td><td>Icone crayon au survol, ou nom dans le header</td></tr>
-      <tr><td>Supprimer</td><td>Icone poubelle au survol</td></tr>
-      <tr><td>Partager</td><td>Icone partage au survol</td></tr>
+      <tr><td>&#9998;</td><td><strong>Renommer</strong> le projet</td></tr>
+      <tr><td>&#128279;</td><td><strong>Partager</strong> avec un autre utilisateur</td></tr>
+      <tr><td>&#128465;</td><td><strong>Supprimer</strong> le projet</td></tr>
     </table>
+    <p>Vous pouvez aussi renommer un projet en cliquant sur son nom dans la barre du haut.</p>
   </div>
 </section>
 
 <section class="section" id="u-analyse">
   <h2 class="section-title">Analyse IA</h2>
   <div class="card">
-    <h3>Configuration</h3>
-    <table>
-      <tr><th>Parametre</th><th>Description</th><th>Defaut</th></tr>
-      <tr><td>Modele LLM</td><td>Analyse semantique</td><td><code>mistral-small:22b</code></td></tr>
-      <tr><td>Modele Whisper</td><td>Transcription</td><td><code>large-v3</code></td></tr>
-      <tr><td>Consignes</td><td>Instructions de decoupe</td><td>Vide</td></tr>
-      <tr><td>Vocabulaire</td><td>Termes de domaine pour Whisper</td><td>Patrimoine Vendee/Bretagne</td></tr>
-    </table>
-    <h3>Traitement en arriere-plan</h3>
-    <p>Cliquer <strong>Lancer l'analyse</strong>. Le traitement s'execute cote serveur. Vous pouvez naviguer librement ou fermer le navigateur.</p>
-    <div class="schema">1. Extraction audio (FFmpeg)     → WAV 16kHz mono
-2. Transcription (Whisper)        → Segments horodates
-3. Analyse semantique (Ollama)    → Segments thematiques
-4. Sauvegarde en base             → Statut "Termine"</div>
+    <h3>Comment ca marche ?</h3>
+    <p>L'IA va ecouter votre video, transcrire tout ce qui est dit, puis decouper automatiquement le contenu en chapitres thematiques avec des titres.</p>
+    <p><span class="step-num">1</span> <strong>Importez</strong> une ou plusieurs videos dans votre projet</p>
+    <p><span class="step-num">2</span> Choisissez le mode <strong>Analyse IA</strong></p>
+    <p><span class="step-num">3</span> Dans le panneau a droite, vous pouvez ajuster :</p>
+    <ul>
+      <li><strong>Consignes de decoupe</strong> — Decrivez ce que vous attendez. Par exemple : <em>"Concentre-toi sur les anecdotes personnelles"</em> ou <em>"Cree un chapitre par theme aborde"</em></li>
+      <li><strong>Vocabulaire</strong> — Si votre video contient des mots rares, du patois, des noms de lieux... ajoutez-les ici pour que la transcription soit plus fidele</li>
+    </ul>
+    <p><span class="step-num">4</span> Cliquez <strong>Lancer l'analyse</strong></p>
+    <div class="tip"><strong>Pas besoin de rester sur la page !</strong> L'analyse tourne en arriere-plan. Vous pouvez revenir a l'accueil, travailler sur un autre projet, ou meme fermer votre navigateur. Vos resultats seront la quand vous reviendrez.</div>
+  </div>
+  <div class="card">
+    <h3>Que se passe-t-il pendant l'analyse ?</h3>
+    <div class="flow">
+      <div class="flow-item">Extraction du son</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-item">Transcription des paroles</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-item">Decoupe en chapitres</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-item">Pret !</div>
+    </div>
+    <p>Si vous restez sur la page, vous verrez la progression en temps reel. Sinon, la carte du projet passera au statut <span class="badge badge-green">Termine</span> sur la page d'accueil.</p>
+  </div>
+  <div class="card">
+    <h3>A propos du vocabulaire</h3>
+    <p>Le champ <strong>Vocabulaire Whisper</strong> aide l'IA a mieux reconnaitre les mots difficiles : noms propres, termes techniques, patois, noms de lieux...</p>
+    <p>Par defaut, un vocabulaire lie au patrimoine culturel de Vendee et Bretagne est pre-rempli (artisanat, musique traditionnelle, gastronomie, etc.). Vous pouvez le modifier librement selon votre sujet.</p>
   </div>
 </section>
 
 <section class="section" id="u-manuel">
-  <h2 class="section-title">Projet manuel</h2>
+  <h2 class="section-title">Decoupe manuelle</h2>
   <div class="card">
-    <p>Ajoutez des segments manuellement sans IA : importez des videos, utilisez le bouton <strong>+</strong> dans la timeline, ajustez les timecodes et exportez.</p>
-    <div class="tip">Travaillez sur un projet manuel pendant qu'un projet IA s'analyse en arriere-plan.</div>
+    <p>Si vous preferez garder le controle total, choisissez le mode <strong>Decoupe manuelle</strong> apres avoir importe vos videos.</p>
+    <p><span class="step-num">1</span> <strong>Importez</strong> vos videos</p>
+    <p><span class="step-num">2</span> Choisissez le mode <strong>Decoupe manuelle</strong></p>
+    <p><span class="step-num">3</span> Utilisez le bouton <strong>+</strong> dans la timeline pour ajouter des segments</p>
+    <p><span class="step-num">4</span> Ajustez les timecodes, renommez vos segments, reordonnez-les</p>
+    <div class="tip">Astuce : vous pouvez lancer un projet IA sur une video longue et travailler manuellement sur une autre video en attendant les resultats.</div>
   </div>
 </section>
 
 <section class="section" id="u-editeur">
-  <h2 class="section-title">Editeur</h2>
+  <h2 class="section-title">L'editeur</h2>
   <div class="card">
-    <p>L'editeur NLE comprend : lecteur video, timeline, liste des segments (renommer, redimensionner, reordonner, supprimer) et transcription horodatee.</p>
+    <h3>L'interface d'edition</h3>
+    <p>Une fois vos segments crees (par l'IA ou manuellement), vous accedez a l'editeur. Il se compose de :</p>
+    <ul>
+      <li><strong>Le lecteur video</strong> — En haut, pour visionner et naviguer dans la video. Cliquez sur un segment pour le previsualiser.</li>
+      <li><strong>La timeline</strong> — La forme d'onde audio avec vos segments en couleur. Vous pouvez les redimensionner en tirant les bords, et les deplacer.</li>
+      <li><strong>La liste des segments</strong> — A droite, avec les titres, durees et timecodes. Cliquez pour selectionner, double-cliquez sur le titre pour le renommer.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Ce que vous pouvez faire</h3>
+    <table>
+      <tr><td>Renommer un segment</td><td>Cliquer sur le titre du segment</td></tr>
+      <tr><td>Ajuster les bornes</td><td>Tirer les bords du segment dans la timeline</td></tr>
+      <tr><td>Reordonner</td><td>Glisser-deposer dans la liste</td></tr>
+      <tr><td>Supprimer</td><td>Icone poubelle sur le segment</td></tr>
+      <tr><td>Ajouter un segment</td><td>Bouton + dans la timeline</td></tr>
+    </table>
   </div>
 </section>
 
 <section class="section" id="u-exporter">
-  <h2 class="section-title">Exporter</h2>
+  <h2 class="section-title">Exporter son travail</h2>
   <div class="card">
+    <p>Quand vos segments sont prets, vous pouvez exporter :</p>
     <table>
-      <tr><th>Format</th><th>Description</th></tr>
-      <tr><td>Video (MP4)</td><td>Export de chaque segment</td></tr>
-      <tr><td>Texte</td><td>Transcription complete</td></tr>
-      <tr><td>Projet (JSON)</td><td>Export complet reimportable</td></tr>
+      <tr><th>Format</th><th>Ce que vous obtenez</th></tr>
+      <tr><td><strong>Video MP4</strong></td><td>Un fichier video par segment, pret a diffuser</td></tr>
+      <tr><td><strong>Texte</strong></td><td>La transcription complete avec les timecodes</td></tr>
+      <tr><td><strong>Projet JSON</strong></td><td>Un fichier de sauvegarde que vous pouvez reimporter plus tard</td></tr>
     </table>
   </div>
 </section>
 
 <section class="section" id="u-partage">
-  <h2 class="section-title">Partage et collaboration</h2>
+  <h2 class="section-title">Partager un projet</h2>
   <div class="card">
-    <ol>
-      <li>Survoler un projet → icone <strong>Partager</strong></li>
-      <li>Rechercher un utilisateur par nom ou email</li>
-      <li>Choisir : <strong>Lecteur</strong> (consultation) ou <strong>Editeur</strong> (modification)</li>
-    </ol>
-    <p>Les projets partages apparaissent dans <strong>Partages avec moi</strong> sur la page d'accueil.</p>
+    <h3>Inviter quelqu'un</h3>
+    <p><span class="step-num">1</span> Sur la page d'accueil, survolez votre projet et cliquez l'icone <strong>Partager</strong></p>
+    <p><span class="step-num">2</span> Tapez le nom d'un utilisateur inscrit sur Clipr</p>
+    <p><span class="step-num">3</span> Choisissez son role :</p>
+    <ul>
+      <li><strong>Lecteur</strong> — Il peut voir le projet mais pas le modifier</li>
+      <li><strong>Editeur</strong> — Il peut modifier le projet (segments, timecodes, etc.)</li>
+    </ul>
+    <p>Vous pouvez changer le role a tout moment en cliquant dessus, ou retirer l'acces.</p>
+  </div>
+  <div class="card">
+    <h3>Projets partages avec moi</h3>
+    <p>Quand quelqu'un partage un projet avec vous, il apparait dans la section <strong>Partages avec moi</strong> en bas de votre page d'accueil. Cliquez dessus pour l'ouvrir.</p>
   </div>
 </section>
 
 <section class="section" id="u-lock">
-  <h2 class="section-title">Verrouillage IA</h2>
+  <h2 class="section-title">L'IA est occupee ?</h2>
   <div class="card">
-    <p>Un seul utilisateur a la fois peut utiliser l'IA. Banniere ambre quand occupee. Timeout automatique de 30 minutes.</p>
+    <p>L'IA ne peut analyser <strong>qu'un seul projet a la fois</strong> (pour tous les utilisateurs). Si quelqu'un d'autre est en train d'utiliser l'IA, vous verrez un message vous indiquant qui l'utilise et sur quel projet.</p>
+    <p>En attendant, vous pouvez :</p>
+    <ul>
+      <li>Travailler en <strong>mode manuel</strong> sur un autre projet</li>
+      <li>Modifier les segments d'un projet deja analyse</li>
+      <li>Exporter vos projets termines</li>
+    </ul>
+    <p>L'IA se libere automatiquement quand l'analyse est terminee (ou apres 30 minutes maximum en cas de probleme).</p>
   </div>
 </section>
 
 <section class="section" id="u-admin">
-  <h2 class="section-title">Dashboard admin</h2>
+  <h2 class="section-title">Espace administrateur</h2>
   <div class="card">
-    <p>Icone bouclier dans le header (admin uniquement). 4 onglets :</p>
-    <table>
-      <tr><th>Onglet</th><th>Contenu</th></tr>
-      <tr><td>Vue d'ensemble</td><td>Stats, services, disque, statut IA</td></tr>
-      <tr><td>Projets</td><td>Tous les projets de tous les utilisateurs</td></tr>
-      <tr><td>Utilisateurs</td><td>Liste des comptes</td></tr>
-      <tr><td>Logs</td><td>200 dernieres lignes, coloration par niveau</td></tr>
-    </table>
+    <p>Si vous etes administrateur (le premier compte cree), vous avez acces a un espace de supervision via l'icone <strong>bouclier</strong> dans la barre du haut.</p>
+    <h3>Ce que vous pouvez voir</h3>
+    <ul>
+      <li><strong>Vue d'ensemble</strong> — Nombre d'utilisateurs, de projets, etat des services et de l'IA</li>
+      <li><strong>Tous les projets</strong> — La liste complete de tous les projets de tous les utilisateurs</li>
+      <li><strong>Utilisateurs</strong> — Les comptes inscrits avec leurs roles</li>
+      <li><strong>Logs</strong> — Un journal de ce qui se passe sur le serveur (utile en cas de probleme)</li>
+    </ul>
   </div>
 </section>
 
 <section class="section" id="u-config">
-  <h2 class="section-title">Configuration</h2>
+  <h2 class="section-title">Reglages</h2>
   <div class="card">
-    <h3>Variables d'environnement</h3>
-    <table>
-      <tr><th>Variable</th><th>Defaut</th><th>Description</th></tr>
-      <tr><td><code>JWT_SECRET</code></td><td>Auto-genere</td><td>Secret JWT (definir en production)</td></tr>
-      <tr><td><code>CORS_ORIGINS</code></td><td>*</td><td>Origines CORS autorisees</td></tr>
-      <tr><td><code>DATA_DIR</code></td><td>/data</td><td>Repertoire de stockage</td></tr>
-      <tr><td><code>OLLAMA_HOST</code></td><td>ollama</td><td>Hostname Ollama</td></tr>
-      <tr><td><code>OLLAMA_PORT</code></td><td>11434</td><td>Port Ollama</td></tr>
-    </table>
-    <div class="warn">Definissez <code>JWT_SECRET</code> en production pour persister les sessions.</div>
+    <h3>Parametres de l'IA</h3>
+    <p>Dans le panneau IA, vous pouvez choisir :</p>
+    <ul>
+      <li><strong>Le modele de transcription</strong> — <em>Large V3</em> pour la meilleure qualite, <em>Large V3 Turbo</em> pour aller plus vite</li>
+      <li><strong>Le modele d'analyse</strong> — L'IA qui cree les chapitres. Selectionnez parmi les modeles installes</li>
+      <li><strong>La langue</strong> — Francais par defaut</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Theme</h3>
+    <p>Cliquez sur l'icone soleil/lune dans la barre du haut pour basculer entre le mode <strong>clair</strong> et <strong>sombre</strong>.</p>
   </div>
 </section>
 
