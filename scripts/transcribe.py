@@ -18,10 +18,11 @@ import os
 def main():
     parser = argparse.ArgumentParser(description='Transcribe audio using faster-whisper')
     parser.add_argument('audio_path', help='Path to audio file')
-    parser.add_argument('--model', default='medium', help='Model size: tiny, base, small, medium, large-v2')
+    parser.add_argument('--model', default='large-v3', help='Model size: tiny, base, small, medium, large-v3, large-v3-turbo')
     parser.add_argument('--language', default='fr', help='Language code')
     parser.add_argument('--output', help='Output JSON path')
     parser.add_argument('--device', default='auto', help='Device: cpu, cuda, auto')
+    parser.add_argument('--prompt', default='', help='Initial prompt to guide transcription with domain vocabulary')
     args = parser.parse_args()
 
     # Try faster-whisper first, fall back to openai-whisper
@@ -68,13 +69,17 @@ def main():
         print(f"STATUS: Transcribing...", file=sys.stderr)
 
         segments_list = []
-        segments_generator, info = model.transcribe(
-            args.audio_path,
+        transcribe_kwargs = dict(
             language=args.language,
             beam_size=5,
             vad_filter=True,  # Filter out silence for faster processing
-            vad_parameters=dict(min_silence_duration_ms=500)
+            vad_parameters=dict(min_silence_duration_ms=500),
         )
+        if args.prompt:
+            transcribe_kwargs['initial_prompt'] = args.prompt
+            print(f"STATUS: Using initial prompt ({len(args.prompt)} chars)", file=sys.stderr)
+
+        segments_generator, info = model.transcribe(args.audio_path, **transcribe_kwargs)
 
         duration = info.duration
 
@@ -102,11 +107,14 @@ def main():
         print(f"PROGRESS: 5", file=sys.stderr)
         print(f"STATUS: Transcribing (using slower openai-whisper)...", file=sys.stderr)
 
-        result = model.transcribe(
-            args.audio_path,
+        transcribe_kwargs = dict(
             language=args.language,
-            verbose=False
+            verbose=False,
         )
+        if args.prompt:
+            transcribe_kwargs['initial_prompt'] = args.prompt
+
+        result = model.transcribe(args.audio_path, **transcribe_kwargs)
 
         segments_list = []
         for i, seg in enumerate(result.get('segments', [])):

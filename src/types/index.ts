@@ -62,12 +62,13 @@ export interface ProcessingProgress {
 
 /** Configuration utilisateur de l'application */
 export interface AppConfig {
-  whisperModel: 'tiny' | 'base' | 'small' | 'medium' | 'large'
+  whisperModel: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3' | 'large-v3-turbo'
   ollamaModel: string
   language: string
   outputQuality: number
   outputFolder: string | null
   context: string // Zone de contexte pour l'analyse IA
+  whisperPrompt: string // Vocabulaire de domaine pour guider la transcription Whisper
 }
 
 /** Résultat brut de l'analyse sémantique par Ollama */

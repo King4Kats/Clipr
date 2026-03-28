@@ -216,12 +216,13 @@ app.post('/api/export/text', (req, res) => {
 // Whisper transcribe
 app.post('/api/whisper/transcribe', async (req, res) => {
   try {
-    const { audioPath, language, model } = req.body
+    const { audioPath, language, model, initialPrompt } = req.body
     if (model) await whisperService.loadWhisperModel(model)
     const segments = await whisperService.transcribe(
       audioPath, language,
       (segment) => broadcast('transcript:segment', segment),
-      (percent) => broadcast('progress', { progress: percent, message: 'Transcription...' })
+      (percent) => broadcast('progress', { progress: percent, message: 'Transcription...' }),
+      initialPrompt
     )
     res.json({ segments })
   } catch (err: any) { res.status(500).json({ error: err.message }) }

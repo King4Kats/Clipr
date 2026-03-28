@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Brain, Sparkles, Settings2 } from "lucide-react";
+import { Brain, Sparkles, Settings2, MessageSquareText } from "lucide-react";
 import { motion } from "framer-motion";
 import { useStore } from "@/store/useStore";
 import { Button } from "@/components/ui/button";
@@ -162,6 +162,8 @@ const AIAnalysisPanel = () => {
                     <SelectItem value="base" className="text-xs cursor-pointer">Base</SelectItem>
                     <SelectItem value="small" className="text-xs cursor-pointer">Small</SelectItem>
                     <SelectItem value="medium" className="text-xs cursor-pointer">Medium</SelectItem>
+                    <SelectItem value="large-v3" className="text-xs cursor-pointer">Large V3</SelectItem>
+                    <SelectItem value="large-v3-turbo" className="text-xs cursor-pointer">Large V3 Turbo</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -180,6 +182,22 @@ const AIAnalysisPanel = () => {
             placeholder="Ex: 'Podcast tech, coupe tous les silences et concentre-toi sur les questions du public...'"
             className="w-full h-32 bg-secondary/10 text-xs text-foreground p-3 rounded-lg border border-border focus:ring-1 focus:ring-primary outline-none transition-all placeholder:text-muted-foreground/30 leading-relaxed resize-none"
           />
+        </div>
+
+        {/* Zone de texte : vocabulaire de domaine pour Whisper */}
+        <div className="space-y-3">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+            <MessageSquareText className="w-3.5 h-3.5" /> Vocabulaire Whisper
+          </label>
+          <textarea
+            value={config.whisperPrompt}
+            onChange={(e) => updateConfig({ whisperPrompt: e.target.value })}
+            placeholder="Mots-clés et vocabulaire de domaine pour améliorer la reconnaissance vocale (noms propres, patois, termes techniques...)"
+            className="w-full h-24 bg-secondary/10 text-xs text-foreground p-3 rounded-lg border border-border focus:ring-1 focus:ring-primary outline-none transition-all placeholder:text-muted-foreground/30 leading-relaxed resize-none"
+          />
+          <p className="text-[9px] text-muted-foreground/50">
+            Liste de mots, noms de lieux, patois ou termes techniques pour guider la transcription.
+          </p>
         </div>
 
         {/* Encart informatif : description du workflow IA */}

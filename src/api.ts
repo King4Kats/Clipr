@@ -98,8 +98,8 @@ const api = {
   downloadExport: (url: string, filename: string) => downloadFile(url, filename),
 
   // Whisper
-  transcribe: (audioPath: string, language: string, model?: string) =>
-    post<{ segments: any[] }>('/api/whisper/transcribe', { audioPath, language, model }).then(r => r.segments),
+  transcribe: (audioPath: string, language: string, model?: string, initialPrompt?: string) =>
+    post<{ segments: any[] }>('/api/whisper/transcribe', { audioPath, language, model, initialPrompt }).then(r => r.segments),
   cancelTranscription: () => post('/api/whisper/cancel'),
 
   // Ollama
