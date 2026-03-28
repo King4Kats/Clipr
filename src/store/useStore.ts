@@ -297,12 +297,27 @@ export const useStore = create<AppState>((set, get) => ({
       // Créer un projet en base si pas encore fait
       if (!state.activeProjectId) {
         const projectName = state.activeProjectName || state.videoFiles[0]?.name || 'Projet Sans Nom'
-        const id = await state.createProject(projectName, 'ai')
-        if (!id) {
+        // Sauvegarder l'état actuel avant createProject (qui reset le store)
+        const savedVideoFiles = [...state.videoFiles]
+        const savedAudioPaths = [...state.audioPaths]
+        const savedConfig = { ...state.config }
+
+        const project = await api.createProject(projectName, 'ai')
+        if (!project?.id) {
           state.setProcessing('error', 0, 'Impossible de créer le projet')
           return
         }
-        state = get() // refresh state after creation
+        // Restaurer les données dans le store avec le nouveau project id
+        set({
+          activeProjectId: project.id,
+          activeProjectName: project.name,
+          videoFiles: savedVideoFiles,
+          videoFile: savedVideoFiles[0] || null,
+          audioPaths: savedAudioPaths,
+          audioPath: savedAudioPaths[0] || null,
+          config: savedConfig,
+        })
+        state = get()
       }
 
       // Sauvegarder l'état actuel avant de lancer l'analyse
