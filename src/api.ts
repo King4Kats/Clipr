@@ -4,6 +4,12 @@
  */
 
 const API_BASE = ''  // meme origin
+const AUTH_STORAGE_KEY = 'clipr-auth-token'
+
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem(AUTH_STORAGE_KEY)
+  return token ? { 'Authorization': `Bearer ${token}` } : {}
+}
 
 // ── WebSocket ──
 type WsCallback = (data: any) => void
@@ -68,7 +74,7 @@ connectWs()
 
 // ── HTTP helpers ──
 async function get<T = any>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`)
+  const res = await fetch(`${API_BASE}${path}`, { headers: getAuthHeaders() })
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
   return res.json()
 }
@@ -76,7 +82,7 @@ async function get<T = any>(path: string): Promise<T> {
 async function post<T = any>(path: string, body?: any): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: body ? JSON.stringify(body) : undefined
   })
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
@@ -86,7 +92,7 @@ async function post<T = any>(path: string, body?: any): Promise<T> {
 async function patch<T = any>(path: string, body?: any): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: body ? JSON.stringify(body) : undefined
   })
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
@@ -94,7 +100,7 @@ async function patch<T = any>(path: string, body?: any): Promise<T> {
 }
 
 async function del<T = any>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE' })
+  const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE', headers: getAuthHeaders() })
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
   return res.json()
 }
@@ -103,7 +109,7 @@ async function del<T = any>(path: string): Promise<T> {
 async function uploadFiles(files: File[]): Promise<any[]> {
   const formData = new FormData()
   files.forEach(f => formData.append('videos', f))
-  const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: formData })
+  const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: formData, headers: getAuthHeaders() })
   if (!res.ok) throw new Error('Upload echoue')
   return res.json()
 }

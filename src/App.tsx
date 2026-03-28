@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from "react";
 import { useStore } from "@/store/useStore";
+import { useAuthStore } from "@/store/useAuthStore";
 
 import Header from "@/components/new/Header";
 import UploadZone from "@/components/new/UploadZone";
@@ -18,11 +19,14 @@ import ProgressPanel from "@/components/new/ProgressPanel";
 import VideoPreview from "@/components/new/VideoPreview";
 import EditorLayout from "@/components/new/EditorLayout";
 import SetupWizard from "@/components/SetupWizard";
+import AuthScreen from "@/components/AuthScreen";
 
 import { motion, AnimatePresence } from "framer-motion";
 import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check } from "lucide-react";
 
 function App() {
+  const { isAuthenticated, isLoading: authLoading, checkAuth } = useAuthStore();
+
   const {
     videoFiles,
     processingStep,
@@ -45,7 +49,14 @@ function App() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
 
+  // Check auth on mount
   useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
     const checkFirstRun = async () => {
       const setupComplete = localStorage.getItem("decoupeur-video-setup-complete");
       if (!setupComplete) setShowSetup(true);
@@ -59,7 +70,7 @@ function App() {
       if (!useStore.getState().activeProjectId) loadHistory();
     }, 10000);
     return () => clearInterval(interval);
-  }, [loadHistory]);
+  }, [loadHistory, isAuthenticated]);
 
   const handleSetupComplete = () => {
     localStorage.setItem("decoupeur-video-setup-complete", "true");
@@ -325,6 +336,20 @@ function App() {
       </div>
     );
   };
+
+  // Auth loading
+  if (authLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-background">
+        <Loader2 className="w-10 h-10 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  // Not authenticated — show login/register
+  if (!isAuthenticated) {
+    return <AuthScreen />;
+  }
 
   if (!setupChecked) {
     return (
