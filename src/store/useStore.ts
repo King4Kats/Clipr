@@ -290,19 +290,30 @@ export const useStore = create<AppState>((set, get) => ({
    * Le serveur sauvegarde les résultats en DB à la fin.
    */
   triggerAnalysis: async () => {
-    const state = get()
-    if (state.videoFiles.length === 0 || !state.activeProjectId) return
+    let state = get()
+    if (state.videoFiles.length === 0) return
 
     try {
+      // Créer un projet en base si pas encore fait
+      if (!state.activeProjectId) {
+        const projectName = state.activeProjectName || state.videoFiles[0]?.name || 'Projet Sans Nom'
+        const id = await state.createProject(projectName, 'ai')
+        if (!id) {
+          state.setProcessing('error', 0, 'Impossible de créer le projet')
+          return
+        }
+        state = get() // refresh state after creation
+      }
+
       // Sauvegarder l'état actuel avant de lancer l'analyse
       await state.saveProject()
 
       // S'abonner au channel WebSocket du projet
-      api.subscribeToProject(state.activeProjectId)
+      api.subscribeToProject(state.activeProjectId!)
 
       // Lancer l'analyse côté serveur (retour immédiat)
       state.setProcessing('extracting-audio', 0, 'Lancement de l\'analyse IA...')
-      await api.launchAnalysis(state.activeProjectId, state.config)
+      await api.launchAnalysis(state.activeProjectId!, state.config)
 
       // Le suivi de progression se fait via les events WebSocket
       // (configurés dans App.tsx via onProgress / onAnalysisComplete)
