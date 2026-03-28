@@ -14,7 +14,7 @@ const VIDEO_EXTENSIONS = ["mp4", "avi", "mov", "mkv", "mts", "webm"];
 const UploadZone = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { addVideoFile, setProcessing } = useStore();
+  const { addVideoFile, setProcessing, setAudioPaths } = useStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = useCallback(
@@ -34,10 +34,24 @@ const UploadZone = () => {
             name: r.name,
             duration: r.duration,
             size: r.size,
-            id: r.id, // ID serveur pour l'URL
+            id: r.id,
           } as any);
         }
         setProcessing("idle", 0, "");
+
+        // Extraire l'audio en arrière-plan pour la waveform
+        (async () => {
+          try {
+            const audioPaths: string[] = [];
+            for (const r of results) {
+              const audioPath = await api.extractAudio(r.path);
+              audioPaths.push(audioPath);
+            }
+            setAudioPaths(audioPaths);
+          } catch (err) {
+            console.warn("Extraction audio waveform:", err);
+          }
+        })();
       } catch (error) {
         console.error("Erreur upload:", error);
         setProcessing("error", 0, "Erreur lors du chargement de la video");
