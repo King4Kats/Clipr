@@ -299,14 +299,9 @@ export const useStore = create<AppState>((set, get) => ({
         // Sauvegarder l'état avant createProject (qui reset le store)
         const savedVideoFiles = [...state.videoFiles]
         const savedAudioPaths = [...state.audioPaths]
-        const savedAudioPath = state.audioPath
         const savedConfig = { ...state.config }
 
         const projectName = state.activeProjectName || state.videoFiles[0]?.name || 'Projet Sans Nom'
-        // Sauvegarder l'état actuel avant createProject (qui reset le store)
-        const savedVideoFiles = [...state.videoFiles]
-        const savedAudioPaths = [...state.audioPaths]
-        const savedConfig = { ...state.config }
 
         const project = await api.createProject(projectName, 'ai')
         if (!project?.id) {
