@@ -5,7 +5,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, Reorder } from "framer-motion";
-import { Scissors, Play, Trash2, Plus, Pause, FileText, Film, ChevronDown, GripVertical, GripHorizontal } from "lucide-react";
+import { Scissors, Play, Trash2, Plus, Pause, FileText, Film, ChevronDown, GripVertical, GripHorizontal, Loader2 } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { Button } from "@/components/ui/button";
 import api from "@/api";
@@ -22,12 +22,51 @@ const Timeline = () => {
   const {
     segments, selectedSegmentId, setSelectedSegmentId, videoFiles,
     removeSegment, addSegment, getTotalDuration, isPlaying, setIsPlaying,
-    updateSegment, getClipsForSegment, setProcessing, transcript, setSegments
+    updateSegment, getClipsForSegment, setProcessing, transcript, setTranscript, setSegments,
+    videoFile, audioPaths, setAudioPaths, config
   } = useStore();
 
   const [isExporting, setIsExporting] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  // Assure qu'on a une transcription, la lance si besoin
+  const ensureTranscript = async (): Promise<boolean> => {
+    if (transcript.length > 0) return true;
+    if (videoFiles.length === 0) return false;
+
+    setIsTranscribing(true);
+    try {
+      // Extraire l'audio si pas encore fait
+      let paths = audioPaths;
+      if (!paths || paths.length === 0) {
+        paths = [];
+        for (const vf of videoFiles) {
+          const audioPath = await api.extractAudio(vf.path);
+          paths.push(audioPath);
+        }
+        setAudioPaths(paths);
+      }
+
+      // Transcrire chaque audio
+      const allSegments: any[] = [];
+      for (let i = 0; i < paths.length; i++) {
+        const segs = await api.transcribe(paths[i], config.language, config.whisperModel, config.whisperPrompt);
+        const offset = videoFiles[i]?.offset || 0;
+        const adjusted = segs.map((s: any) => ({ ...s, start: s.start + offset, end: s.end + offset }));
+        allSegments.push(...adjusted);
+      }
+
+      setTranscript(allSegments);
+      setIsTranscribing(false);
+      return allSegments.length > 0;
+    } catch (err) {
+      console.error('Erreur transcription auto:', err);
+      setIsTranscribing(false);
+      return false;
+    }
+  };
   const totalDuration = getTotalDuration();
 
   useEffect(() => {
@@ -90,6 +129,10 @@ const Timeline = () => {
     if (segments.length === 0) return;
     setShowExportMenu(false);
 
+    // Lancer la transcription si pas encore faite
+    await ensureTranscript();
+    const currentTranscript = useStore.getState().transcript;
+
     let content = '='.repeat(60) + '\n';
     content += 'SEQUENCES AVEC TIMECODES\n';
     content += '='.repeat(60) + '\n\n';
@@ -97,7 +140,7 @@ const Timeline = () => {
     segments.forEach((segment, index) => {
       content += `[${String(index + 1).padStart(2, '0')}] ${segment.title}\n`;
       content += `     Debut: ${formatTime(segment.start)} | Fin: ${formatTime(segment.end)} | Duree: ${formatTime(segment.end - segment.start)}\n`;
-      const segTranscript = transcript.filter(t => t.start < segment.end && t.end > segment.start);
+      const segTranscript = currentTranscript.filter(t => t.start < segment.end && t.end > segment.start);
       if (segTranscript.length > 0) {
         content += '     Transcription:\n';
         segTranscript.forEach(t => { content += `     [${formatTime(t.start)}] ${t.text}\n`; });
@@ -117,20 +160,24 @@ const Timeline = () => {
   };
 
   const handleExportTxtPropre = async () => {
-    if (transcript.length === 0) return;
     setShowExportMenu(false);
+
+    // Lancer la transcription si pas encore faite
+    const hasTranscript = await ensureTranscript();
+    if (!hasTranscript) return;
+    const currentTranscript = useStore.getState().transcript;
 
     let content = '';
     if (segments.length > 0) {
       segments.forEach((segment, index) => {
-        const segTranscript = transcript.filter(t => t.start < segment.end && t.end > segment.start);
+        const segTranscript = currentTranscript.filter(t => t.start < segment.end && t.end > segment.start);
         if (segTranscript.length > 0) {
           content += `== ${String(index + 1).padStart(2, '0')}. ${segment.title} ==\n\n`;
           content += segTranscript.map(t => t.text).join(' ') + '\n\n';
         }
       });
     } else {
-      content = transcript.map(t => t.text).join(' ');
+      content = currentTranscript.map(t => t.text).join(' ');
     }
     content = content.trim();
 
@@ -170,14 +217,14 @@ const Timeline = () => {
                   <button onClick={handleExportVideo} className="w-full text-left px-3 py-2 text-xs font-medium hover:bg-secondary/50 transition-colors flex items-center gap-2">
                     <Film className="w-3.5 h-3.5 text-primary" /> Exporter les videos
                   </button>
-                  <button onClick={handleExportTxtSequences} className="w-full text-left px-3 py-2 text-xs font-medium hover:bg-secondary/50 transition-colors flex items-center gap-2">
-                    <FileText className="w-3.5 h-3.5 text-muted-foreground" /> TXT avec timecodes
+                  <button onClick={handleExportTxtSequences} disabled={isTranscribing} className="w-full text-left px-3 py-2 text-xs font-medium hover:bg-secondary/50 transition-colors flex items-center gap-2 disabled:opacity-50">
+                    {isTranscribing ? <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" /> : <FileText className="w-3.5 h-3.5 text-muted-foreground" />}
+                    TXT avec timecodes
                   </button>
-                  {transcript.length > 0 && (
-                    <button onClick={handleExportTxtPropre} className="w-full text-left px-3 py-2 text-xs font-medium hover:bg-secondary/50 transition-colors flex items-center gap-2">
-                      <FileText className="w-3.5 h-3.5 text-muted-foreground" /> TXT propre
-                    </button>
-                  )}
+                  <button onClick={handleExportTxtPropre} disabled={isTranscribing} className="w-full text-left px-3 py-2 text-xs font-medium hover:bg-secondary/50 transition-colors flex items-center gap-2 disabled:opacity-50">
+                    {isTranscribing ? <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" /> : <FileText className="w-3.5 h-3.5 text-muted-foreground" />}
+                    TXT propre {transcript.length === 0 && <span className="text-[8px] text-muted-foreground">(transcription auto)</span>}
+                  </button>
                 </div>
               )}
             </div>
