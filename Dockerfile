@@ -24,6 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     git \
     curl \
+    build-essential \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Installer faster-whisper dans un venv (avec support large-v3)
