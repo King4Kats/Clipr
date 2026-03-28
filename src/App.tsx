@@ -22,8 +22,10 @@ import SetupWizard from "@/components/SetupWizard";
 import AuthScreen from "@/components/AuthScreen";
 import AdminDashboard from "@/components/AdminDashboard";
 
+import ShareDialog from "@/components/ShareDialog";
+
 import { motion, AnimatePresence } from "framer-motion";
-import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check } from "lucide-react";
+import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check, Share2, Users } from "lucide-react";
 
 function App() {
   const { isAuthenticated, isLoading: authLoading, checkAuth, user } = useAuthStore();
@@ -50,6 +52,9 @@ function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+  const [sharingProjectId, setSharingProjectId] = useState<string | null>(null);
+  const [sharingProjectName, setSharingProjectName] = useState("");
+  const [sharedProjects, setSharedProjects] = useState<any[]>([]);
 
   // Check auth on mount
   useEffect(() => {
@@ -64,12 +69,16 @@ function App() {
       if (!setupComplete) setShowSetup(true);
       setSetupChecked(true);
       await loadHistory();
+      try { setSharedProjects(await import('@/api').then(m => m.default.getSharedProjects())) } catch {}
     };
     checkFirstRun();
 
     // Poll history every 10s to update processing status on home page
-    const interval = setInterval(() => {
-      if (!useStore.getState().activeProjectId) loadHistory();
+    const interval = setInterval(async () => {
+      if (!useStore.getState().activeProjectId) {
+        loadHistory();
+        try { setSharedProjects(await import('@/api').then(m => m.default.getSharedProjects())) } catch {}
+      }
     }, 10000);
     return () => clearInterval(interval);
   }, [loadHistory, isAuthenticated]);
@@ -245,9 +254,16 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Actions : rename & delete */}
+                  {/* Actions : share, rename & delete */}
                   {editingId !== project.id && (
                     <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSharingProjectId(project.id); setSharingProjectName(project.name || project.data?.projectName || '') }}
+                        className="p-1.5 rounded-md bg-secondary/80 hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
+                        title="Partager"
+                      >
+                        <Share2 className="w-3 h-3" />
+                      </button>
                       <button
                         onClick={(e) => handleStartRename(e, project.id, project.name || project.data?.projectName || '')}
                         className="p-1.5 rounded-md bg-secondary/80 hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
@@ -282,6 +298,44 @@ function App() {
               )}
             </div>
           </div>
+
+          {/* Projets partagés avec moi */}
+          {sharedProjects.length > 0 && (
+            <div className="mb-12">
+              <div className="flex items-center gap-2 mb-4 px-1">
+                <Users className="w-4 h-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold text-foreground">Partagés avec moi</h2>
+                <span className="text-[10px] text-muted-foreground font-bold">{sharedProjects.length}</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {sharedProjects.map((project: any, i: number) => (
+                  <motion.div
+                    key={project.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: i * 0.05 }}
+                    onClick={() => loadFromHistory(project)}
+                    className="group p-3 bg-card/50 hover:bg-secondary/50 border border-dashed border-border rounded-xl cursor-pointer transition-all hover:scale-[1.01]"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-muted/50 flex items-center justify-center text-muted-foreground">
+                        <Share2 className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-xs font-semibold text-foreground truncate">{project.name}</h3>
+                        <p className="text-[9px] text-muted-foreground">
+                          Par {project.owner_username} ·{' '}
+                          <span className={project.share_role === 'editor' ? 'text-blue-400' : 'text-zinc-400'}>
+                            {project.share_role === 'editor' ? 'Éditeur' : 'Lecteur'}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Zone de glisser-déposer pour importer une vidéo (crée un projet auto) */}
           <UploadZone />
@@ -376,6 +430,17 @@ function App() {
           {renderContent()}
         </main>
       )}
+
+      {/* Share dialog */}
+      <AnimatePresence>
+        {sharingProjectId && (
+          <ShareDialog
+            projectId={sharingProjectId}
+            projectName={sharingProjectName}
+            onClose={() => setSharingProjectId(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

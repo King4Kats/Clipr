@@ -60,6 +60,20 @@ function initSchema() {
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (project_id) REFERENCES projects(id)
     );
+
+    CREATE TABLE IF NOT EXISTS project_shares (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'viewer' CHECK(role IN ('viewer', 'editor')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      UNIQUE(project_id, user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_shares_project ON project_shares(project_id);
+    CREATE INDEX IF NOT EXISTS idx_shares_user ON project_shares(user_id);
   `)
 
   // Migration: add user_id column if missing (for existing DBs)
