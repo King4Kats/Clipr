@@ -104,9 +104,10 @@ const SegmentTimeline = () => {
     const loadAudio = async () => {
       setLoading(true);
       try {
-        // En mode web, charger l'audio via HTTP
+        // En mode web, charger l'audio via HTTP avec auth
         const dataDir = audioPath.includes('/data/') ? audioPath.split('/data/')[1] : audioPath;
-        const url = `/api/data-files/${dataDir}`;
+        const token = localStorage.getItem('clipr-auth-token');
+        const url = `/api/data-files/${dataDir}${token ? `?token=${token}` : ''}`;
         const response = await fetch(url);
         const arrayBuffer = await response.arrayBuffer();
         const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();

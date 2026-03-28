@@ -26,6 +26,7 @@ export interface VideoSegment {
 
 /** Fichier vidéo chargé dans l'application */
 export interface VideoFile {
+  id?: string // Identifiant du fichier sur le serveur (filename)
   path: string
   name: string
   duration: number
