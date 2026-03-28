@@ -37,6 +37,16 @@ const ALLOWED_ORIGINS = process.env.CORS_ORIGINS?.split(',') || []
 app.use(cors(ALLOWED_ORIGINS.length > 0 ? { origin: ALLOWED_ORIGINS } : undefined))
 app.use(express.json({ limit: '10mb' }))
 
+// Force UTF-8 charset on all JSON responses
+app.use((_req, res, next) => {
+  const originalJson = res.json.bind(res)
+  res.json = (body: any) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    return originalJson(body)
+  }
+  next()
+})
+
 // Rate limiting on auth routes
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: 'Trop de tentatives, réessayez dans 15 minutes' } })
 
