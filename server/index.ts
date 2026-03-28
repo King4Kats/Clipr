@@ -14,6 +14,7 @@ import * as ollamaService from './services/ollama.js'
 import * as projectService from './services/project-history.js'
 import * as authService from './services/auth.js'
 import * as aiLockService from './services/ai-lock.js'
+import * as sharingService from './services/sharing.js'
 import { requireAuth, requireAdmin, optionalAuth } from './middleware/auth.js'
 
 // ── Config ──
@@ -417,10 +418,13 @@ app.post('/api/project/autosave', requireAuth, (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
-// Project load by id
+// Project load by id (owner or shared)
 app.get('/api/project/load/:id', requireAuth, (req, res) => {
-  const project = projectService.getProject(req.params.id, req.user!.userId)
-  if (project) res.json(project)
+  const { access, role } = sharingService.hasAccess(req.params.id, req.user!.userId)
+  if (!access) return res.status(404).json({ error: 'Projet non trouve' })
+
+  const project = projectService.getProject(req.params.id)
+  if (project) res.json({ ...project, accessRole: role })
   else res.status(404).json({ error: 'Projet non trouve' })
 })
 
@@ -446,6 +450,43 @@ app.patch('/api/project/:id/status', requireAuth, (req, res) => {
     projectService.updateProjectStatus(req.params.id, req.body.status)
     res.json({ success: true })
   } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// ── Sharing ──
+
+// Share a project with a user
+app.post('/api/project/:id/share', requireAuth, (req, res) => {
+  try {
+    const { username, role } = req.body
+    const share = sharingService.shareProject(req.params.id, req.user!.userId, username, role || 'viewer')
+    res.json(share)
+  } catch (err: any) { res.status(400).json({ error: err.message }) }
+})
+
+// Remove a share
+app.delete('/api/project/:id/share/:userId', requireAuth, (req, res) => {
+  try {
+    sharingService.unshareProject(req.params.id, req.user!.userId, req.params.userId)
+    res.json({ success: true })
+  } catch (err: any) { res.status(400).json({ error: err.message }) }
+})
+
+// List shares for a project
+app.get('/api/project/:id/shares', requireAuth, (req, res) => {
+  const shares = sharingService.getProjectShares(req.params.id)
+  res.json(shares)
+})
+
+// Get projects shared with me
+app.get('/api/project/shared', requireAuth, (req, res) => {
+  res.json(sharingService.getSharedProjects(req.user!.userId))
+})
+
+// Search users for sharing autocomplete
+app.get('/api/users/search', requireAuth, (req, res) => {
+  const q = (req.query.q as string) || ''
+  if (q.length < 2) return res.json([])
+  res.json(sharingService.searchUsers(q, req.user!.userId))
 })
 
 // ── Server-side AI Analysis (background processing) ──
