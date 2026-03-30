@@ -329,8 +329,8 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
     e.preventDefault()
     setIsDragging(false)
     const files = Array.from(e.dataTransfer.files)
-    if (files.length > 0) handleFileSelect(files[0])
-  }, [handleFileSelect])
+    if (files.length > 0) handleFilesSelect(files)
+  }, [handleFilesSelect])
 
   // Start transcription
   const handleStart = async () => {
@@ -495,7 +495,8 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
                 ref={fileInputRef}
                 type="file"
                 accept={ACCEPTED_EXTENSIONS}
-                onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
+                multiple
+                onChange={(e) => e.target.files && e.target.files.length > 0 && handleFilesSelect(Array.from(e.target.files))}
                 className="hidden"
               />
               {status === 'uploading' ? (
