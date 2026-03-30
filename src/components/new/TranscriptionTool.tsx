@@ -29,6 +29,21 @@ interface TranscriptionToolProps {
 
 type ToolStatus = 'idle' | 'uploading' | 'queued' | 'extracting-audio' | 'transcribing' | 'done' | 'error'
 
+// Batch file item
+interface BatchItem {
+  id: string
+  file: File
+  filename: string
+  status: 'pending' | 'uploading' | 'uploaded' | 'queued' | 'extracting-audio' | 'transcribing' | 'done' | 'error'
+  progress: number
+  progressMessage: string
+  taskId?: string
+  filePath?: string
+  transcriptionId?: string
+  error?: string
+  liveSegments: TranscriptSegment[]
+}
+
 const InfoTip = ({ text }: { text: string }) => {
   const [show, setShow] = useState(false)
   return (
@@ -49,6 +64,11 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
   const [uploadedFile, setUploadedFile] = useState<{ path: string; name: string; duration: number } | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Batch state
+  const [batchItems, setBatchItems] = useState<BatchItem[]>([])
+  const [batchMode, setBatchMode] = useState(false)
+  const [batchProcessing, setBatchProcessing] = useState(false)
 
   // Config
   const [whisperModel, setWhisperModel] = useState<string>('large-v3')
@@ -80,48 +100,99 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
 
   // WebSocket listeners
   useEffect(() => {
+    if (allTaskIds.length === 0 && !taskId) return
+
     const unsubProgress = api.onTranscriptionProgress((data: any) => {
-      if (data.taskId !== taskId) return
-      setStatus(data.step as ToolStatus)
-      setProgress(data.progress || 0)
-      setProgressMessage(data.message || '')
+      if (batchMode) {
+        if (!allTaskIds.includes(data.taskId)) return
+        setBatchItems(prev => prev.map(item =>
+          item.taskId === data.taskId
+            ? { ...item, status: data.step as BatchItem["status"], progress: data.progress || 0, progressMessage: data.message || "" }
+            : item
+        ))
+      } else {
+        if (data.taskId !== taskId) return
+        setStatus(data.step as ToolStatus)
+        setProgress(data.progress || 0)
+        setProgressMessage(data.message || "")
+      }
     })
 
     const unsubSegment = api.onTranscriptionSegment((data: any) => {
-      if (data.taskId !== taskId) return
-      setLiveSegments(prev => [...prev, data.segment])
+      if (batchMode) {
+        if (!allTaskIds.includes(data.taskId)) return
+        setBatchItems(prev => prev.map(item =>
+          item.taskId === data.taskId
+            ? { ...item, liveSegments: [...item.liveSegments, data.segment] }
+            : item
+        ))
+      } else {
+        if (data.taskId !== taskId) return
+        setLiveSegments(prev => [...prev, data.segment])
+      }
     })
 
     const unsubComplete = api.onTranscriptionComplete((data: any) => {
-      if (data.taskId !== taskId) return
-      setStatus('done')
-      setTranscriptionId(data.transcriptionId)
-      // Fetch full result
-      api.getTranscription(data.transcriptionId).then((result: any) => {
-        setSegments(result.segments)
-      }).catch(() => {})
-      // Refresh history
-      api.getTranscriptionHistory().then(setHistory).catch(() => {})
+      if (batchMode) {
+        if (!allTaskIds.includes(data.taskId)) return
+        setBatchItems(prev => prev.map(item =>
+          item.taskId === data.taskId
+            ? { ...item, status: "done", progress: 100, transcriptionId: data.transcriptionId }
+            : item
+        ))
+        api.getTranscriptionHistory().then(setHistory).catch(() => {})
+      } else {
+        if (data.taskId !== taskId) return
+        setStatus("done")
+        setTranscriptionId(data.transcriptionId)
+        api.getTranscription(data.transcriptionId).then((result: any) => {
+          setSegments(result.segments)
+        }).catch(() => {})
+        api.getTranscriptionHistory().then(setHistory).catch(() => {})
+      }
     })
 
     const unsubQueueStarted = api.onQueueTaskStarted((data: any) => {
-      if (data.taskId !== taskId) return
-      setStatus('extracting-audio')
-      setQueuePosition(0)
+      if (batchMode) {
+        if (!allTaskIds.includes(data.taskId)) return
+        setBatchItems(prev => prev.map(item =>
+          item.taskId === data.taskId ? { ...item, status: "extracting-audio", progress: 0 } : item
+        ))
+      } else {
+        if (data.taskId !== taskId) return
+        setStatus("extracting-audio")
+        setQueuePosition(0)
+      }
     })
 
     const unsubQueueFailed = api.onQueueTaskFailed((data: any) => {
-      if (data.taskId !== taskId) return
-      setStatus('error')
-      setErrorMessage(data.error || 'Erreur inconnue')
+      if (batchMode) {
+        if (!allTaskIds.includes(data.taskId)) return
+        setBatchItems(prev => prev.map(item =>
+          item.taskId === data.taskId ? { ...item, status: "error", error: data.error || "Erreur inconnue" } : item
+        ))
+      } else {
+        if (data.taskId !== taskId) return
+        setStatus("error")
+        setErrorMessage(data.error || "Erreur inconnue")
+      }
     })
 
     const unsubQueueUpdate = api.onQueueUpdate((data: any) => {
-      if (!taskId) return
-      const myTask = data.queue?.userTasks?.find((t: any) => t.id === taskId)
-      if (myTask && myTask.status === 'pending') {
-        setQueuePosition(myTask.position || 0)
-        setStatus('queued')
+      if (batchMode) {
+        setBatchItems(prev => prev.map(item => {
+          if (!item.taskId) return item
+          const myTask = data.queue?.userTasks?.find((t: any) => t.id === item.taskId)
+          if (myTask && myTask.status === "pending") return { ...item, status: "queued", progress: 0 }
+          return item
+        }))
+      } else {
+        if (!taskId) return
+        const myTask = data.queue?.userTasks?.find((t: any) => t.id === taskId)
+        if (myTask && myTask.status === "pending") {
+          setQueuePosition(myTask.position || 0)
+          setStatus("queued")
+        }
       }
     })
 
@@ -133,18 +204,43 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
       unsubQueueFailed()
       unsubQueueUpdate()
     }
-  }, [taskId])
+  }, [allTaskIds.join(","), batchMode, taskId])
 
-  // Handle file selection
-  const handleFileSelect = useCallback(async (selectedFile: File) => {
-    const ext = selectedFile.name.split('.').pop()?.toLowerCase() || ''
-    if (!ALL_EXTENSIONS.includes(ext)) {
+  // Handle file selection (single or multiple)
+  const handleFilesSelect = useCallback(async (selectedFiles: File[]) => {
+    const validFiles = selectedFiles.filter(f => {
+      const ext = f.name.split('.').pop()?.toLowerCase() || ''
+      return ALL_EXTENSIONS.includes(ext)
+    })
+
+    if (validFiles.length === 0) {
       setErrorMessage('Format non supporté. Utilisez: ' + ALL_EXTENSIONS.join(', '))
       setStatus('error')
       return
     }
 
+    // Multiple files -> batch mode
+    if (validFiles.length > 1) {
+      const items: BatchItem[] = validFiles.map((f, i) => ({
+        id: 'file-' + Date.now() + '-' + i,
+        file: f,
+        filename: f.name,
+        status: 'pending' as const,
+        progress: 0,
+        progressMessage: '',
+        liveSegments: []
+      }))
+      setBatchItems(items)
+      setBatchMode(true)
+      setStatus('idle')
+      setErrorMessage('')
+      return
+    }
+
+    // Single file -> existing flow
+    const selectedFile = validFiles[0]
     setFile(selectedFile)
+    setBatchMode(false)
     setStatus('uploading')
     setErrorMessage('')
 
@@ -154,9 +250,76 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
       setStatus('idle')
     } catch (err: any) {
       setStatus('error')
-      setErrorMessage(err.message || 'Erreur d\'upload')
+      setErrorMessage(err.message || "Erreur d'upload")
     }
   }, [])
+
+  // Legacy single-file handler
+  const handleFileSelect = useCallback(async (selectedFile: File) => {
+    handleFilesSelect([selectedFile])
+  }, [handleFilesSelect])
+
+  // Remove a batch item
+  const removeBatchItem = (id: string) => {
+    setBatchItems(prev => {
+      const next = prev.filter(i => i.id !== id)
+      if (next.length <= 1) {
+        if (next.length === 1) handleFileSelect(next[0].file)
+        setBatchMode(false)
+        return []
+      }
+      return next
+    })
+  }
+
+  // Start batch transcription
+  const handleBatchStart = async () => {
+    if (batchItems.length === 0) return
+    setBatchProcessing(true)
+
+    // Upload files sequentially
+    const updatedItems = [...batchItems]
+    for (let i = 0; i < updatedItems.length; i++) {
+      const item = updatedItems[i]
+      setBatchItems(prev => prev.map(bi =>
+        bi.id === item.id ? { ...bi, status: 'uploading' as const } : bi
+      ))
+      try {
+        const result = await api.uploadMedia(item.file)
+        updatedItems[i] = { ...updatedItems[i], status: 'uploaded' as const, filePath: result.path, filename: result.name }
+        setBatchItems(prev => prev.map(bi =>
+          bi.id === item.id ? { ...bi, status: 'uploaded' as const, filePath: result.path, filename: result.name } : bi
+        ))
+      } catch (err: any) {
+        updatedItems[i] = { ...updatedItems[i], status: 'error' as const, error: err.message || "Erreur d'upload" }
+        setBatchItems(prev => prev.map(bi =>
+          bi.id === item.id ? { ...bi, status: 'error' as const, error: err.message || "Erreur d'upload" } : bi
+        ))
+      }
+    }
+
+    // Start batch transcription for successfully uploaded files
+    const uploaded = updatedItems.filter(i => i.filePath && i.status !== 'error')
+    if (uploaded.length === 0) {
+      setBatchProcessing(false)
+      return
+    }
+
+    try {
+      const files = uploaded.map(i => ({ filePath: i.filePath!, filename: i.filename }))
+      const result = await api.startTranscriptionBatch(files, { whisperModel, language, whisperPrompt })
+      setBatchItems(prev => prev.map(item => {
+        const taskInfo = result.tasks.find((t: any) => t.filename === item.filename)
+        if (taskInfo) return { ...item, taskId: taskInfo.taskId, status: 'queued' as const }
+        return item
+      }))
+    } catch (err: any) {
+      setBatchItems(prev => prev.map(item =>
+        item.status === 'uploaded' ? { ...item, status: 'error' as const, error: err.message } : item
+      ))
+      setBatchProcessing(false)
+    }
+  }
 
   // Drag & drop handlers
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -232,7 +395,7 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
     setHistory(prev => prev.filter(h => h.id !== id))
   }
 
-  const isProcessing = ['uploading', 'queued', 'extracting-audio', 'transcribing'].includes(status)
+  const isProcessing = batchProcessing || ['uploading', 'queued', 'extracting-audio', 'transcribing'].includes(status)
 
   // Format time
   const fmtTime = (s: number) => {
@@ -254,7 +417,7 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
           </div>
           <div>
             <h1 className="text-lg font-bold text-foreground">Transcription audio</h1>
-            <p className="text-xs text-muted-foreground">Transcrire un fichier audio ou vidéo avec Whisper</p>
+            <p className="text-xs text-muted-foreground">Transcrire un ou plusieurs fichiers audio/vidéo avec Whisper</p>
           </div>
         </div>
         {history.length > 0 && (
@@ -311,7 +474,7 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
         {/* Left: Upload + Result */}
         <div className="lg:col-span-2 space-y-6">
           {/* Upload zone */}
-          {!uploadedFile && status !== 'done' && (
+          {!uploadedFile && !batchMode && status !== 'done' && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -343,7 +506,7 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
                     <Upload className="w-7 h-7 text-primary" />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-foreground">Glissez un fichier audio ou vidéo</p>
+                    <p className="text-sm font-semibold text-foreground">Glissez un ou plusieurs fichiers audio/vidéo</p>
                     <p className="text-xs text-muted-foreground mt-1">
                       WAV, MP3, FLAC, OGG, M4A, AAC, MP4, MOV, AVI, MKV, WebM, MTS
                     </p>
@@ -546,18 +709,30 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
                 className="w-full h-20 bg-secondary/10 text-xs text-foreground p-2.5 rounded-lg border border-border focus:ring-1 focus:ring-primary outline-none transition-all placeholder:text-muted-foreground/30 resize-none"
               />
             </div>
-
             {/* Launch button */}
-            <Button
-              onClick={handleStart}
-              disabled={!uploadedFile || isProcessing}
-              className="w-full h-10 bg-primary hover:bg-primary/90 text-primary-foreground font-bold uppercase tracking-wide rounded-lg text-xs"
-            >
-              <span className="flex items-center gap-2">
-                <Mic className="w-4 h-4" />
-                {isProcessing ? 'En cours...' : 'Lancer la transcription'}
-              </span>
-            </Button>
+            {batchMode ? (
+              <Button
+                onClick={handleBatchStart}
+                disabled={batchProcessing || batchItems.length === 0 || batchAllDone}
+                className="w-full h-10 bg-primary hover:bg-primary/90 text-primary-foreground font-bold uppercase tracking-wide rounded-lg text-xs"
+              >
+                <span className="flex items-center gap-2">
+                  <Files className="w-4 h-4" />
+                  {batchProcessing ? `En cours (${batchDoneCount}/${batchItems.length})...` : `Transcrire ${batchItems.length} fichiers`}
+                </span>
+              </Button>
+            ) : (
+              <Button
+                onClick={handleStart}
+                disabled={!uploadedFile || isProcessing}
+                className="w-full h-10 bg-primary hover:bg-primary/90 text-primary-foreground font-bold uppercase tracking-wide rounded-lg text-xs"
+              >
+                <span className="flex items-center gap-2">
+                  <Mic className="w-4 h-4" />
+                  {isProcessing ? "En cours..." : "Lancer la transcription"}
+                </span>
+              </Button>
+            )}
           </motion.div>
         </div>
       </div>
