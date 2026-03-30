@@ -63,6 +63,13 @@ function App() {
   const [showVideoSegmentation, setShowVideoSegmentation] = useState(false);
   const [showNewProjectChoice, setShowNewProjectChoice] = useState(false);
 
+  // Reset segmentation screen once files are uploaded (normal flow takes over)
+  useEffect(() => {
+    if (showVideoSegmentation && videoFiles.length > 0) {
+      setShowVideoSegmentation(false);
+    }
+  }, [videoFiles.length, showVideoSegmentation]);
+
   // Check auth on mount
   useEffect(() => {
     checkAuth();
@@ -169,7 +176,7 @@ function App() {
       return <TranscriptionTool onBack={() => setShowTranscriptionTool(false)} />;
     }
 
-    // ── Écran segmentation d'interview vidéo ──
+    // ── Écran segmentation d'interview vidéo (upload) ──
     if (showVideoSegmentation && videoFiles.length === 0 && !useStore.getState().activeProjectId) {
       return (
         <div className="max-w-4xl mx-auto w-full pt-8">
@@ -191,6 +198,7 @@ function App() {
         </div>
       );
     }
+
 
     // ── Écran d'accueil : aucune vidéo importée et pas de projet actif ──
     if (videoFiles.length === 0 && !useStore.getState().activeProjectId) {
