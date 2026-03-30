@@ -13,7 +13,11 @@ COPY . .
 RUN npm run build:client && npm run build:server
 
 # ── Stage 3 : Runtime ──
-FROM node:20-slim AS runtime
+FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04 AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Force UTF-8 locale
@@ -34,7 +38,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Installer faster-whisper dans un venv (avec support large-v3)
 RUN python3 -m venv /opt/whisper-venv \
-    && /opt/whisper-venv/bin/pip install --no-cache-dir faster-whisper torch
+    && /opt/whisper-venv/bin/pip install --no-cache-dir faster-whisper \
+    && /opt/whisper-venv/bin/pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
 ENV PATH="/opt/whisper-venv/bin:$PATH"
 
 # Installer Docker CLI (pour self-rebuild)

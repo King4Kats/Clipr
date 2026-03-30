@@ -89,6 +89,11 @@ export function transcribe(
       whisperProcess = null
       logger.info('=== Fin Whisper === Code:', code)
 
+      // Wait a moment for CUDA to release GPU memory
+      const { execSync } = require('child_process')
+      try { execSync('sleep 2') } catch {}
+
+
       if (code === 0) {
         if (segments.length > 0) {
           resolve(segments)

@@ -31,7 +31,7 @@ export async function runAnalysisPipeline(task: QueueTask, broadcastFn: Broadcas
 
   const whisperModel = config?.whisperModel || 'large-v3'
   const whisperPrompt = config?.whisperPrompt || ''
-  const ollamaModel = config?.ollamaModel || 'mistral-small:22b'
+  const ollamaModel = config?.ollamaModel || 'qwen2.5:14b'
   const language = config?.language || 'fr'
   const context = config?.context || ''
 

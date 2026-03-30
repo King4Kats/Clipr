@@ -91,8 +91,8 @@ interface AppState {
 const DEFAULT_WHISPER_PROMPT = `Entretien sur le patrimoine culturel de Vendée et de Bretagne. On parle du bocage, des métairies, closeries et borderies, du marais poitevin avec ses conches, biefs et rigoles, de la bourrine et du bourrinage. Les paludiers récoltent la fleur de sel dans les œillets, vasières, cobiers et adernes avec le las et la lousse, formant des mulons sur le trémet. En musique traditionnelle, le kan ha diskan avec kaner et diskaner anime les festoù-noz, avec gavotte, dañs-tro, ton simpl, tamm kreizh. La maraîchine et l'avant-deux sont les danses vendéennes. Les gwerzioù et sonioù accompagnent binioù kozh et bombarde dans le bagad. L'artisanat comprend le sabotier, le bourrelier, le tonnelier, le chaumier, le vannier et le charron. En architecture, longère, penty, malouinière, chaumière. Les pardons et troménies sont des traditions bretonnes. Gastronomie : préfou, mogette, brioche vendéenne, gâche, fouace, tourtisseaux, kouign-amann, krampouezh, far breton, kig ha farz, galette de sarrasin, chouchen. Toponymes en Plou-, Lan-, Tré-, Ker-, Loc-. La pigouille propulse la plate dans la Venise Verte.`
 
 const defaultConfig: AppConfig = {
-  whisperModel: 'large-v3',
-  ollamaModel: 'mistral-small:22b',
+  whisperModel: 'large-v3-turbo',
+  ollamaModel: 'qwen2.5:14b',
   language: 'fr',
   outputQuality: 23,
   outputFolder: null,

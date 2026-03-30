@@ -127,6 +127,17 @@ def main():
             segments_list.append(seg_data)
             print(f"SEGMENT: {json.dumps(seg_data)}", file=sys.stderr)
 
+    # Free GPU memory before exiting so Ollama can use it
+    del model
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except:
+        pass
+    import gc
+    gc.collect()
+
     print(f"PROGRESS: 100", file=sys.stderr)
     print(f"STATUS: Done! {len(segments_list)} segments", file=sys.stderr)
 
