@@ -63,10 +63,11 @@ function App() {
   const [showVideoSegmentation, setShowVideoSegmentation] = useState(false);
   const [showNewProjectChoice, setShowNewProjectChoice] = useState(false);
 
-  // Reset segmentation screen once files are uploaded (normal flow takes over)
+  // Reset segmentation screen once files are uploaded — ensure mode choice is shown
   useEffect(() => {
     if (showVideoSegmentation && videoFiles.length > 0) {
       setShowVideoSegmentation(false);
+      setProjectMode(null);
     }
   }, [videoFiles.length, showVideoSegmentation]);
 
