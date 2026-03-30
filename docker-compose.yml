@@ -45,7 +45,7 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: clipr-tunnel
-    command: tunnel --no-autoupdate --protocol http2 run --token ***REDACTED_CLOUDFLARE_TOKEN***
+    command: tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     restart: always
     depends_on:
       - clipr
