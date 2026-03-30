@@ -70,6 +70,9 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
   const [batchMode, setBatchMode] = useState(false)
   const [batchProcessing, setBatchProcessing] = useState(false)
 
+  // Derived: all task IDs from batch items
+  const allTaskIds = batchItems.map(item => item.taskId).filter((id): id is string => !!id)
+
   // Config
   const [whisperModel, setWhisperModel] = useState<string>('large-v3')
   const [language, setLanguage] = useState<string>('fr')
