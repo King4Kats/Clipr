@@ -522,6 +522,94 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
             </motion.div>
           )}
 
+          {/* Batch file list */}
+          {batchMode && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-border rounded-xl p-5 space-y-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <Files className="w-3.5 h-3.5" />
+                  {batchItems.length} fichiers sélectionnés
+                </h3>
+                {!batchProcessing && !batchAllDone && (
+                  <button onClick={() => { setBatchMode(false); setBatchItems([]); setBatchProcessing(false) }} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                    Annuler
+                  </button>
+                )}
+              </div>
+
+              {/* Overall batch progress */}
+              {batchProcessing && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span className="text-primary animate-pulse font-bold uppercase tracking-wider">Traitement en cours</span>
+                    <span className="font-mono">{batchDoneCount}/{batchItems.length}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${batchItems.length > 0 ? (batchDoneCount / batchItems.length) * 100 : 0}%` }}
+                      className="h-full bg-primary"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {batchAllDone && (
+                <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                  <CheckCircle2 className="w-4 h-4 text-green-500" />
+                  <p className="text-xs font-medium text-green-400">
+                    Toutes les transcriptions sont terminées ! Consultez l'historique.
+                  </p>
+                </div>
+              )}
+
+              {/* File list */}
+              <div className="max-h-[400px] overflow-y-auto space-y-1.5 custom-scrollbar">
+                {batchItems.map((item) => (
+                  <div key={item.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-secondary/30 border border-border/50">
+                    <div className="w-8 h-8 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+                      {item.status === 'done' ? (
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                      ) : item.status === 'error' ? (
+                        <AlertCircle className="w-4 h-4 text-destructive" />
+                      ) : item.status === 'uploading' || item.status === 'extracting-audio' || item.status === 'transcribing' ? (
+                        <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                      ) : item.status === 'queued' ? (
+                        <Clock className="w-4 h-4 text-amber-500" />
+                      ) : (
+                        <Music className="w-4 h-4 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-foreground truncate">{item.filename}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {item.status === 'pending' && 'En attente'}
+                        {item.status === 'uploading' && 'Upload...'}
+                        {item.status === 'uploaded' && 'Prêt'}
+                        {item.status === 'queued' && 'Dans la file'}
+                        {item.status === 'extracting-audio' && `Extraction audio... ${Math.round(item.progress)}%`}
+                        {item.status === 'transcribing' && `Transcription... ${Math.round(item.progress)}%`}
+                        {item.status === 'done' && 'Terminé'}
+                        {item.status === 'error' && (item.error || 'Erreur')}
+                      </p>
+                    </div>
+                    {/* Individual progress bar */}
+                    {(item.status === 'extracting-audio' || item.status === 'transcribing') && (
+                      <div className="w-16 h-1 bg-secondary rounded-full overflow-hidden shrink-0">
+                        <div className="h-full bg-primary transition-all" style={{ width: `${item.progress}%` }} />
+                      </div>
+                    )}
+                    {!batchProcessing && item.status === 'pending' && (
+                      <button onClick={() => removeBatchItem(item.id)} className="p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-all shrink-0">
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
           {/* File info + processing */}
           {uploadedFile && status !== 'done' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-card border border-border rounded-xl p-5">
