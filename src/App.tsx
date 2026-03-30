@@ -60,6 +60,7 @@ function App() {
   const [sharedProjects, setSharedProjects] = useState<any[]>([]);
   const [projectMode, setProjectMode] = useState<'choose' | 'ai' | 'manual' | null>(null);
   const [showTranscriptionTool, setShowTranscriptionTool] = useState(false);
+  const [showVideoSegmentation, setShowVideoSegmentation] = useState(false);
 
   // Check auth on mount
   useEffect(() => {
@@ -166,6 +167,29 @@ function App() {
     // ── Outil de transcription standalone ──
     if (showTranscriptionTool) {
       return <TranscriptionTool onBack={() => setShowTranscriptionTool(false)} />;
+    }
+
+    // ── Écran segmentation d'interview vidéo ──
+    if (showVideoSegmentation && videoFiles.length === 0 && !useStore.getState().activeProjectId) {
+      return (
+        <div className="max-w-4xl mx-auto w-full pt-8">
+          <div className="flex items-center gap-4 mb-8">
+            <button onClick={() => setShowVideoSegmentation(false)} className="p-2 rounded-lg hover:bg-secondary transition-colors">
+              <Film className="w-5 h-5 text-muted-foreground" />
+            </button>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                <Scissors className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-foreground">Segmentation d'interview vidéo</h1>
+                <p className="text-xs text-muted-foreground">Déposez une ou plusieurs vidéos pour lancer l'analyse IA</p>
+              </div>
+            </div>
+          </div>
+          <UploadZone />
+        </div>
+      );
     }
 
     // ── Écran d'accueil : aucune vidéo importée et pas de projet actif ──
@@ -354,7 +378,7 @@ function App() {
               <Mic className="w-4 h-4 text-muted-foreground" />
               <h2 className="text-sm font-semibold text-foreground">Outils</h2>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -368,16 +392,33 @@ function App() {
                   <div>
                     <h3 className="text-sm font-bold text-foreground">Transcrire un audio</h3>
                     <p className="text-[10px] text-muted-foreground mt-0.5">
-                      Convertir un fichier audio ou vidéo en texte avec Whisper
+                      Convertir un ou plusieurs fichiers audio en texte avec Whisper
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.05 }}
+                onClick={() => setShowVideoSegmentation(true)}
+                className="group p-5 bg-card border-2 border-border hover:border-primary/50 rounded-xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-violet-500/10 flex items-center justify-center text-violet-400 group-hover:bg-violet-500 group-hover:text-white transition-colors">
+                    <Scissors className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground">Segmentation d'interview vidéo</h3>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Analyse IA pour découper automatiquement une interview en segments
                     </p>
                   </div>
                 </div>
               </motion.div>
             </div>
           </div>
-
-          {/* Zone de glisser-déposer pour importer une vidéo (crée un projet auto) */}
-          <UploadZone />
         </div>
       );
     }
