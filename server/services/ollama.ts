@@ -16,7 +16,7 @@ function ollamaRequest(method: string, path: string, body?: unknown): Promise<st
     const options: http.RequestOptions = {
       hostname: OLLAMA_HOST, port: OLLAMA_PORT, path, method,
       headers: { 'Content-Type': 'application/json', ...(postData ? { 'Content-Length': Buffer.byteLength(postData) } : {}) },
-      timeout: 600000
+      timeout: 1200000
     }
     const req = http.request(options, (res) => {
       let data = ''
@@ -52,7 +52,7 @@ export async function pullOllamaModel(modelName: string): Promise<boolean> {
       const req = http.request({
         hostname: OLLAMA_HOST, port: OLLAMA_PORT, path: '/api/pull', method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
-        timeout: 600000
+        timeout: 1200000
       }, (res) => {
         let data = ''
         res.on('data', (chunk) => { data += chunk })
@@ -110,7 +110,7 @@ Sois concis mais exhaustif sur les thematiques.`
   const body = {
     model,
     messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: `${context ? `CONTEXTE: ${context}\n\n` : ''}TRANSCRIPTION:\n"""\n${sample}\n"""\n\nAnalyse et fournis un resume structure.` }],
-    stream: false, options: { temperature: 0.3, num_ctx: 32768 }
+    stream: false, options: { temperature: 0.3, num_ctx: 8192 }
   }
   try {
     const data = await ollamaRequest('POST', '/api/chat', body)
@@ -149,7 +149,7 @@ REGLES ABSOLUES :
   const body = {
     model,
     messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: `SUJET:\n"${globalSummary.substring(0, 500)}"\n${continuityHint}${rangeHint}\n${context ? `CONSIGNES: ${context}\n` : ''}TRANSCRIPTION ${chunkLabel}:\n"""\n${chunk}\n"""\n\nDecoupe en segments thematiques SEQUENTIELS. JSON uniquement:\n{"segments":[{"title":"...","start":X,"end":Y,"description":"..."},...]}` }],
-    format: 'json', stream: false, options: { temperature: 0.1, num_ctx: 32768 }
+    format: 'json', stream: false, options: { temperature: 0.1, num_ctx: 8192 }
   }
 
   for (let attempt = 1; attempt <= 3; attempt++) {

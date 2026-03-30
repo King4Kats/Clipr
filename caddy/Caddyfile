@@ -1,3 +1,3 @@
-{$CLIPR_DOMAIN:localhost} {
+clipr.temonia.fr {
     reverse_proxy clipr:3000
 }
