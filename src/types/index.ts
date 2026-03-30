@@ -45,6 +45,7 @@ export interface VideoClip {
 /** Étapes du workflow de traitement (machine à états) */
 export type ProcessingStep =
   | 'idle'
+  | 'queued'
   | 'extracting-audio'
   | 'transcribing'
   | 'analyzing'
@@ -104,5 +105,53 @@ export type UpdateStatus =
   | { status: 'downloading'; percent: number; bytesPerSecond: number; transferred: number; total: number }
   | { status: 'downloaded'; version: string }
   | { status: 'error'; message: string }
+
+/** Types pour la file d'attente IA */
+export type TaskType = 'analysis' | 'transcription'
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export interface QueueTask {
+  id: string
+  user_id: string
+  username?: string
+  type: TaskType
+  status: TaskStatus
+  project_id: string | null
+  config: any
+  result: any | null
+  progress: number
+  progress_message: string | null
+  position: number | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface QueueState {
+  currentTask: QueueTask | null
+  userTasks: QueueTask[]
+  totalPending: number
+}
+
+/** Résultat d'une transcription standalone */
+export interface TranscriptionResult {
+  id: string
+  task_id: string
+  filename: string
+  language: string
+  whisper_model: string
+  segments: TranscriptSegment[]
+  duration: number
+  created_at: string
+}
+
+export interface TranscriptionHistoryItem {
+  id: string
+  filename: string
+  language: string
+  whisper_model: string
+  duration: number
+  created_at: string
+}
 
 // L'API est exposee via src/api.ts comme window.electron pour compatibilite

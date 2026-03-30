@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Brain, Sparkles, Settings2, MessageSquareText, Lock, HelpCircle } from "lucide-react";
+import { Brain, Sparkles, Settings2, MessageSquareText, Lock, HelpCircle, Clock } from "lucide-react";
 import { motion } from "framer-motion";
 import { useStore } from "@/store/useStore";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -53,9 +53,9 @@ const AIAnalysisPanel = () => {
   const [modelsReady, setModelsReady] = useState<boolean | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [ollamaStatus, setOllamaStatus] = useState<string>("Vérification...");
-  const [aiLock, setAiLock] = useState<{ locked: boolean; lock: any }>({ locked: false, lock: null });
+  const [queueState, setQueueState] = useState<{ locked: boolean; lock: any; queue?: any }>({ locked: false, lock: null });
 
-  // --- Effet : vérifie Ollama + statut AI lock ---
+  // --- Effet : vérifie Ollama + statut file d'attente ---
   useEffect(() => {
     const checkModels = async () => {
       try {
@@ -77,18 +77,28 @@ const AIAnalysisPanel = () => {
         setOllamaStatus("Erreur Ollama");
       }
     };
-    const checkAiLock = async () => {
+    const checkQueue = async () => {
       try {
         const status = await api.getAiStatus();
-        setAiLock(status);
+        setQueueState(status);
       } catch { /* ignore */ }
     };
     checkModels();
-    checkAiLock();
+    checkQueue();
 
-    // Poll AI lock status every 15s
-    const interval = setInterval(checkAiLock, 15000);
-    return () => clearInterval(interval);
+    const interval = setInterval(checkQueue, 15000);
+    const unsubQueue = api.onQueueUpdate((data: any) => {
+      if (data.queue) {
+        setQueueState(prev => ({
+          ...prev,
+          locked: !!data.queue.currentTask,
+          lock: data.queue.currentTask,
+          queue: data.queue
+        }));
+      }
+    });
+
+    return () => { clearInterval(interval); unsubQueue(); };
   }, []);
 
   // Détermine si un traitement est en cours (empêche les interactions)
@@ -123,12 +133,13 @@ const AIAnalysisPanel = () => {
         </div>
       </div>
 
-      {/* AI Lock banner */}
-      {aiLock.locked && aiLock.lock?.user_id !== user?.id && (
+      {/* Queue status banner */}
+      {queueState.locked && queueState.lock?.user_id !== user?.id && (
         <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-          <Lock className="w-4 h-4 text-amber-500 shrink-0" />
+          <Clock className="w-4 h-4 text-amber-500 shrink-0" />
           <p className="text-[11px] text-amber-400 font-medium">
-            IA utilisée par <span className="font-bold">{aiLock.lock?.username}</span> sur "{aiLock.lock?.project_name}"
+            IA occupée{queueState.lock?.username ? <> par <span className="font-bold">{queueState.lock.username}</span></> : ''}
+            {queueState.queue?.totalPending > 0 ? ` · ${queueState.queue.totalPending} tâche(s) en attente` : ''}
           </p>
         </div>
       )}
@@ -270,14 +281,14 @@ const AIAnalysisPanel = () => {
         ) : (
           <Button
             onClick={handleStart}
-            disabled={videoFiles.length === 0 || !modelsReady || (aiLock.locked && aiLock.lock?.user_id !== user?.id)}
+            disabled={videoFiles.length === 0 || !modelsReady}
             className="w-full h-11 bg-primary hover:bg-primary/90 text-primary-foreground font-bold uppercase tracking-wide rounded-lg"
           >
             <span className="flex items-center gap-2">
-              {aiLock.locked && aiLock.lock?.user_id !== user?.id ? (
+              {queueState.locked && queueState.lock?.user_id !== user?.id ? (
                 <>
-                  <Lock className="w-4 h-4" />
-                  IA indisponible
+                  <Clock className="w-4 h-4" />
+                  Lancer (file d'attente)
                 </>
               ) : (
                 <>

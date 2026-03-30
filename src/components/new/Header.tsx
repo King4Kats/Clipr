@@ -12,6 +12,7 @@ import { useStore } from "@/store/useStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
+import QueueStatus from "@/components/new/QueueStatus";
 import logo from "@/assets/Clipr.svg";
 
 interface HeaderProps {
@@ -106,6 +107,7 @@ const Header = ({ onOpenSetup, onOpenAdmin }: HeaderProps) => {
 
         {/* Barre d'actions */}
         <div className="flex items-center gap-2">
+          <QueueStatus />
           <div className="flex items-center gap-1 border-r border-border pr-3 mr-1">
             {/* Retour accueil */}
             {(hasProject || hasVideos) && (

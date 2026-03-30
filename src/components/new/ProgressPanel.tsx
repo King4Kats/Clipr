@@ -9,12 +9,13 @@
 
 import { useStore } from "@/store/useStore";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, Music, MessageSquare, Sparkles, AlertCircle, CheckCircle2, Download } from "lucide-react";
+import { Loader2, Music, MessageSquare, Sparkles, AlertCircle, CheckCircle2, Download, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 // Libellés affichés pour chaque étape du traitement
 const STEP_LABELS: Record<string, string> = {
     idle: "En attente",
+    queued: "En file d'attente",
     "extracting-audio": "Extraction audio",
     transcribing: "Transcription (Whisper)",
     analyzing: "Analyse IA (Ollama)",
@@ -26,6 +27,7 @@ const STEP_LABELS: Record<string, string> = {
 
 // Icônes associées à chaque étape du traitement
 const STEP_ICONS: Record<string, any> = {
+    queued: Clock,
     "extracting-audio": Music,
     transcribing: MessageSquare,
     analyzing: Sparkles,

@@ -19,6 +19,7 @@ import AIAnalysisPanel from "@/components/new/AIAnalysisPanel";
 import ProgressPanel from "@/components/new/ProgressPanel";
 import VideoPreview from "@/components/new/VideoPreview";
 import EditorLayout from "@/components/new/EditorLayout";
+import TranscriptionTool from "@/components/new/TranscriptionTool";
 import SetupWizard from "@/components/SetupWizard";
 import AuthScreen from "@/components/AuthScreen";
 import AdminDashboard from "@/components/AdminDashboard";
@@ -26,7 +27,7 @@ import AdminDashboard from "@/components/AdminDashboard";
 import ShareDialog from "@/components/ShareDialog";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check, Share2, Users, Brain, Scissors } from "lucide-react";
+import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check, Share2, Users, Brain, Scissors, Mic } from "lucide-react";
 import logo from "@/assets/Clipr.svg";
 
 function App() {
@@ -58,6 +59,7 @@ function App() {
   const [sharingProjectName, setSharingProjectName] = useState("");
   const [sharedProjects, setSharedProjects] = useState<any[]>([]);
   const [projectMode, setProjectMode] = useState<'choose' | 'ai' | 'manual' | null>(null);
+  const [showTranscriptionTool, setShowTranscriptionTool] = useState(false);
 
   // Check auth on mount
   useEffect(() => {
@@ -161,6 +163,11 @@ function App() {
   };
 
   const renderContent = () => {
+    // ── Outil de transcription standalone ──
+    if (showTranscriptionTool) {
+      return <TranscriptionTool onBack={() => setShowTranscriptionTool(false)} />;
+    }
+
     // ── Écran d'accueil : aucune vidéo importée et pas de projet actif ──
     if (videoFiles.length === 0 && !useStore.getState().activeProjectId) {
       return (
@@ -340,6 +347,34 @@ function App() {
               </div>
             </div>
           )}
+
+          {/* Section Outils */}
+          <div className="mb-12">
+            <div className="flex items-center gap-2 mb-4 px-1">
+              <Mic className="w-4 h-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold text-foreground">Outils</h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                onClick={() => setShowTranscriptionTool(true)}
+                className="group p-5 bg-card border-2 border-border hover:border-primary/50 rounded-xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                    <Mic className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground">Transcrire un audio</h3>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Convertir un fichier audio ou vidéo en texte avec Whisper
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          </div>
 
           {/* Zone de glisser-déposer pour importer une vidéo (crée un projet auto) */}
           <UploadZone />
