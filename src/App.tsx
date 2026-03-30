@@ -61,6 +61,7 @@ function App() {
   const [projectMode, setProjectMode] = useState<'choose' | 'ai' | 'manual' | null>(null);
   const [showTranscriptionTool, setShowTranscriptionTool] = useState(false);
   const [showVideoSegmentation, setShowVideoSegmentation] = useState(false);
+  const [showNewProjectChoice, setShowNewProjectChoice] = useState(false);
 
   // Check auth on mount
   useEffect(() => {
@@ -158,9 +159,8 @@ function App() {
     await deleteProject(id);
   };
 
-  const handleNewProject = async () => {
-    setProjectMode(null);
-    await createProject('Nouveau Projet', 'manual');
+  const handleNewProject = () => {
+    setShowNewProjectChoice(true);
   };
 
   const renderContent = () => {
@@ -324,11 +324,40 @@ function App() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: history.length * 0.05 }}
-                  onClick={handleNewProject}
-                  className="p-4 border-2 border-dashed border-border hover:border-primary/50 rounded-xl cursor-pointer transition-all hover:bg-primary/5 flex items-center justify-center gap-3 min-h-[100px]"
+                  className="border-2 border-dashed border-border rounded-xl transition-all min-h-[100px] overflow-hidden"
                 >
-                  <Plus className="w-5 h-5 text-muted-foreground" />
-                  <span className="text-sm font-medium text-muted-foreground">Nouveau Projet</span>
+                  {showNewProjectChoice ? (
+                    <div className="p-3 space-y-2 h-full">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Nouveau projet</span>
+                        <button onClick={() => setShowNewProjectChoice(false)} className="p-0.5 text-muted-foreground hover:text-foreground">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => { setShowNewProjectChoice(false); setShowTranscriptionTool(true) }}
+                        className="w-full flex items-center gap-2.5 p-2.5 rounded-lg hover:bg-primary/10 transition-colors text-left"
+                      >
+                        <Mic className="w-4 h-4 text-primary shrink-0" />
+                        <span className="text-xs font-medium text-foreground">Transcription audio</span>
+                      </button>
+                      <button
+                        onClick={() => { setShowNewProjectChoice(false); setShowVideoSegmentation(true) }}
+                        className="w-full flex items-center gap-2.5 p-2.5 rounded-lg hover:bg-violet-500/10 transition-colors text-left"
+                      >
+                        <Scissors className="w-4 h-4 text-violet-400 shrink-0" />
+                        <span className="text-xs font-medium text-foreground">Segmentation vidéo</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={handleNewProject}
+                      className="p-4 cursor-pointer hover:border-primary/50 hover:bg-primary/5 flex items-center justify-center gap-3 h-full transition-all"
+                    >
+                      <Plus className="w-5 h-5 text-muted-foreground" />
+                      <span className="text-sm font-medium text-muted-foreground">Nouveau Projet</span>
+                    </div>
+                  )}
                 </motion.div>
               )}
             </div>
