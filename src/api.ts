@@ -176,11 +176,14 @@ const api = {
   renameProject: (id: string, name: string) => patch(`/api/project/${id}/rename`, { name }),
   deleteProject: (id: string) => del(`/api/project/${id}`),
   updateProjectStatus: (id: string, status: string) => patch(`/api/project/${id}/status`, { status }),
-  // AI lock status
-  getAiStatus: () => get<{ locked: boolean; lock: any }>('/api/ai/status'),
-  // Launch server-side background analysis
+  // AI / Queue status
+  getAiStatus: () => get<{ locked: boolean; lock: any; queue: any }>('/api/ai/status'),
+  getQueueState: () => get<any>('/api/queue'),
+  getTaskStatus: (taskId: string) => get<any>(`/api/queue/${taskId}`),
+  cancelTask: (taskId: string) => del(`/api/queue/${taskId}`),
+  // Launch server-side background analysis (via queue)
   launchAnalysis: (projectId: string, config: any) =>
-    post(`/api/project/${projectId}/analyze`, { config }),
+    post<{ success: boolean; taskId: string; position: number }>(`/api/project/${projectId}/analyze`, { config }),
   // Sharing
   shareProject: (projectId: string, username: string, role: 'viewer' | 'editor' = 'viewer') =>
     post(`/api/project/${projectId}/share`, { username, role }),
@@ -210,12 +213,41 @@ const api = {
   // Logs
   exportLogs: () => downloadFile('/api/logs/export', 'clipr-logs.log'),
 
+  // Standalone Transcription
+  uploadMedia: async (file: File): Promise<any> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await fetch(`${API_BASE}/api/upload/media`, { method: 'POST', body: formData, headers: getAuthHeaders() })
+    if (!res.ok) throw new Error('Upload échoué')
+    return res.json()
+  },
+  startTranscription: (filePath: string, filename: string, config: any) =>
+    post<{ success: boolean; taskId: string; position: number }>('/api/transcription/start', { filePath, filename, config }),
+  getTranscriptionHistory: () => get<any[]>('/api/transcription/history'),
+  getTranscription: (id: string) => get<any>(`/api/transcription/${id}`),
+  deleteTranscription: (id: string) => del(`/api/transcription/${id}`),
+  getTranscriptionExportUrl: (id: string, format: 'txt' | 'srt') => {
+    const token = localStorage.getItem(AUTH_STORAGE_KEY)
+    return `${API_BASE}/api/transcription/${id}/export?format=${format}${token ? `&token=${token}` : ''}`
+  },
+
   // WebSocket events
   onProgress: (cb: (data: any) => void) => onWsEvent('progress', cb),
   onTranscriptSegment: (cb: (segment: any) => void) => onWsEvent('transcript:segment', cb),
   onModelProgress: (cb: (data: any) => void) => onWsEvent('model:progress', cb),
   onAnalysisComplete: (cb: (data: any) => void) => onWsEvent('analysis:complete', cb),
   onAnalysisError: (cb: (data: any) => void) => onWsEvent('analysis:error', cb),
+
+  // Queue WebSocket events
+  onQueueUpdate: (cb: (data: any) => void) => onWsEvent('queue:update', cb),
+  onQueueTaskStarted: (cb: (data: any) => void) => onWsEvent('queue:task-started', cb),
+  onQueueTaskCompleted: (cb: (data: any) => void) => onWsEvent('queue:task-completed', cb),
+  onQueueTaskFailed: (cb: (data: any) => void) => onWsEvent('queue:task-failed', cb),
+
+  // Transcription WebSocket events
+  onTranscriptionProgress: (cb: (data: any) => void) => onWsEvent('transcription:progress', cb),
+  onTranscriptionSegment: (cb: (data: any) => void) => onWsEvent('transcription:segment', cb),
+  onTranscriptionComplete: (cb: (data: any) => void) => onWsEvent('transcription:complete', cb),
 
   // WebSocket project subscription
   subscribeToProject,

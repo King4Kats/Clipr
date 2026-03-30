@@ -16,6 +16,9 @@ import * as projectService from './services/project-history.js'
 import * as authService from './services/auth.js'
 import * as aiLockService from './services/ai-lock.js'
 import * as sharingService from './services/sharing.js'
+import * as taskQueueService from './services/task-queue.js'
+import { runAnalysisPipeline } from './services/analysis-pipeline.js'
+import { runTranscriptionPipeline, getTranscription, getTranscriptionHistory, deleteTranscription, exportAsText, exportAsSrt } from './services/transcription-pipeline.js'
 import { requireAuth, requireAdmin, optionalAuth } from './middleware/auth.js'
 
 // ── Config ──
@@ -121,6 +124,25 @@ function broadcastToProject(projectId: string, type: string, data: any) {
   })
 }
 
+// Broadcast to a specific user (all their connected clients)
+function broadcastToUser(userId: string, type: string, data: any) {
+  const msg = JSON.stringify({ type, ...data })
+  clients.forEach(c => {
+    if (c.ws.readyState === WebSocket.OPEN && c.userId === userId) {
+      c.ws.send(msg)
+    }
+  })
+}
+
+// Unified broadcast for queue: sends to user AND to project if applicable
+function queueBroadcast(userId: string, projectId: string | null, type: string, data: any) {
+  if (projectId && (type === 'progress' || type === 'transcript:segment' || type === 'analysis:complete' || type === 'analysis:error')) {
+    broadcastToProject(projectId, type, data)
+  } else {
+    broadcastToUser(userId, type, data)
+  }
+}
+
 // ── Upload (multer) with file type validation ──
 const ALLOWED_VIDEO_MIMES = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', 'video/mp2t']
 const ALLOWED_EXTENSIONS = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.mts']
@@ -144,6 +166,34 @@ const upload = multer({
     }
   }
 })
+
+// ── Media upload (audio + video) for standalone transcription ──
+const ALLOWED_AUDIO_MIMES = ['audio/wav', 'audio/x-wav', 'audio/mpeg', 'audio/mp3', 'audio/flac', 'audio/ogg', 'audio/x-m4a', 'audio/aac', 'audio/mp4']
+const ALLOWED_AUDIO_EXTENSIONS = ['.wav', '.mp3', '.flac', '.ogg', '.m4a', '.aac']
+const ALL_MEDIA_MIMES = [...ALLOWED_VIDEO_MIMES, ...ALLOWED_AUDIO_MIMES]
+const ALL_MEDIA_EXTENSIONS = [...ALLOWED_EXTENSIONS, ...ALLOWED_AUDIO_EXTENSIONS]
+
+const mediaUpload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = extname(file.originalname).toLowerCase()
+    if (ALL_MEDIA_MIMES.includes(file.mimetype) || ALL_MEDIA_EXTENSIONS.includes(ext)) {
+      cb(null, true)
+    } else {
+      cb(new Error('Type de fichier non autorisé. Formats acceptés: MP4, MOV, AVI, MKV, WebM, MTS, WAV, MP3, FLAC, OGG, M4A, AAC'))
+    }
+  }
+})
+
+// ── Initialize task queue ──
+taskQueueService.initQueue(
+  {
+    analysis: runAnalysisPipeline,
+    transcription: runTranscriptionPipeline
+  },
+  queueBroadcast
+)
 
 // ── Routes API ──
 
@@ -220,10 +270,11 @@ app.get('/api/admin/logs', requireAuth, requireAdmin, (req, res) => {
   }
 })
 
-// AI Lock status — any authenticated user can check
-app.get('/api/ai/status', requireAuth, (_req, res) => {
-  const lock = aiLockService.getActiveLock()
-  res.json({ locked: !!lock, lock })
+// AI Lock status — now returns queue info for backward compatibility
+app.get('/api/ai/status', requireAuth, (req, res) => {
+  const queue = taskQueueService.getQueueState(req.user!.userId)
+  const isLocked = !!queue.currentTask
+  res.json({ locked: isLocked, lock: queue.currentTask, queue })
 })
 
 // Version
@@ -566,7 +617,7 @@ app.get('/api/users/search', requireAuth, (req, res) => {
   res.json(sharingService.searchUsers(q, req.user!.userId))
 })
 
-// ── Server-side AI Analysis (background processing) ──
+// ── Server-side AI Analysis (via task queue) ──
 app.post('/api/project/:id/analyze', requireAuth, async (req, res) => {
   const projectId = req.params.id
   const userId = req.user!.userId
@@ -580,149 +631,107 @@ app.post('/api/project/:id/analyze', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Aucune video dans le projet' })
   }
 
-  // Try to acquire AI lock
-  const lockResult = aiLockService.acquireLock(userId, projectId)
-  if (!lockResult.success) {
-    return res.status(423).json({ error: lockResult.error, lock: lockResult.lock })
+  // Enqueue analysis task
+  const task = taskQueueService.enqueueTask(userId, 'analysis', config, projectId)
+
+  res.json({ success: true, message: 'Analyse mise en file d\'attente', taskId: task.id, position: task.position })
+})
+
+// ── Queue status ──
+app.get('/api/queue', requireAuth, (req, res) => {
+  const state = taskQueueService.getQueueState(req.user!.userId)
+  res.json(state)
+})
+
+app.get('/api/queue/:taskId', requireAuth, (req, res) => {
+  const task = taskQueueService.getTaskById(req.params.taskId)
+  if (!task) return res.status(404).json({ error: 'Tâche introuvable' })
+  res.json(task)
+})
+
+app.delete('/api/queue/:taskId', requireAuth, (req, res) => {
+  const result = taskQueueService.cancelTask(req.params.taskId, req.user!.userId)
+  if (!result.success) return res.status(400).json({ error: result.error })
+  res.json({ success: true })
+})
+
+// ── Standalone Transcription ──
+app.post('/api/upload/media', requireAuth, mediaUpload.single('file'), async (req, res) => {
+  try {
+    const file = req.file
+    if (!file) return res.status(400).json({ error: 'Aucun fichier' })
+
+    const name = Buffer.from(file.originalname, 'latin1').toString('utf-8')
+    let duration = 0
+    try { duration = await ffmpegService.getVideoDuration(file.path) } catch { /* audio files may not have video duration */ }
+
+    res.json({ id: file.filename, path: file.path, name, duration, size: file.size })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+app.post('/api/transcription/start', requireAuth, (req, res) => {
+  const userId = req.user!.userId
+  const { filePath, filename, config } = req.body
+
+  if (!filePath) return res.status(400).json({ error: 'filePath requis' })
+
+  const taskConfig = {
+    filePath,
+    filename: filename || 'audio',
+    whisperModel: config?.whisperModel || 'large-v3',
+    language: config?.language || 'fr',
+    whisperPrompt: config?.whisperPrompt || ''
   }
 
-  // Respond immediately — analysis runs in background
-  res.json({ success: true, message: 'Analyse lancee en arriere-plan' })
+  const task = taskQueueService.enqueueTask(userId, 'transcription', taskConfig)
+  res.json({ success: true, taskId: task.id, position: task.position })
+})
 
-  // Mark project as processing
-  projectService.updateProjectStatus(projectId, 'processing')
+app.get('/api/transcription/history', requireAuth, (req, res) => {
+  res.json(getTranscriptionHistory(req.user!.userId))
+})
 
-  // Background pipeline
-  ;(async () => {
-    try {
-      const videoFiles = data.videoFiles
-      const whisperModel = config?.whisperModel || 'large-v3'
-      const whisperPrompt = config?.whisperPrompt || ''
-      const ollamaModel = config?.ollamaModel || 'mistral-small:22b'
-      const language = config?.language || 'fr'
-      const context = config?.context || ''
+app.get('/api/transcription/:id', requireAuth, (req, res) => {
+  const result = getTranscription(req.params.id, req.user!.userId)
+  if (!result) return res.status(404).json({ error: 'Transcription introuvable' })
+  res.json(result)
+})
 
-      // 1. Extract audio
-      broadcastToProject(projectId, 'progress', { step: 'extracting-audio', progress: 0, message: 'Extraction des pistes audio...' })
-      const audioPaths: string[] = []
+app.get('/api/transcription/:id/export', (req, res) => {
+  // Support token from query param for direct download links
+  const token = req.headers.authorization?.slice(7) || (req.query.token as string)
+  if (!token) return res.status(401).json({ error: 'Authentification requise' })
+  let userId: string
+  try {
+    const payload = authService.verifyToken(token)
+    userId = payload.userId
+  } catch { return res.status(401).json({ error: 'Token invalide' }) }
 
-      for (let i = 0; i < videoFiles.length; i++) {
-        const audioPath = await ffmpegService.extractAudio(videoFiles[i].path, (percent) => {
-          broadcastToProject(projectId, 'progress', {
-            step: 'extracting-audio',
-            progress: ((i + percent / 100) / videoFiles.length) * 100,
-            message: `Extraction audio ${i + 1}/${videoFiles.length}...`
-          })
-        })
-        audioPaths.push(audioPath)
-      }
+  const transcription = getTranscription(req.params.id, userId)
+  if (!transcription) return res.status(404).json({ error: 'Transcription introuvable' })
 
-      // Auto-save audio paths
-      projectService.saveProject(projectId, { ...data, audioPaths, config })
+  const format = req.query.format as string || 'txt'
+  const segments = transcription.segments
 
-      // 2. Transcribe
-      broadcastToProject(projectId, 'progress', { step: 'transcribing', progress: 0, message: 'Transcription de la voix...' })
+  if (format === 'srt') {
+    const content = exportAsSrt(segments)
+    const filename = `${transcription.filename.replace(/\.[^.]+$/, '')}.srt`
+    res.setHeader('Content-Type', 'text/srt; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    res.send(content)
+  } else {
+    const content = exportAsText(segments)
+    const filename = `${transcription.filename.replace(/\.[^.]+$/, '')}.txt`
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    res.send(content)
+  }
+})
 
-      await whisperService.loadWhisperModel(whisperModel)
-      const allTranscriptSegments: any[] = []
-
-      for (let i = 0; i < audioPaths.length; i++) {
-        broadcastToProject(projectId, 'progress', {
-          step: 'transcribing',
-          progress: (i / audioPaths.length) * 100,
-          message: `Transcription video ${i + 1}/${audioPaths.length}...`
-        })
-
-        const segments = await whisperService.transcribe(
-          audioPaths[i], language,
-          (segment) => {
-            const offset = videoFiles[i]?.offset || 0
-            const adjusted = { ...segment, start: segment.start + offset, end: segment.end + offset }
-            broadcastToProject(projectId, 'transcript:segment', adjusted)
-          },
-          (percent) => {
-            broadcastToProject(projectId, 'progress', {
-              step: 'transcribing',
-              progress: ((i + percent / 100) / audioPaths.length) * 100,
-              message: `Transcription video ${i + 1}/${audioPaths.length}...`
-            })
-          },
-          whisperPrompt
-        )
-
-        const offset = videoFiles[i]?.offset || 0
-        const adjusted = segments.map((seg: any) => ({
-          ...seg, start: seg.start + offset, end: seg.end + offset
-        }))
-        allTranscriptSegments.push(...adjusted)
-      }
-
-      // Auto-save transcript
-      projectService.saveProject(projectId, { ...data, audioPaths, transcript: allTranscriptSegments, config })
-
-      // 3. Analyze with LLM
-      broadcastToProject(projectId, 'progress', { step: 'analyzing', progress: 0, message: 'Decoupe intelligente par l\'IA...' })
-
-      const fullText = allTranscriptSegments
-        .map((t: any) => `[${t.start.toFixed(1)}s] ${t.text}`)
-        .join('\n')
-
-      const result = await ollamaService.analyzeTranscript(fullText, context, ollamaModel, (ci, tc, _sf, msg) => {
-        broadcastToProject(projectId, 'progress', {
-          step: 'analyzing',
-          progress: (ci / tc) * 100,
-          message: msg || 'Analyse thematique...'
-        })
-      })
-
-      const finalSegments = (result?.segments || []).map((s: any) => ({
-        ...s,
-        id: Math.random().toString(36).substring(2, 11),
-        transcriptSegments: [],
-        color: ''
-      }))
-
-      // 4. Save final results to DB
-      const finalData = {
-        ...data,
-        audioPaths,
-        transcript: allTranscriptSegments,
-        segments: finalSegments,
-        config,
-        projectName: data.projectName || project.name
-      }
-
-      projectService.saveProject(projectId, finalData)
-      projectService.updateProjectStatus(projectId, 'done')
-
-      broadcastToProject(projectId, 'analysis:complete', {
-        step: 'done',
-        progress: 100,
-        message: 'Analyse terminee !',
-        segments: finalSegments,
-        transcript: allTranscriptSegments,
-        audioPaths
-      })
-
-      logger.info(`[Analysis] Project ${projectId} completed: ${finalSegments.length} segments`)
-
-      // Release AI lock
-      aiLockService.releaseLockForProject(projectId)
-
-    } catch (err: any) {
-      logger.error(`[Analysis] Project ${projectId} failed:`, err)
-      projectService.updateProjectStatus(projectId, 'draft')
-
-      // Release AI lock on error
-      aiLockService.releaseLockForProject(projectId)
-
-      broadcastToProject(projectId, 'analysis:error', {
-        step: 'error',
-        progress: 0,
-        message: `Echec: ${err.message}`
-      })
-    }
-  })()
+app.delete('/api/transcription/:id', requireAuth, (req, res) => {
+  const ok = deleteTranscription(req.params.id, req.user!.userId)
+  if (!ok) return res.status(404).json({ error: 'Transcription introuvable' })
+  res.json({ success: true })
 })
 
 // Project export (auth required)

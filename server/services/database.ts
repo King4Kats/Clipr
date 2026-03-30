@@ -75,6 +75,40 @@ function initSchema() {
 
     CREATE INDEX IF NOT EXISTS idx_shares_project ON project_shares(project_id);
     CREATE INDEX IF NOT EXISTS idx_shares_user ON project_shares(user_id);
+
+    CREATE TABLE IF NOT EXISTS task_queue (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('analysis', 'transcription')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+      project_id TEXT,
+      config TEXT NOT NULL DEFAULT '{}',
+      result TEXT,
+      progress INTEGER NOT NULL DEFAULT 0,
+      progress_message TEXT,
+      position INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      started_at TEXT,
+      completed_at TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_queue_status ON task_queue(status);
+    CREATE INDEX IF NOT EXISTS idx_task_queue_user ON task_queue(user_id);
+
+    CREATE TABLE IF NOT EXISTS transcriptions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'fr',
+      whisper_model TEXT NOT NULL DEFAULT 'large-v3',
+      segments TEXT NOT NULL DEFAULT '[]',
+      duration REAL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (task_id) REFERENCES task_queue(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_transcriptions_user ON transcriptions(user_id);
   `)
 
   // Migration: add user_id column if missing (for existing DBs)
