@@ -687,6 +687,52 @@ app.post('/api/transcription/start', requireAuth, (req, res) => {
   res.json({ success: true, taskId: task.id, position: task.position })
 })
 
+
+// ── Batch upload (multiple media files) ──
+app.post('/api/upload/media/batch', requireAuth, mediaUpload.array('files', 20), async (req, res) => {
+  try {
+    const files = req.files as Express.Multer.File[]
+    if (!files || files.length === 0) return res.status(400).json({ error: 'Aucun fichier' })
+
+    const results = []
+    for (const file of files) {
+      const name = Buffer.from(file.originalname, 'latin1').toString('utf-8')
+      let duration = 0
+      try { duration = await ffmpegService.getVideoDuration(file.path) } catch { /* audio files may not have video duration */ }
+      results.push({ id: file.filename, path: file.path, name, duration, size: file.size })
+    }
+    res.json({ files: results })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// ── Batch transcription start ──
+app.post('/api/transcription/start/batch', requireAuth, (req, res) => {
+  const userId = req.user!.userId
+  const { files, config } = req.body
+
+  if (!files || !Array.isArray(files) || files.length === 0) {
+    return res.status(400).json({ error: 'files[] requis' })
+  }
+  if (files.length > 20) {
+    return res.status(400).json({ error: 'Maximum 20 fichiers par batch' })
+  }
+
+  const batchId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const tasks = files.map((f: { filePath: string; filename: string }) => {
+    const taskConfig = {
+      filePath: f.filePath,
+      filename: f.filename || 'audio',
+      whisperModel: config?.whisperModel || 'large-v3',
+      language: config?.language || 'fr',
+      whisperPrompt: config?.whisperPrompt || '',
+      batchId
+    }
+    const task = taskQueueService.enqueueTask(userId, 'transcription', taskConfig)
+    return { taskId: task.id, position: task.position, filename: f.filename }
+  })
+
+  res.json({ success: true, batchId, tasks })
+})
 app.get('/api/transcription/history', requireAuth, (req, res) => {
   res.json(getTranscriptionHistory(req.user!.userId))
 })

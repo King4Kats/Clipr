@@ -223,6 +223,16 @@ const api = {
   },
   startTranscription: (filePath: string, filename: string, config: any) =>
     post<{ success: boolean; taskId: string; position: number }>('/api/transcription/start', { filePath, filename, config }),
+  // Batch transcription
+  uploadMediaBatch: async (files: File[]): Promise<any> => {
+    const formData = new FormData()
+    files.forEach(f => formData.append('files', f))
+    const res = await fetch(`${API_BASE}/api/upload/media/batch`, { method: 'POST', body: formData, headers: getAuthHeaders() })
+    if (!res.ok) throw new Error('Upload batch échoué')
+    return res.json()
+  },
+  startTranscriptionBatch: (files: { filePath: string; filename: string }[], config: any) =>
+    post<{ success: boolean; batchId: string; tasks: { taskId: string; position: number; filename: string }[] }>('/api/transcription/start/batch', { files, config }),
   getTranscriptionHistory: () => get<any[]>('/api/transcription/history'),
   getTranscription: (id: string) => get<any>(`/api/transcription/${id}`),
   deleteTranscription: (id: string) => del(`/api/transcription/${id}`),
