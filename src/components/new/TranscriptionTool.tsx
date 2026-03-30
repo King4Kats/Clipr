@@ -9,7 +9,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Mic, ArrowLeft, Upload, Loader2, Copy, Download, Trash2,
-  CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music
+  CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -70,8 +70,10 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
   const [batchMode, setBatchMode] = useState(false)
   const [batchProcessing, setBatchProcessing] = useState(false)
 
-  // Derived: all task IDs from batch items
+  // Derived batch state
   const allTaskIds = batchItems.map(item => item.taskId).filter((id): id is string => !!id)
+  const batchDoneCount = batchItems.filter(item => item.status === 'done').length
+  const batchAllDone = batchItems.length > 0 && batchItems.every(item => item.status === 'done' || item.status === 'error')
 
   // Config
   const [whisperModel, setWhisperModel] = useState<string>('large-v3')
