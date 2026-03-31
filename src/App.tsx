@@ -175,7 +175,7 @@ function App() {
   const renderContent = () => {
     // ── Outil de transcription standalone ──
     if (showTranscriptionTool) {
-      return <TranscriptionTool onBack={() => { setShowTranscriptionTool(false); setActiveTranscriptionProject(null); }} initialProject={activeTranscriptionProject} />;
+      return <TranscriptionTool onBack={() => { setShowTranscriptionTool(false); setActiveTranscriptionProject(null); loadHistory(); }} initialProject={activeTranscriptionProject} />;
     }
 
     // ── Écran segmentation d'interview vidéo (upload) ──

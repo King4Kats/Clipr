@@ -398,7 +398,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
     const unsub = api.onTranscriptionComplete((data: any) => {
       if (data.projectId !== initialProject.id) return
       setProjectItems(prev => prev.map((item: any) =>
-        item.taskId === data.taskId
+        item.filename === data.filename
           ? { ...item, status: 'done', transcriptionId: data.transcriptionId, duration: data.duration }
           : item
       ))
