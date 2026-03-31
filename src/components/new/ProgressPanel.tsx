@@ -9,7 +9,7 @@
 
 import { useStore } from "@/store/useStore";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, Music, MessageSquare, Sparkles, AlertCircle, CheckCircle2, Download, Clock } from "lucide-react";
+import { Loader2, Music, MessageSquare, Sparkles, AlertCircle, CheckCircle2, Download, Clock, ArrowDownToLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 // Libellés affichés pour chaque étape du traitement
@@ -38,7 +38,7 @@ const STEP_ICONS: Record<string, any> = {
 
 const ProgressPanel = () => {
     // --- Etat global depuis le store ---
-    const { processingStep, progress, progressMessage, transcript } = useStore();
+    const { processingStep, progress, progressMessage, transcript, reset } = useStore();
 
     // Drapeaux dérivés pour le rendu conditionnel
     const isError = processingStep === "error";
@@ -119,6 +119,17 @@ const ProgressPanel = () => {
                         >
                             Redémarrer
                         </Button>
+                    )}
+
+                    {!isError && !isDone && processingStep !== 'exporting' && (
+                        <button
+                            onClick={reset}
+                            className="mt-6 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mx-auto"
+                            title="L'analyse continue en arrière-plan"
+                        >
+                            <ArrowDownToLine className="w-3.5 h-3.5" />
+                            Passer en arrière-plan
+                        </button>
                     )}
                 </div>
             </motion.div>
