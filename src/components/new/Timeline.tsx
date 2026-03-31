@@ -5,7 +5,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, Reorder } from "framer-motion";
-import { Scissors, Play, Trash2, Plus, Pause, FileText, Film, ChevronDown, GripVertical, GripHorizontal, Loader2 } from "lucide-react";
+import { Scissors, Play, Trash2, Plus, Pause, FileText, Film, ChevronDown, GripVertical, GripHorizontal, Loader2, CheckCircle } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { Button } from "@/components/ui/button";
 import api from "@/api";
@@ -22,7 +22,7 @@ const Timeline = () => {
   const {
     segments, selectedSegmentId, setSelectedSegmentId, videoFiles,
     removeSegment, addSegment, getTotalDuration, isPlaying, setIsPlaying,
-    updateSegment, getClipsForSegment, setProcessing, transcript, setTranscript, setSegments,
+    updateSegment, getClipsForSegment, setProcessing, processingStep, transcript, setTranscript, setSegments,
     videoFile, audioPaths, setAudioPaths, config
   } = useStore();
 
@@ -277,6 +277,29 @@ const Timeline = () => {
           </div>
         )}
       </div>
+
+      {/* Section export prominente apres completion */}
+      {(processingStep === 'done' || processingStep === 'ready') && segments.length > 0 && (
+        <div className="border-t border-border p-3 space-y-2">
+          <div className="flex items-center gap-2 text-green-400 mb-2">
+            <CheckCircle className="w-4 h-4" />
+            <span className="text-xs font-semibold">{segments.length} segments prets</span>
+          </div>
+          <Button variant="default" size="sm" onClick={handleExportVideo} disabled={isExporting} className="w-full gap-2 text-xs font-bold">
+            <Film className="w-3.5 h-3.5" /> Exporter les videos
+          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="outline" size="sm" onClick={handleExportTxtSequences} disabled={isTranscribing} className="gap-1.5 text-[10px]">
+              {isTranscribing ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+              TXT timecodes
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleExportTxtPropre} disabled={isTranscribing} className="gap-1.5 text-[10px]">
+              {isTranscribing ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+              TXT propre
+            </Button>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 };

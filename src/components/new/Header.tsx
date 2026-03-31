@@ -7,7 +7,7 @@
  */
 
 import { useState } from "react";
-import { Settings, Save, RotateCcw, Sun, Moon, BookOpen, Pencil, Check, X, Home, LogOut, User, Shield } from "lucide-react";
+import { Settings, Save, RotateCcw, Sun, Moon, BookOpen, Pencil, Check, X, Home, LogOut, User, Shield, Loader2 } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useTheme } from "next-themes";
@@ -21,7 +21,7 @@ interface HeaderProps {
 }
 
 const Header = ({ onOpenSetup, onOpenAdmin }: HeaderProps) => {
-  const { videoFiles, processingStep, reset, saveProject, activeProjectId, activeProjectName, renameProject } = useStore();
+  const { videoFiles, processingStep, reset, saveProject, activeProjectId, activeProjectName, renameProject, history } = useStore();
   const { user, logout } = useAuthStore();
   const { theme, setTheme } = useTheme();
 
@@ -32,6 +32,7 @@ const Header = ({ onOpenSetup, onOpenAdmin }: HeaderProps) => {
   const hasProject = !!activeProjectId;
   const isProcessing =
     processingStep !== "idle" && processingStep !== "ready" && processingStep !== "done";
+  const processingCount = (history as any[]).filter((p: any) => p.status === 'processing').length;
 
   const toggleTheme = () => {
     setTheme(theme === "dark" ? "light" : "dark");
@@ -70,6 +71,11 @@ const Header = ({ onOpenSetup, onOpenAdmin }: HeaderProps) => {
             <div className="flex items-center gap-2 text-primary animate-pulse text-sm font-medium">
               <RotateCcw className="w-4 h-4 animate-spin-slow" />
               <span>Analyse ou traitement en cours...</span>
+            </div>
+          ) : !hasProject && processingCount > 0 ? (
+            <div className="flex items-center gap-2 text-amber-400 text-sm font-medium">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>{processingCount} projet{processingCount > 1 ? 's' : ''} en analyse...</span>
             </div>
           ) : hasProject ? (
             <div className="flex items-center gap-2">
