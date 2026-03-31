@@ -140,7 +140,8 @@ export async function runTranscriptionPipeline(task: QueueTask, broadcastFn: Bro
     transcriptionId,
     segmentCount: finalSegments.length,
     duration,
-    projectId
+    projectId,
+    filename
   })
 
   return { transcriptionId }
