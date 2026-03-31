@@ -246,7 +246,7 @@ function App() {
                   transition={{ delay: i * 0.05 }}
                   onClick={() => editingId !== project.id && loadFromHistory(project)}
                   className={`group relative p-4 bg-card hover:bg-secondary/50 border rounded-xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg ${
-                    project.status === 'processing' ? 'border-amber-500/50 animate-pulse' : 'border-border'
+                    project.status === 'processing' ? 'border-amber-500/60 border-2' : 'border-border'
                   }`}
                 >
                   <div className="flex items-start gap-3">
@@ -297,6 +297,19 @@ function App() {
                       </p>
                     </div>
                   </div>
+
+                  {/* Indicateur de traitement en cours */}
+                  {project.status === 'processing' && (
+                    <div className="mt-3 pt-2.5 border-t border-amber-500/20">
+                      <div className="flex items-center gap-2 text-amber-400">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <span className="text-[10px] font-semibold">Analyse IA en cours...</span>
+                      </div>
+                      <div className="mt-1.5 h-1 bg-amber-500/10 rounded-full overflow-hidden">
+                        <div className="h-full bg-amber-500/50 rounded-full animate-pulse" style={{ width: '60%' }} />
+                      </div>
+                    </div>
+                  )}
 
                   {/* Actions : share, rename & delete */}
                   {editingId !== project.id && (
