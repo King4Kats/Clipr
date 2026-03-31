@@ -401,9 +401,9 @@ export const useStore = create<AppState>((set, get) => ({
       audioPath: audioPaths.length > 0 ? audioPaths[0] : null,
       config: { ...get().config, ...data.config },
       videoFile: data.videoFiles && data.videoFiles.length > 0 ? data.videoFiles[0] : null,
-      processingStep: isProcessing ? 'analyzing' : 'ready',
-      progress: isProcessing ? 50 : 100,
-      progressMessage: isProcessing ? 'Analyse en cours (arrière-plan)...' : 'Projet chargé'
+      processingStep: isProcessing ? 'queued' : 'ready',
+      progress: 0,
+      progressMessage: isProcessing ? 'Reconnexion à l\'analyse en cours...' : 'Projet chargé'
     })
   },
 

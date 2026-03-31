@@ -98,7 +98,7 @@ wss.on('connection', (ws) => {
       // Subscribe to project channel (requires auth)
       if (msg.type === 'subscribe' && msg.projectId && client.userId) {
         client.projectId = msg.projectId
-        // Envoyer l'état actuel du projet au client qui vient de s'abonner
+        // Si le projet est terminé, envoyer les résultats immédiatement au client
         const record = projectService.getProject(msg.projectId)
         if (record && record.status === 'done' && record.data?.segments?.length > 0) {
           ws.send(JSON.stringify({
@@ -107,14 +107,6 @@ wss.on('connection', (ws) => {
             segments: record.data.segments,
             transcript: record.data.transcript || [],
             audioPaths: record.data.audioPaths || []
-          }))
-        } else if (record && record.status === 'processing') {
-          ws.send(JSON.stringify({
-            type: 'progress',
-            projectId: msg.projectId,
-            step: 'analyzing',
-            progress: 50,
-            message: 'Analyse en cours (arrière-plan)...'
           }))
         }
       }
