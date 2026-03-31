@@ -121,9 +121,8 @@ const Header = ({ onOpenSetup, onOpenAdmin }: HeaderProps) => {
                 variant="secondary"
                 size="sm"
                 onClick={reset}
-                disabled={isProcessing}
                 className="h-8 gap-2 bg-primary/10 hover:bg-primary/20 text-primary border-primary/30"
-                title="Retour à l'accueil"
+                title="Retour à l'accueil (l'analyse continue en arrière-plan)"
               >
                 <Home className="w-4 h-4" />
                 <span>Accueil</span>
