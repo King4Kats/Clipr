@@ -60,6 +60,7 @@ function App() {
   const [sharedProjects, setSharedProjects] = useState<any[]>([]);
   const [projectMode, setProjectMode] = useState<'choose' | 'ai' | 'manual' | null>(null);
   const [showTranscriptionTool, setShowTranscriptionTool] = useState(false);
+  const [activeTranscriptionProject, setActiveTranscriptionProject] = useState<any>(null);
   const [showVideoSegmentation, setShowVideoSegmentation] = useState(false);
   const [showNewProjectChoice, setShowNewProjectChoice] = useState(false);
 
@@ -174,7 +175,7 @@ function App() {
   const renderContent = () => {
     // ── Outil de transcription standalone ──
     if (showTranscriptionTool) {
-      return <TranscriptionTool onBack={() => setShowTranscriptionTool(false)} />;
+      return <TranscriptionTool onBack={() => { setShowTranscriptionTool(false); setActiveTranscriptionProject(null); }} initialProject={activeTranscriptionProject} />;
     }
 
     // ── Écran segmentation d'interview vidéo (upload) ──
@@ -244,14 +245,22 @@ function App() {
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: i * 0.05 }}
-                  onClick={() => editingId !== project.id && loadFromHistory(project)}
+                  onClick={() => {
+                    if (editingId === project.id) return;
+                    if (project.data?.toolType === 'transcription') {
+                      setActiveTranscriptionProject(project);
+                      setShowTranscriptionTool(true);
+                    } else {
+                      loadFromHistory(project);
+                    }
+                  }}
                   className={`group relative p-4 bg-card hover:bg-secondary/50 border rounded-xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg ${
                     project.status === 'processing' ? 'border-amber-500/60 border-2' : 'border-border'
                   }`}
                 >
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors shrink-0">
-                      {project.type === 'ai' ? <Cpu className="w-5 h-5" /> : <Film className="w-5 h-5" />}
+                      {project.data?.toolType === 'transcription' ? <Mic className="w-5 h-5" /> : project.type === 'ai' ? <Cpu className="w-5 h-5" /> : <Film className="w-5 h-5" />}
                     </div>
                     <div className="min-w-0 flex-1">
                       {editingId === project.id ? (
@@ -276,11 +285,13 @@ function App() {
                       )}
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                          project.type === 'ai'
+                          project.data?.toolType === 'transcription'
+                            ? 'bg-primary/10 text-primary'
+                            : project.type === 'ai'
                             ? 'bg-violet-500/10 text-violet-400'
                             : 'bg-blue-500/10 text-blue-400'
                         }`}>
-                          {project.type === 'ai' ? 'IA' : 'Manuel'}
+                          {project.data?.toolType === 'transcription' ? 'Audio' : project.type === 'ai' ? 'IA' : 'Manuel'}
                         </span>
                         <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
                           project.status === 'done'
@@ -293,7 +304,10 @@ function App() {
                         </span>
                       </div>
                       <p className="text-[10px] text-muted-foreground font-mono mt-1">
-                        {new Date(project.updated_at || project.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })} • {project.data?.segments?.length || 0} segments
+                        {new Date(project.updated_at || project.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })} •{' '}
+                        {project.data?.toolType === 'transcription'
+                          ? `${project.data?.transcriptionItems?.length || 0} fichier${(project.data?.transcriptionItems?.length || 0) > 1 ? 's' : ''}`
+                          : `${project.data?.segments?.length || 0} segments`}
                       </p>
                     </div>
                   </div>
