@@ -682,20 +682,36 @@ app.post('/api/upload/media', requireAuth, mediaUpload.single('file'), async (re
 
 app.post('/api/transcription/start', requireAuth, (req, res) => {
   const userId = req.user!.userId
-  const { filePath, filename, config } = req.body
+  const { filePath, filename, config, projectName } = req.body
 
   if (!filePath) return res.status(400).json({ error: 'filePath requis' })
+
+  // Créer un projet pour ce projet de transcription
+  let projectId: string | undefined
+  try {
+    const name = projectName || filename || 'Transcription audio'
+    const project = projectService.createProject(name, 'manual', userId)
+    projectService.saveProject(project.id, {
+      videoFiles: [], transcript: [], segments: [], audioPaths: [],
+      config: config || {}, timestamp: Date.now(), projectName: name,
+      toolType: 'transcription',
+      transcriptionItems: [{ filename: filename || 'audio', status: 'processing' }]
+    })
+    projectService.updateProjectStatus(project.id, 'processing')
+    projectId = project.id
+  } catch { /* limite atteinte, on continue sans projet */ }
 
   const taskConfig = {
     filePath,
     filename: filename || 'audio',
     whisperModel: config?.whisperModel || 'large-v3',
     language: config?.language || 'fr',
-    whisperPrompt: config?.whisperPrompt || ''
+    whisperPrompt: config?.whisperPrompt || '',
+    projectId
   }
 
   const task = taskQueueService.enqueueTask(userId, 'transcription', taskConfig)
-  res.json({ success: true, taskId: task.id, position: task.position })
+  res.json({ success: true, taskId: task.id, position: task.position, projectId })
 })
 
 
@@ -719,7 +735,7 @@ app.post('/api/upload/media/batch', requireAuth, mediaUpload.array('files', 20),
 // ── Batch transcription start ──
 app.post('/api/transcription/start/batch', requireAuth, (req, res) => {
   const userId = req.user!.userId
-  const { files, config } = req.body
+  const { files, config, projectName } = req.body
 
   if (!files || !Array.isArray(files) || files.length === 0) {
     return res.status(400).json({ error: 'files[] requis' })
@@ -727,6 +743,21 @@ app.post('/api/transcription/start/batch', requireAuth, (req, res) => {
   if (files.length > 20) {
     return res.status(400).json({ error: 'Maximum 20 fichiers par batch' })
   }
+
+  // Créer un projet unique pour tout le batch
+  let projectId: string | undefined
+  try {
+    const name = projectName || (files.length === 1 ? files[0].filename : `Transcription - ${files.length} fichiers`)
+    const project = projectService.createProject(name, 'manual', userId)
+    const transcriptionItems = files.map((f: any) => ({ filename: f.filename, status: 'processing' as const }))
+    projectService.saveProject(project.id, {
+      videoFiles: [], transcript: [], segments: [], audioPaths: [],
+      config: config || {}, timestamp: Date.now(), projectName: name,
+      toolType: 'transcription', transcriptionItems
+    })
+    projectService.updateProjectStatus(project.id, 'processing')
+    projectId = project.id
+  } catch { /* limite atteinte */ }
 
   const batchId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const tasks = files.map((f: { filePath: string; filename: string }) => {
@@ -736,13 +767,14 @@ app.post('/api/transcription/start/batch', requireAuth, (req, res) => {
       whisperModel: config?.whisperModel || 'large-v3',
       language: config?.language || 'fr',
       whisperPrompt: config?.whisperPrompt || '',
-      batchId
+      batchId,
+      projectId
     }
     const task = taskQueueService.enqueueTask(userId, 'transcription', taskConfig)
     return { taskId: task.id, position: task.position, filename: f.filename }
   })
 
-  res.json({ success: true, batchId, tasks })
+  res.json({ success: true, batchId, tasks, projectId })
 })
 app.get('/api/transcription/history', requireAuth, (req, res) => {
   res.json(getTranscriptionHistory(req.user!.userId))

@@ -17,6 +17,14 @@ function fixMojibake(str: string): string {
   return str
 }
 
+export interface TranscriptionItem {
+  transcriptionId?: string
+  filename: string
+  duration?: number
+  status: 'processing' | 'done' | 'error'
+  taskId?: string
+}
+
 export interface ProjectData {
   videoFiles: any[]
   transcript: any[]
@@ -25,6 +33,8 @@ export interface ProjectData {
   config: any
   timestamp: number
   projectName: string
+  toolType?: 'transcription'
+  transcriptionItems?: TranscriptionItem[]
 }
 
 export interface ProjectRecord {

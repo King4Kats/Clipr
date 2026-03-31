@@ -9,7 +9,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Mic, ArrowLeft, Upload, Loader2, Copy, Download, Trash2,
-  CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files
+  CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files, Pencil, X, Check
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,6 +25,7 @@ const ALL_EXTENSIONS = [...AUDIO_EXTENSIONS, ...VIDEO_EXTENSIONS]
 
 interface TranscriptionToolProps {
   onBack: () => void
+  initialProject?: any
 }
 
 type ToolStatus = 'idle' | 'uploading' | 'queued' | 'extracting-audio' | 'transcribing' | 'done' | 'error'
@@ -58,7 +59,7 @@ const InfoTip = ({ text }: { text: string }) => {
   )
 }
 
-const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
+const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) => {
   // Upload state
   const [file, setFile] = useState<File | null>(null)
   const [uploadedFile, setUploadedFile] = useState<{ path: string; name: string; duration: number } | null>(null)
@@ -97,6 +98,15 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
   // History
   const [history, setHistory] = useState<TranscriptionHistoryItem[]>([])
   const [showHistory, setShowHistory] = useState(false)
+
+  // Project mode state (when opened from home page project card)
+  const [projectItems, setProjectItems] = useState<any[]>(initialProject?.data?.transcriptionItems || [])
+  const [selectedItem, setSelectedItem] = useState<any | null>(null)
+  const [selectedItemSegments, setSelectedItemSegments] = useState<TranscriptSegment[]>([])
+  const [selectedItemLoading, setSelectedItemLoading] = useState(false)
+  const [projectName, setProjectName] = useState(initialProject?.name || '')
+  const [editingProjectName, setEditingProjectName] = useState(false)
+  const [projectNameEdit, setProjectNameEdit] = useState('')
 
   // Load history on mount
   useEffect(() => {
@@ -382,6 +392,43 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  // Listen for transcription:complete events for this project
+  useEffect(() => {
+    if (!initialProject) return
+    const unsub = api.onTranscriptionComplete((data: any) => {
+      if (data.projectId !== initialProject.id) return
+      setProjectItems(prev => prev.map((item: any) =>
+        item.taskId === data.taskId
+          ? { ...item, status: 'done', transcriptionId: data.transcriptionId, duration: data.duration }
+          : item
+      ))
+    })
+    return unsub
+  }, [initialProject?.id])
+
+  // Load a single project item's transcript
+  const handleLoadProjectItem = async (item: any) => {
+    if (!item.transcriptionId) return
+    setSelectedItem(item)
+    setSelectedItemLoading(true)
+    setSelectedItemSegments([])
+    try {
+      const result = await api.getTranscription(item.transcriptionId)
+      setSelectedItemSegments(result.segments || [])
+    } catch { /* ignore */ }
+    finally { setSelectedItemLoading(false) }
+  }
+
+  // Rename project
+  const handleProjectRename = async () => {
+    if (!initialProject || !projectNameEdit.trim()) return
+    try {
+      await api.renameProject(initialProject.id, projectNameEdit.trim())
+      setProjectName(projectNameEdit.trim())
+    } catch { /* ignore */ }
+    setEditingProjectName(false)
+  }
+
   // Load a past transcription
   const handleLoadHistory = async (item: TranscriptionHistoryItem) => {
     try {
@@ -407,6 +454,160 @@ const TranscriptionTool = ({ onBack }: TranscriptionToolProps) => {
     const m = Math.floor(s / 60)
     const sec = Math.floor(s % 60)
     return `${m}:${String(sec).padStart(2, '0')}`
+  }
+
+  // ── Vue projet : liste de fichiers ──
+  if (initialProject && !selectedItem) {
+    const doneCount = projectItems.filter((i: any) => i.status === 'done').length
+    const allDone = projectItems.length > 0 && projectItems.every((i: any) => i.status === 'done' || i.status === 'error')
+
+    return (
+      <div className="max-w-4xl mx-auto w-full pt-8">
+        {/* Header */}
+        <div className="flex items-center gap-4 mb-8">
+          <button onClick={onBack} className="p-2 rounded-lg hover:bg-secondary transition-colors">
+            <ArrowLeft className="w-5 h-5 text-muted-foreground" />
+          </button>
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <Mic className="w-5 h-5 text-primary" />
+            </div>
+            <div className="min-w-0 flex-1">
+              {editingProjectName ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    value={projectNameEdit}
+                    onChange={(e) => setProjectNameEdit(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleProjectRename(); if (e.key === 'Escape') setEditingProjectName(false) }}
+                    className="text-lg font-bold text-foreground bg-secondary/50 border border-primary/30 rounded px-2 py-0.5 outline-none focus:ring-1 focus:ring-primary w-full"
+                    autoFocus
+                  />
+                  <button onClick={handleProjectRename} className="p-1 text-green-500 hover:text-green-400 shrink-0"><Check className="w-4 h-4" /></button>
+                  <button onClick={() => setEditingProjectName(false)} className="p-1 text-muted-foreground hover:text-foreground shrink-0"><X className="w-4 h-4" /></button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <h1 className="text-lg font-bold text-foreground truncate">{projectName}</h1>
+                  <button onClick={() => { setProjectNameEdit(projectName); setEditingProjectName(true) }} className="p-1 text-muted-foreground/50 hover:text-foreground transition-colors shrink-0">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                {doneCount}/{projectItems.length} fichier{projectItems.length > 1 ? 's' : ''} transcrit{doneCount > 1 ? 's' : ''}
+                {!allDone && <span className="text-amber-400"> · En cours...</span>}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* File list */}
+        <div className="space-y-3">
+          {projectItems.map((item: any, i: number) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.04 }}
+              onClick={() => item.status === 'done' && item.transcriptionId && handleLoadProjectItem(item)}
+              className={`bg-card border rounded-xl p-4 flex items-center gap-4 transition-all ${
+                item.status === 'done' && item.transcriptionId
+                  ? 'border-border hover:border-primary/50 hover:bg-secondary/30 cursor-pointer'
+                  : 'border-border/50 opacity-80'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
+                item.status === 'done' ? 'bg-green-500/10' : item.status === 'error' ? 'bg-destructive/10' : 'bg-amber-500/10'
+              }`}>
+                {item.status === 'done' ? (
+                  <CheckCircle2 className="w-5 h-5 text-green-500" />
+                ) : item.status === 'error' ? (
+                  <AlertCircle className="w-5 h-5 text-destructive" />
+                ) : (
+                  <Loader2 className="w-5 h-5 text-amber-500 animate-spin" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-foreground truncate">{item.filename}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {item.status === 'done' && item.duration ? fmtTime(item.duration) + ' · ' : ''}
+                  {item.status === 'done' ? 'Terminé — cliquer pour voir' : item.status === 'error' ? 'Erreur' : 'Transcription en cours...'}
+                </p>
+              </div>
+              {item.status === 'done' && item.transcriptionId && (
+                <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <a href={api.getTranscriptionExportUrl(item.transcriptionId, 'txt')} download onClick={(e) => e.stopPropagation()}>
+                    <button className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
+                      <Download className="w-3 h-3" /> .txt
+                    </button>
+                  </a>
+                  <a href={api.getTranscriptionExportUrl(item.transcriptionId, 'srt')} download onClick={(e) => e.stopPropagation()}>
+                    <button className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
+                      <Download className="w-3 h-3" /> .srt
+                    </button>
+                  </a>
+                </div>
+              )}
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Vue projet : transcript d'un fichier ──
+  if (initialProject && selectedItem) {
+    return (
+      <div className="max-w-4xl mx-auto w-full pt-8">
+        <div className="flex items-center gap-4 mb-8">
+          <button onClick={() => { setSelectedItem(null); setSelectedItemSegments([]) }} className="p-2 rounded-lg hover:bg-secondary transition-colors">
+            <ArrowLeft className="w-5 h-5 text-muted-foreground" />
+          </button>
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <FileText className="w-5 h-5 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-lg font-bold text-foreground truncate">{selectedItem.filename}</h1>
+              <p className="text-xs text-muted-foreground">{projectName}</p>
+            </div>
+          </div>
+          {selectedItem.transcriptionId && !selectedItemLoading && (
+            <div className="flex items-center gap-2 shrink-0">
+              <a href={api.getTranscriptionExportUrl(selectedItem.transcriptionId, 'txt')} download>
+                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
+                  <Download className="w-3.5 h-3.5" /> .txt
+                </button>
+              </a>
+              <a href={api.getTranscriptionExportUrl(selectedItem.transcriptionId, 'srt')} download>
+                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
+                  <Download className="w-3.5 h-3.5" /> .srt
+                </button>
+              </a>
+            </div>
+          )}
+        </div>
+
+        {selectedItemLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 text-primary animate-spin" />
+          </div>
+        ) : (
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <div className="max-h-[600px] overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
+              {selectedItemSegments.map((seg, i) => (
+                <div key={i} className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
+                  <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
+                    {fmtTime(seg.start)}
+                  </span>
+                  <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (

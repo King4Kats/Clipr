@@ -10,6 +10,7 @@ import * as ffmpegService from './ffmpeg.js'
 import * as whisperService from './whisper.js'
 import { getDb } from './database.js'
 import { updateTaskProgress } from './task-queue.js'
+import { getProject, saveProject, updateProjectStatus } from './project-history.js'
 import { randomUUID } from 'crypto'
 import { logger } from '../logger.js'
 
@@ -117,11 +118,29 @@ export async function runTranscriptionPipeline(task: QueueTask, broadcastFn: Bro
 
   logger.info(`[Transcription] Completed: ${transcriptionId}, ${finalSegments.length} segments, ${duration.toFixed(1)}s`)
 
+  // Mettre à jour le projet associé si présent
+  const projectId = config.projectId as string | undefined
+  if (projectId) {
+    const project = getProject(projectId)
+    if (project) {
+      const items: any[] = (project.data as any).transcriptionItems || []
+      const updatedItems = items.map((item: any) =>
+        item.filename === filename
+          ? { ...item, transcriptionId, status: 'done', duration }
+          : item
+      )
+      const allDone = updatedItems.every((i: any) => i.status === 'done' || i.status === 'error')
+      saveProject(projectId, { ...project.data, transcriptionItems: updatedItems })
+      if (allDone) updateProjectStatus(projectId, 'done')
+    }
+  }
+
   broadcastFn(userId, null, 'transcription:complete', {
     taskId: task.id,
     transcriptionId,
     segmentCount: finalSegments.length,
-    duration
+    duration,
+    projectId
   })
 
   return { transcriptionId }
