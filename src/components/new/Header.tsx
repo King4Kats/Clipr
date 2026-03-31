@@ -55,7 +55,7 @@ const Header = ({ onOpenSetup, onOpenAdmin }: HeaderProps) => {
   };
 
   return (
-    <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-50">
+    <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-[60]">
       <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
         {/* Logo et nom de l'application */}
         <div className="flex items-center gap-3 select-none">
