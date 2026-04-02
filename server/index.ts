@@ -33,6 +33,7 @@ for (const dir of [DATA_DIR, UPLOAD_DIR, EXPORT_DIR]) {
 
 // ── Express ──
 const app = express()
+app.set('trust proxy', true)
 const server = createServer(app)
 
 // CORS: restrict to same origin in production
