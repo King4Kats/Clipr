@@ -239,6 +239,25 @@ function cleanStaleChunks() {
 cleanStaleChunks()
 setInterval(cleanStaleChunks, 30 * 60_000)
 
+// ── Remux non-browser-compatible formats (MTS) to MP4 ──
+const NEEDS_REMUX = ['.mts']
+async function remuxToMp4(inputPath: string): Promise<{ path: string, filename: string }> {
+  const ext = extname(inputPath).toLowerCase()
+  if (!NEEDS_REMUX.includes(ext)) return { path: inputPath, filename: basename(inputPath) }
+
+  const mp4Name = basename(inputPath, ext) + '.mp4'
+  const mp4Path = join(UPLOAD_DIR, mp4Name)
+  await new Promise<void>((resolve, reject) => {
+    exec(`ffmpeg -i "${inputPath}" -c copy -movflags +faststart "${mp4Path}"`, (err) => {
+      if (err) reject(new Error(`Remux failed: ${err.message}`))
+      else resolve()
+    })
+  })
+  // Remove original MTS file
+  try { unlinkSync(inputPath) } catch {}
+  return { path: mp4Path, filename: mp4Name }
+}
+
 // ── Initialize task queue ──
 taskQueueService.initQueue(
   {
@@ -346,10 +365,14 @@ app.post('/api/upload', requireAuth, upload.array('videos', 20), async (req, res
 
     const results = []
     for (const file of files) {
-      const duration = await ffmpegService.getVideoDuration(file.path)
+      // Remux MTS to MP4 for browser compatibility
+      const { path: filePath, filename: fileId } = await remuxToMp4(file.path)
+      const duration = await ffmpegService.getVideoDuration(filePath)
       // Multer decodes originalname as latin1 — re-encode to UTF-8 for accented characters
       const name = Buffer.from(file.originalname, 'latin1').toString('utf-8')
-      results.push({ id: file.filename, path: file.path, name, duration, size: file.size })
+        .replace(/\.mts$/i, '.mp4')
+      const size = statSync(filePath).size
+      results.push({ id: fileId, path: filePath, name, duration, size })
     }
     res.json(results)
   } catch (err: any) { res.status(500).json({ error: err.message }) }
@@ -395,9 +418,12 @@ app.post('/api/upload/chunk/complete', requireAuth, express.json(), async (req, 
     await assembleChunks(chunkDir, finalPath, total)
     rmSync(chunkDir, { recursive: true, force: true })
 
-    const duration = await ffmpegService.getVideoDuration(finalPath)
-    const size = statSync(finalPath).size
-    res.json({ id: finalName, path: finalPath, name: fileName || safeName, duration, size })
+    // Remux MTS to MP4 for browser compatibility
+    const { path: remuxedPath, filename: remuxedName } = await remuxToMp4(finalPath)
+    const duration = await ffmpegService.getVideoDuration(remuxedPath)
+    const size = statSync(remuxedPath).size
+    const displayName = (fileName || safeName).replace(/\.mts$/i, '.mp4')
+    res.json({ id: remuxedName, path: remuxedPath, name: displayName, duration, size })
   } catch (err: any) {
     res.status(500).json({ error: err.message })
   }
