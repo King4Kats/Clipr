@@ -380,7 +380,7 @@ function App() {
                         className="w-full flex items-center gap-2.5 p-2.5 rounded-lg hover:bg-primary/10 transition-colors text-left"
                       >
                         <Mic className="w-4 h-4 text-primary shrink-0" />
-                        <span className="text-xs font-medium text-foreground">Transcription audio</span>
+                        <span className="text-xs font-medium text-foreground">Transcription audio/video</span>
                       </button>
                       <button
                         onClick={() => { setShowNewProjectChoice(false); setShowVideoSegmentation(true) }}

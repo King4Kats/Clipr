@@ -622,7 +622,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
             <Mic className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-foreground">Transcription audio</h1>
+            <h1 className="text-lg font-bold text-foreground">Transcription audio/video</h1>
             <p className="text-xs text-muted-foreground">Transcrire un ou plusieurs fichiers audio/vidéo avec Whisper</p>
           </div>
         </div>
