@@ -669,7 +669,7 @@ app.post('/api/project/autosave', requireAuth, (req, res) => {
 
 // Project load by id (owner or shared)
 app.get('/api/project/load/:id', requireAuth, (req, res) => {
-  const { access, role } = sharingService.hasAccess(req.params.id, req.user!.userId)
+  const { access, role } = sharingService.hasAccess(req.params.id, req.user!.userId, req.user!.role)
   if (!access) return res.status(404).json({ error: 'Projet non trouve' })
 
   const project = projectService.getProject(req.params.id)

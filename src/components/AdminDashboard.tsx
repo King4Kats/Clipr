@@ -3,9 +3,10 @@ import { useAuthStore } from '@/store/useAuthStore'
 import { motion } from 'framer-motion'
 import {
   Users, FolderKanban, HardDrive, Activity, RefreshCw,
-  CheckCircle, XCircle, Lock, ScrollText, ArrowLeft, Cpu, Trash2
+  CheckCircle, XCircle, Lock, ScrollText, ArrowLeft, Cpu, Trash2, ExternalLink
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import api from '@/api'
 
 interface SystemHealth {
   services: { ollama: boolean; ffmpeg: boolean }
@@ -22,7 +23,7 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
-export default function AdminDashboard({ onBack }: { onBack: () => void }) {
+export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () => void; onLoadProject?: (projectData: any) => void }) {
   const { token } = useAuthStore()
   const [tab, setTab] = useState<'overview' | 'projects' | 'users' | 'logs'>('overview')
   const [system, setSystem] = useState<SystemHealth | null>(null)
@@ -77,6 +78,15 @@ export default function AdminDashboard({ onBack }: { onBack: () => void }) {
     const interval = setInterval(fetchSystem, 30000)
     return () => clearInterval(interval)
   }, [fetchSystem])
+
+  const openProject = async (projectId: string) => {
+    try {
+      const data = await api.loadProjectById(projectId)
+      onLoadProject?.(data)
+    } catch (err: any) {
+      console.error('Failed to load project:', err)
+    }
+  }
 
   const diskPercent = system?.disk.total ? Math.round((system.disk.used / system.disk.total) * 100) : 0
 
@@ -167,8 +177,8 @@ export default function AdminDashboard({ onBack }: { onBack: () => void }) {
               </thead>
               <tbody>
                 {projects.map((p: any) => (
-                  <tr key={p.id} className="border-b border-border/50 hover:bg-secondary/20">
-                    <td className="p-3 font-medium text-foreground">{p.name}</td>
+                  <tr key={p.id} className="border-b border-border/50 hover:bg-secondary/20 cursor-pointer" onClick={() => openProject(p.id)}>
+                    <td className="p-3 font-medium text-foreground flex items-center gap-1.5">{p.name} <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100" /></td>
                     <td className="p-3 text-muted-foreground">{p.owner_username || '—'}</td>
                     <td className="p-3">
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${

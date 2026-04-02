@@ -97,8 +97,8 @@ export function getSharedProjects(userId: string): any[] {
   }))
 }
 
-// ── Check if a user has access to a project (owner OR shared) ──
-export function hasAccess(projectId: string, userId: string): { access: boolean; role: 'owner' | 'editor' | 'viewer' | null } {
+// ── Check if a user has access to a project (owner, shared, or admin) ──
+export function hasAccess(projectId: string, userId: string, userRole?: string): { access: boolean; role: 'owner' | 'editor' | 'viewer' | 'admin' | null } {
   const db = getDb()
 
   // Check ownership
@@ -107,6 +107,9 @@ export function hasAccess(projectId: string, userId: string): { access: boolean;
   ).get(projectId) as any
   if (!project) return { access: false, role: null }
   if (project.user_id === userId) return { access: true, role: 'owner' }
+
+  // Admin can access all projects (read-only)
+  if (userRole === 'admin') return { access: true, role: 'admin' }
 
   // Check share
   const share = db.prepare(
