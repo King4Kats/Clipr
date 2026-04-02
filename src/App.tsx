@@ -69,6 +69,7 @@ function App() {
     if (showVideoSegmentation && videoFiles.length > 0) {
       setShowVideoSegmentation(false);
       setProjectMode(null);
+      setProcessing('idle', 0, '');
     }
   }, [videoFiles.length, showVideoSegmentation]);
 
@@ -110,17 +111,20 @@ function App() {
 
     // Progress updates (extraction, transcription, analysis)
     const unsubProgress = (window as any).electron.onProgress((data: any) => {
+      if (!useStore.getState().activeProjectId) return;
       const step = data.step || processingStep;
       setProcessing(step, data.progress, data.message);
     });
 
     // Transcript segments streamed in real-time
     const unsubSegment = (window as any).electron.onTranscriptSegment((segment: any) => {
+      if (!useStore.getState().activeProjectId) return;
       addTranscriptSegment(segment as any);
     });
 
     // Analysis completed server-side — load results
     const unsubComplete = (window as any).electron.onAnalysisComplete((data: any) => {
+      if (!useStore.getState().activeProjectId) return;
       if (data.segments) setSegments(data.segments);
       if (data.transcript) setTranscript(data.transcript);
       if (data.audioPaths) setAudioPaths(data.audioPaths);
@@ -130,6 +134,7 @@ function App() {
 
     // Analysis failed server-side
     const unsubError = (window as any).electron.onAnalysisError((data: any) => {
+      if (!useStore.getState().activeProjectId) return;
       setProcessing('error', 0, data.message || 'Erreur d\'analyse');
       loadHistory();
     });
