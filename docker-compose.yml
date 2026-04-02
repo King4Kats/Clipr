@@ -13,7 +13,7 @@ services:
       - DATA_DIR=/data
       - OLLAMA_HOST=ollama
       - OLLAMA_PORT=11434
-      - JWT_SECRET=***REDACTED***
+      - JWT_SECRET=${JWT_SECRET}
     deploy:
       resources:
         reservations:
