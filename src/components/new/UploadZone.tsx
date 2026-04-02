@@ -14,6 +14,7 @@ const VIDEO_EXTENSIONS = ["mp4", "avi", "mov", "mkv", "mts", "webm"];
 const UploadZone = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const { addVideoFile, setProcessing, setAudioPaths } = useStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -26,8 +27,9 @@ const UploadZone = () => {
       if (valid.length === 0) return;
 
       setIsLoading(true);
+      setUploadProgress(0);
       try {
-        const results = await api.uploadFiles(valid);
+        const results = await api.uploadFiles(valid, (pct) => setUploadProgress(Math.round(pct * 100)));
         for (const r of results) {
           addVideoFile({
             path: r.path,
@@ -57,6 +59,7 @@ const UploadZone = () => {
         setProcessing("error", 0, "Erreur lors du chargement de la video");
       }
       setIsLoading(false);
+      setUploadProgress(0);
     },
     [addVideoFile, setProcessing]
   );
@@ -124,8 +127,15 @@ const UploadZone = () => {
           </div>
           <div>
             <p className="text-foreground font-medium text-lg">
-              {isLoading ? "Chargement de la video..." : "Deposer une interview ici"}
+              {isLoading
+                ? uploadProgress > 0 ? `Chargement... ${uploadProgress}%` : "Chargement de la video..."
+                : "Deposer une interview ici"}
             </p>
+            {isLoading && uploadProgress > 0 && (
+              <div className="w-48 mx-auto mt-2 bg-secondary rounded-full h-1.5">
+                <div className="bg-primary h-1.5 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+              </div>
+            )}
             <p className="text-muted-foreground text-sm mt-1">MP4, MOV, AVI — Automatiquement pret pour l'IA</p>
           </div>
           {!isLoading && (

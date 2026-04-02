@@ -5,7 +5,7 @@ import multer from 'multer'
 import cors from 'cors'
 import rateLimit from 'express-rate-limit'
 import { join, basename, extname, resolve } from 'path'
-import { existsSync, mkdirSync, createReadStream, statSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, createReadStream, createWriteStream, statSync, readFileSync, writeFileSync, readdirSync, renameSync, rmSync, unlinkSync } from 'fs'
 import { execSync, exec } from 'child_process'
 import { logger } from './logger.js'
 
@@ -26,8 +26,9 @@ const PORT = parseInt(process.env.PORT || '3000')
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
 const UPLOAD_DIR = join(DATA_DIR, 'uploads')
 const EXPORT_DIR = join(DATA_DIR, 'exports')
+const CHUNK_DIR = join(DATA_DIR, 'chunks')
 
-for (const dir of [DATA_DIR, UPLOAD_DIR, EXPORT_DIR]) {
+for (const dir of [DATA_DIR, UPLOAD_DIR, EXPORT_DIR, CHUNK_DIR]) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 }
 
@@ -198,6 +199,46 @@ const mediaUpload = multer({
   }
 })
 
+// ── Chunked upload (for large files through Cloudflare Tunnel) ──
+const chunkStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, CHUNK_DIR),
+  filename: (_req, _file, cb) => cb(null, `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`)
+})
+const chunkUpload = multer({ storage: chunkStorage, limits: { fileSize: 100 * 1024 * 1024 } })
+
+async function assembleChunks(chunkDir: string, outputPath: string, totalChunks: number): Promise<void> {
+  const ws = createWriteStream(outputPath)
+  for (let i = 0; i < totalChunks; i++) {
+    const chunkPath = join(chunkDir, `chunk_${i.toString().padStart(5, '0')}`)
+    await new Promise<void>((resolve, reject) => {
+      const rs = createReadStream(chunkPath)
+      rs.pipe(ws, { end: false })
+      rs.on('end', resolve)
+      rs.on('error', reject)
+    })
+  }
+  ws.end()
+  await new Promise<void>((resolve, reject) => { ws.on('finish', resolve); ws.on('error', reject) })
+}
+
+function cleanStaleChunks() {
+  try {
+    const now = Date.now()
+    for (const name of readdirSync(CHUNK_DIR)) {
+      const dir = join(CHUNK_DIR, name)
+      try {
+        const st = statSync(dir)
+        if (st.isDirectory() && now - st.mtimeMs > 3600_000) {
+          rmSync(dir, { recursive: true, force: true })
+          logger.info(`Cleaned stale chunk dir: ${name}`)
+        }
+      } catch {}
+    }
+  } catch {}
+}
+cleanStaleChunks()
+setInterval(cleanStaleChunks, 30 * 60_000)
+
 // ── Initialize task queue ──
 taskQueueService.initQueue(
   {
@@ -312,6 +353,54 @@ app.post('/api/upload', requireAuth, upload.array('videos', 20), async (req, res
     }
     res.json(results)
   } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Chunked upload: receive a single chunk
+app.post('/api/upload/chunk', requireAuth, chunkUpload.single('chunk'), async (req, res) => {
+  try {
+    const { uploadId, chunkIndex, totalChunks } = req.body
+    if (!uploadId || !/^\d+_[a-z0-9]+$/.test(uploadId)) return res.status(400).json({ error: 'uploadId invalide' })
+    const idx = parseInt(chunkIndex, 10)
+    const total = parseInt(totalChunks, 10)
+    if (isNaN(idx) || isNaN(total) || idx < 0 || idx >= total) return res.status(400).json({ error: 'chunkIndex invalide' })
+
+    const chunkDir = join(CHUNK_DIR, uploadId)
+    if (!existsSync(chunkDir)) mkdirSync(chunkDir, { recursive: true })
+
+    const file = req.file as Express.Multer.File
+    if (!file) return res.status(400).json({ error: 'Aucun chunk' })
+
+    renameSync(file.path, join(chunkDir, `chunk_${idx.toString().padStart(5, '0')}`))
+    res.json({ ok: true, chunkIndex: idx })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Chunked upload: assemble all chunks into final file
+app.post('/api/upload/chunk/complete', requireAuth, express.json(), async (req, res) => {
+  try {
+    const { uploadId, fileName, totalChunks } = req.body
+    if (!uploadId || !/^\d+_[a-z0-9]+$/.test(uploadId)) return res.status(400).json({ error: 'uploadId invalide' })
+
+    const chunkDir = join(CHUNK_DIR, uploadId)
+    if (!existsSync(chunkDir)) return res.status(400).json({ error: 'Chunks introuvables' })
+
+    const total = parseInt(totalChunks, 10)
+    const chunks = readdirSync(chunkDir).filter(f => f.startsWith('chunk_'))
+    if (chunks.length !== total) return res.status(400).json({ error: `Chunks incomplets: ${chunks.length}/${total}` })
+
+    const safeName = (fileName || 'video').replace(/[^a-zA-Z0-9._-]/g, '_')
+    const finalName = `${Date.now()}_${safeName}`
+    const finalPath = join(UPLOAD_DIR, finalName)
+
+    await assembleChunks(chunkDir, finalPath, total)
+    rmSync(chunkDir, { recursive: true, force: true })
+
+    const duration = await ffmpegService.getVideoDuration(finalPath)
+    const size = statSync(finalPath).size
+    res.json({ id: finalName, path: finalPath, name: fileName || safeName, duration, size })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
 })
 
 // Stream video/audio files (token via query param for <video> tags)

@@ -112,12 +112,74 @@ async function del<T = any>(path: string): Promise<T> {
 }
 
 // ── Upload helper ──
-async function uploadFiles(files: File[]): Promise<any[]> {
-  const formData = new FormData()
-  files.forEach(f => formData.append('videos', f))
-  const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: formData, headers: getAuthHeaders() })
-  if (!res.ok) throw new Error('Upload echoue')
+const CHUNK_SIZE = 90 * 1024 * 1024 // 90MB — under Cloudflare Tunnel's 100MB limit
+
+async function uploadFileChunked(file: File, onProgress?: (pct: number) => void): Promise<any> {
+  const uploadId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
+
+  for (let i = 0; i < totalChunks; i++) {
+    const blob = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+    const form = new FormData()
+    form.append('chunk', blob)
+    form.append('uploadId', uploadId)
+    form.append('chunkIndex', String(i))
+    form.append('totalChunks', String(totalChunks))
+    form.append('fileName', file.name)
+
+    let lastErr: Error | null = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(`${API_BASE}/api/upload/chunk`, { method: 'POST', body: form, headers: getAuthHeaders() })
+        if (!res.ok) throw new Error(`Chunk ${i} echoue: ${res.status}`)
+        lastErr = null
+        break
+      } catch (err: any) {
+        lastErr = err
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1000))
+      }
+    }
+    if (lastErr) throw lastErr
+    onProgress?.((i + 1) / totalChunks)
+  }
+
+  const res = await fetch(`${API_BASE}/api/upload/chunk/complete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ uploadId, fileName: file.name, totalChunks })
+  })
+  if (!res.ok) throw new Error('Assemblage echoue')
   return res.json()
+}
+
+async function uploadFiles(files: File[], onProgress?: (pct: number) => void): Promise<any[]> {
+  const totalSize = files.reduce((s, f) => s + f.size, 0)
+  const results: any[] = []
+  let uploaded = 0
+
+  for (const file of files) {
+    if (file.size < CHUNK_SIZE) {
+      // Small file — use existing single-request upload
+      const formData = new FormData()
+      formData.append('videos', file)
+      const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: formData, headers: getAuthHeaders() })
+      if (!res.ok) throw new Error('Upload echoue')
+      const arr = await res.json()
+      results.push(...arr)
+      uploaded += file.size
+      onProgress?.(uploaded / totalSize)
+    } else {
+      // Large file — chunked upload
+      const result = await uploadFileChunked(file, (chunkPct) => {
+        onProgress?.((uploaded + chunkPct * file.size) / totalSize)
+      })
+      results.push(result)
+      uploaded += file.size
+      onProgress?.(uploaded / totalSize)
+    }
+  }
+
+  return results
 }
 
 // ── Download helper ──
