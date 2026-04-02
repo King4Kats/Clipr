@@ -636,7 +636,15 @@ function App() {
       <Header onOpenSetup={() => setShowSetup(true)} onOpenAdmin={() => setShowAdmin(true)} />
 
       {showAdmin && user?.role === 'admin' ? (
-        <AdminDashboard onBack={() => setShowAdmin(false)} onLoadProject={(data) => { loadFromHistory(data); setShowAdmin(false); }} />
+        <AdminDashboard onBack={() => setShowAdmin(false)} onLoadProject={(data) => {
+          setShowAdmin(false);
+          if (data.data?.toolType === 'transcription' || data.toolType === 'transcription') {
+            setActiveTranscriptionProject(data);
+            setShowTranscriptionTool(true);
+          } else {
+            loadFromHistory(data);
+          }
+        }} />
       ) : (
         <main className={segments.length > 0 ? "" : "max-w-7xl mx-auto px-6 py-8"}>
           {renderContent()}
