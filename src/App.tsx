@@ -460,9 +460,9 @@ function App() {
                     <Mic className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-foreground">Transcrire un audio</h3>
+                    <h3 className="text-sm font-bold text-foreground">Transcrire un media</h3>
                     <p className="text-[10px] text-muted-foreground mt-0.5">
-                      Convertir un ou plusieurs fichiers audio en texte avec Whisper
+                      Convertir un ou plusieurs fichiers audio/video en texte avec Whisper
                     </p>
                   </div>
                 </div>
