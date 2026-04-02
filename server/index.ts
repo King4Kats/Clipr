@@ -897,7 +897,7 @@ app.get('/api/transcription/history', requireAuth, (req, res) => {
 })
 
 app.get('/api/transcription/:id', requireAuth, (req, res) => {
-  const result = getTranscription(req.params.id, req.user!.userId)
+  const result = getTranscription(req.params.id, req.user!.userId, req.user!.role)
   if (!result) return res.status(404).json({ error: 'Transcription introuvable' })
   res.json(result)
 })
@@ -907,12 +907,14 @@ app.get('/api/transcription/:id/export', (req, res) => {
   const token = req.headers.authorization?.slice(7) || (req.query.token as string)
   if (!token) return res.status(401).json({ error: 'Authentification requise' })
   let userId: string
+  let userRole: string | undefined
   try {
     const payload = authService.verifyToken(token)
     userId = payload.userId
+    userRole = payload.role
   } catch { return res.status(401).json({ error: 'Token invalide' }) }
 
-  const transcription = getTranscription(req.params.id, userId)
+  const transcription = getTranscription(req.params.id, userId, userRole)
   if (!transcription) return res.status(404).json({ error: 'Transcription introuvable' })
 
   const format = req.query.format as string || 'txt'

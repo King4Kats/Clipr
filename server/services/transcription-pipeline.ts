@@ -148,11 +148,12 @@ export async function runTranscriptionPipeline(task: QueueTask, broadcastFn: Bro
 }
 
 // ── Get transcription result ──
-export function getTranscription(id: string, userId: string): any | null {
+export function getTranscription(id: string, userId: string, userRole?: string): any | null {
   const db = getDb()
-  const row = db.prepare(
-    `SELECT * FROM transcriptions WHERE id = ? AND user_id = ?`
-  ).get(id, userId) as any
+  // Admin can access any transcription
+  const row = userRole === 'admin'
+    ? db.prepare(`SELECT * FROM transcriptions WHERE id = ?`).get(id) as any
+    : db.prepare(`SELECT * FROM transcriptions WHERE id = ? AND user_id = ?`).get(id, userId) as any
   if (!row) return null
   return { ...row, segments: JSON.parse(row.segments) }
 }
