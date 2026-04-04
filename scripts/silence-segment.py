@@ -82,26 +82,60 @@ def main():
     print("PROGRESS: 30", file=sys.stderr)
 
     # Construire les blocs de parole (entre les silences)
-    speech_blocks = []
+    raw_blocks = []
 
     # Premier bloc : du debut jusqu'au premier silence
     if silence_starts:
         if silence_starts[0] > 0.3:
-            speech_blocks.append({'start': 0, 'end': round(silence_starts[0], 2)})
+            raw_blocks.append({'start': 0, 'end': round(silence_starts[0], 2)})
     else:
-        # Pas de silence du tout
-        speech_blocks.append({'start': 0, 'end': total_duration})
+        raw_blocks.append({'start': 0, 'end': total_duration})
 
     # Blocs entre les silences
     for i in range(len(silence_ends)):
         block_start = silence_ends[i]
         block_end = silence_starts[i + 1] if i + 1 < len(silence_starts) else total_duration
 
-        if block_end - block_start >= 0.5:  # Bloc de parole d'au moins 0.5s
-            speech_blocks.append({
+        if block_end - block_start >= 0.5:
+            raw_blocks.append({
                 'start': round(block_start, 2),
                 'end': round(block_end, 2)
             })
+
+    # Grouper les blocs en paires "nom + vernaculaire"
+    # Un bloc court (< 1.5s) suivi d'un bloc plus long avec un petit gap = meme intervenant
+    # Le bloc court = prenom nom, le bloc long = phrase vernaculaire
+    speech_blocks = []
+    i = 0
+    while i < len(raw_blocks):
+        block = raw_blocks[i]
+        dur = block['end'] - block['start']
+
+        # Si bloc court ET suivi d'un autre bloc avec petit gap → paire nom+vernaculaire
+        if dur < 1.5 and i + 1 < len(raw_blocks):
+            next_block = raw_blocks[i + 1]
+            gap = next_block['start'] - block['end']
+            if gap < 1.5:
+                # Paire detectee : stocker comme bloc composite
+                speech_blocks.append({
+                    'start': round(block['start'], 2),
+                    'end': round(next_block['end'], 2),
+                    'name_start': round(block['start'], 2),
+                    'name_end': round(block['end'], 2),
+                    'speech_start': round(next_block['start'], 2),
+                    'speech_end': round(next_block['end'], 2),
+                    'has_name': True
+                })
+                i += 2
+                continue
+
+        # Bloc normal (pas de paire)
+        speech_blocks.append({
+            'start': round(block['start'], 2),
+            'end': round(block['end'], 2),
+            'has_name': False
+        })
+        i += 1
 
     print(f"STATUS: {len(speech_blocks)} blocs de parole", file=sys.stderr)
     print("PROGRESS: 50", file=sys.stderr)

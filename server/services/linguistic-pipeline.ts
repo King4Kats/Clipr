@@ -91,16 +91,22 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
   logger.info(`[Linguistic] Silence detect : ${silenceResult.sequences.length} sequences, ${silenceResult.speech_blocks.length} blocs`)
 
   // Construire les sequences a partir du silence detect
+  // Les blocs avec has_name=true ont un nom (prenom) separe du vernaculaire
   let sequences: LinguisticSequence[] = silenceResult.sequences.map((seq: any, i: number) => ({
     id: randomUUID(),
     index: i,
     french_text: '', // sera rempli par Whisper
     french_audio: { start: seq.leader.start, end: seq.leader.end },
     variants: seq.variants.map((v: any) => ({
-      speaker: `LOCUTEUR`,
+      speaker: 'LOCUTEUR',
       ipa: '',
       ipa_original: '',
-      audio: { start: v.start, end: v.end }
+      audio: { start: v.start, end: v.end },
+      // Si le bloc a un nom detecte, stocker les plages separees
+      ...(v.has_name ? {
+        name_audio: { start: v.name_start, end: v.name_end },
+        speech_audio: { start: v.speech_start, end: v.speech_end }
+      } : {})
     }))
   }))
 
@@ -128,25 +134,66 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     } catch {}
   }
 
+  // Aussi preparer les clips "nom" pour Whisper tiny (prenoms des intervenants)
+  const nameClips: { id: string; audioPath: string }[] = []
+  for (let si = 0; si < sequences.length; si++) {
+    for (let vi = 0; vi < sequences[si].variants.length; vi++) {
+      const v = sequences[si].variants[vi] as any
+      if (v.name_audio) {
+        const clipPath = join(tempDir, `ling_name_${task.id}_${si}_${vi}.wav`)
+        try {
+          execSync(`ffmpeg -y -i "${audioPath}" -ss ${v.name_audio.start} -to ${v.name_audio.end} -ar 16000 -ac 1 "${clipPath}" 2>/dev/null`)
+          nameClips.push({ id: `name_${si}_${vi}`, audioPath: clipPath })
+        } catch {}
+      }
+    }
+  }
+
+  // Batch Whisper : FR + noms en un seul appel
   await whisperService.loadWhisperModel(whisperModel)
-  const frResults = await whisperService.transcribeBatch(
-    frClips, language,
+  const allClips = [...frClips, ...nameClips]
+
+  logger.info(`[Linguistic] ${allClips.length} clips Whisper (${frClips.length} FR + ${nameClips.length} noms)`)
+
+  const allResults = await whisperService.transcribeBatch(
+    allClips, language,
     (percent) => {
       broadcastFn(userId, null, 'linguistic:progress', {
-        taskId: task.id, step: 'transcribing', progress: percent, message: `Transcription FR (${frClips.length} phrases)...`
+        taskId: task.id, step: 'transcribing', progress: percent, message: `Transcription (${allClips.length} clips)...`
       })
-      updateTaskProgress(task.id, 15 + percent * 0.20, 'Transcription FR')
+      updateTaskProgress(task.id, 15 + percent * 0.20, 'Transcription')
     }
   )
 
-  // Nettoyer clips + extraire texte
-  for (const clip of frClips) { try { unlinkSync(clip.audioPath) } catch {} }
+  // Nettoyer clips
+  for (const clip of allClips) { try { unlinkSync(clip.audioPath) } catch {} }
+
+  // Extraire texte FR
   for (let si = 0; si < sequences.length; si++) {
-    const segs = frResults.get(`fr_${si}`)
+    const segs = allResults.get(`fr_${si}`)
     sequences[si].french_text = segs && segs.length > 0
       ? segs.map(s => s.text).join(' ').trim()
       : '(transcription echouee)'
   }
+
+  // Extraire noms des intervenants depuis Whisper
+  for (let si = 0; si < sequences.length; si++) {
+    for (let vi = 0; vi < sequences[si].variants.length; vi++) {
+      const nameSegs = allResults.get(`name_${si}_${vi}`)
+      if (nameSegs && nameSegs.length > 0) {
+        const nameText = nameSegs.map(s => s.text).join(' ').trim()
+        // Nettoyer le nom (garder les mots capitalises)
+        const words = nameText.split(/[,.\s]+/).filter(w =>
+          /^[A-ZÀ-Ü]/.test(w) && w.length > 1 && w.length < 20
+        )
+        if (words.length >= 1) {
+          sequences[si].variants[vi].speaker = words.slice(0, 3).join(' ')
+        }
+      }
+    }
+  }
+
+  logger.info(`[Linguistic] Noms detectes pour ${nameClips.length} variantes`)
 
   updateTaskProgress(task.id, 35, 'Diarisation')
 
@@ -193,8 +240,13 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     taskId: task.id, step: 'phonetizing', progress: 0, message: 'Transcription phonetique (IPA)...'
   })
 
+  // IPA seulement sur la partie vernaculaire (pas le nom)
   const ipaSegments = sequences.flatMap((seq, si) =>
-    seq.variants.map((v, vi) => ({ id: `${si}_${vi}`, start: v.audio.start, end: v.audio.end }))
+    seq.variants.map((v: any, vi: number) => ({
+      id: `${si}_${vi}`,
+      start: v.speech_audio ? v.speech_audio.start : v.audio.start,
+      end: v.speech_audio ? v.speech_audio.end : v.audio.end
+    }))
   )
 
   if (ipaSegments.length > 0) {
