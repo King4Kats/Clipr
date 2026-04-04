@@ -1,13 +1,15 @@
 /**
  * LINGUISTIC-PIPELINE.TS : Pipeline de transcription linguistique
  *
- * Approche par detection de silences + diarisation ciblee :
+ * Approche hybride : pyannote (QUI parle) + silence detect (QUAND) :
  *   1. Extraction audio (si video)
- *   2. silence-segment.py : decoupe par les silences reels → blocs de parole → sequences
- *   3. Whisper batch sur les blocs meneur (1er bloc de chaque sequence) → texte FR
- *   4. Diarisation (pyannote via WhisperX) sur les variantes → identifier les speakers
- *   5. Allosaurus IPA sur les variantes
- *   6. Decoupe clips audio + save DB
+ *   2. WhisperX/pyannote sur tout l'audio → timeline speakers
+ *   3. Silence detect → blocs de parole precis
+ *   4. Croiser : chaque bloc + timeline → meneur ou intervenant
+ *   5. Grouper en sequences : meneur → variantes → meneur → ...
+ *   6. Whisper batch sur blocs meneur → texte FR
+ *   7. Allosaurus IPA sur blocs intervenants
+ *   8. Clips audio + save DB
  */
 
 import { extname, join } from 'path'
@@ -44,7 +46,6 @@ interface LinguisticSequence {
   variants: LinguisticVariant[]
 }
 
-// ── Main pipeline ──
 export async function runLinguisticPipeline(task: QueueTask, broadcastFn: BroadcastFn): Promise<{ linguisticId: string }> {
   const { user_id: userId, config } = task
   const filePath: string = config.filePath
@@ -72,54 +73,109 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     })
   }
 
-  // ── Step 2 : Segmentation par silences ──
+  // ── Step 2 : WhisperX/pyannote → timeline des speakers ──
   broadcastFn(userId, null, 'linguistic:progress', {
-    taskId: task.id, step: 'segmenting', progress: 0, message: 'Detection des silences et segmentation...'
+    taskId: task.id, step: 'diarizing', progress: 0, message: 'Identification des voix (pyannote)...'
+  })
+
+  const whisperxResult = await runWhisperX(audioPath, 'tiny', language, numSpeakers, (percent) => {
+    broadcastFn(userId, null, 'linguistic:progress', {
+      taskId: task.id, step: 'diarizing', progress: percent, message: 'Diarisation pyannote...'
+    })
+    updateTaskProgress(task.id, 5 + percent * 0.20, 'Diarisation')
+  })
+
+  // Identifier le meneur = premier speaker du fichier
+  let leaderSpeaker = 'UNKNOWN'
+  const speakerTimeline: Array<{ start: number; end: number; speaker: string }> = []
+
+  if (whisperxResult && whisperxResult.segments.length > 0) {
+    leaderSpeaker = config.leaderSpeaker || whisperxResult.segments[0].speaker || 'UNKNOWN'
+
+    // Construire la timeline speaker
+    for (const seg of whisperxResult.segments) {
+      if (seg.speaker) {
+        speakerTimeline.push({ start: seg.start, end: seg.end, speaker: seg.speaker })
+      }
+    }
+  }
+
+  logger.info(`[Linguistic] Meneur identifie : ${leaderSpeaker} (${speakerTimeline.length} segments pyannote)`)
+
+  // ── Step 3 : Silence detect → blocs de parole ──
+  broadcastFn(userId, null, 'linguistic:progress', {
+    taskId: task.id, step: 'segmenting', progress: 0, message: 'Detection des silences...'
   })
 
   const silenceResult = await runSilenceSegment(audioPath, (percent) => {
     broadcastFn(userId, null, 'linguistic:progress', {
       taskId: task.id, step: 'segmenting', progress: percent, message: 'Segmentation par silences...'
     })
-    updateTaskProgress(task.id, 5 + percent * 0.10, 'Segmentation')
+    updateTaskProgress(task.id, 25 + percent * 0.05, 'Segmentation')
   })
 
-  if (!silenceResult || silenceResult.sequences.length === 0) {
-    throw new Error('Aucune sequence detectee dans l\'audio')
+  if (!silenceResult || silenceResult.speech_blocks.length === 0) {
+    throw new Error('Aucun bloc de parole detecte')
   }
 
-  logger.info(`[Linguistic] Silence detect : ${silenceResult.sequences.length} sequences, ${silenceResult.speech_blocks.length} blocs`)
+  const speechBlocks = silenceResult.speech_blocks
+  logger.info(`[Linguistic] ${speechBlocks.length} blocs de parole detectes`)
 
-  // Construire les sequences a partir du silence detect
-  // Les blocs avec has_name=true ont un nom (prenom) separe du vernaculaire
-  let sequences: LinguisticSequence[] = silenceResult.sequences.map((seq: any, i: number) => ({
-    id: randomUUID(),
-    index: i,
-    french_text: '', // sera rempli par Whisper
-    french_audio: { start: seq.leader.start, end: seq.leader.end },
-    variants: seq.variants.map((v: any) => ({
-      speaker: 'LOCUTEUR',
-      ipa: '',
-      ipa_original: '',
-      audio: { start: v.start, end: v.end },
-      // Si le bloc a un nom detecte, stocker les plages separees
-      ...(v.has_name ? {
-        name_audio: { start: v.name_start, end: v.name_end },
-        speech_audio: { start: v.speech_start, end: v.speech_end }
-      } : {})
-    }))
-  }))
+  // ── Step 4 : Croiser blocs + timeline speakers ──
+  // Pour chaque bloc de parole, trouver le speaker dominant via pyannote
+  for (const block of speechBlocks) {
+    const overlaps: Record<string, number> = {}
+    for (const seg of speakerTimeline) {
+      const overlap = Math.max(0, Math.min(block.end, seg.end) - Math.max(block.start, seg.start))
+      if (overlap > 0) {
+        overlaps[seg.speaker] = (overlaps[seg.speaker] || 0) + overlap
+      }
+    }
+    const best = Object.entries(overlaps).sort((a, b) => b[1] - a[1])[0]
+    block.speaker = best ? best[0] : 'UNKNOWN'
+    block.is_leader = block.speaker === leaderSpeaker
+  }
 
-  // Filtrer sequences avec au moins 1 variante
+  const leaderBlocks = speechBlocks.filter((b: any) => b.is_leader)
+  const variantBlocks = speechBlocks.filter((b: any) => !b.is_leader)
+  logger.info(`[Linguistic] ${leaderBlocks.length} blocs meneur, ${variantBlocks.length} blocs intervenants`)
+
+  // ── Step 5 : Construire les sequences ──
+  // Chaque bloc meneur = nouvelle sequence
+  // Les blocs intervenants entre deux meneurs = variantes de la sequence
+  let sequences: LinguisticSequence[] = []
+  let currentSeq: LinguisticSequence | null = null
+
+  for (const block of speechBlocks) {
+    if (block.is_leader) {
+      if (currentSeq) sequences.push(currentSeq)
+      currentSeq = {
+        id: randomUUID(),
+        index: sequences.length,
+        french_text: '',
+        french_audio: { start: block.start, end: block.end },
+        variants: []
+      }
+    } else if (currentSeq && block.end - block.start >= 1.0) {
+      currentSeq.variants.push({
+        speaker: block.speaker || 'LOCUTEUR',
+        ipa: '',
+        ipa_original: '',
+        audio: { start: block.start, end: block.end }
+      })
+    }
+  }
+  if (currentSeq) sequences.push(currentSeq)
+
   sequences = sequences.filter(s => s.variants.length >= 1)
   sequences.forEach((s, i) => s.index = i)
 
   const duration = silenceResult.stats?.total_duration || 0
   logger.info(`[Linguistic] ${sequences.length} sequences, ${sequences.reduce((s, q) => s + q.variants.length, 0)} variantes`)
 
-  // ── Step 3 : Whisper batch sur les blocs meneur → texte FR ──
+  // ── Step 6 : Whisper batch sur les blocs meneur → texte FR ──
   broadcastFn(userId, null, 'linguistic:progress', {
-    taskId: task.id, step: 'transcribing', progress: 0, message: 'Transcription francais (meneur)...'
+    taskId: task.id, step: 'transcribing', progress: 0, message: 'Transcription francais...'
   })
 
   const tempDir = join(DATA_DIR, 'temp')
@@ -134,119 +190,34 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     } catch {}
   }
 
-  // Aussi preparer les clips "nom" pour Whisper tiny (prenoms des intervenants)
-  const nameClips: { id: string; audioPath: string }[] = []
-  for (let si = 0; si < sequences.length; si++) {
-    for (let vi = 0; vi < sequences[si].variants.length; vi++) {
-      const v = sequences[si].variants[vi] as any
-      if (v.name_audio) {
-        const clipPath = join(tempDir, `ling_name_${task.id}_${si}_${vi}.wav`)
-        try {
-          execSync(`ffmpeg -y -i "${audioPath}" -ss ${v.name_audio.start} -to ${v.name_audio.end} -ar 16000 -ac 1 "${clipPath}" 2>/dev/null`)
-          nameClips.push({ id: `name_${si}_${vi}`, audioPath: clipPath })
-        } catch {}
-      }
-    }
-  }
-
-  // Batch Whisper : FR + noms en un seul appel
   await whisperService.loadWhisperModel(whisperModel)
-  const allClips = [...frClips, ...nameClips]
-
-  logger.info(`[Linguistic] ${allClips.length} clips Whisper (${frClips.length} FR + ${nameClips.length} noms)`)
-
-  const allResults = await whisperService.transcribeBatch(
-    allClips, language,
+  const frResults = await whisperService.transcribeBatch(
+    frClips, language,
     (percent) => {
       broadcastFn(userId, null, 'linguistic:progress', {
-        taskId: task.id, step: 'transcribing', progress: percent, message: `Transcription (${allClips.length} clips)...`
+        taskId: task.id, step: 'transcribing', progress: percent, message: `Transcription FR (${frClips.length} phrases)...`
       })
-      updateTaskProgress(task.id, 15 + percent * 0.20, 'Transcription')
+      updateTaskProgress(task.id, 30 + percent * 0.15, 'Transcription FR')
     }
   )
 
-  // Nettoyer clips
-  for (const clip of allClips) { try { unlinkSync(clip.audioPath) } catch {} }
-
-  // Extraire texte FR
+  for (const clip of frClips) { try { unlinkSync(clip.audioPath) } catch {} }
   for (let si = 0; si < sequences.length; si++) {
-    const segs = allResults.get(`fr_${si}`)
+    const segs = frResults.get(`fr_${si}`)
     sequences[si].french_text = segs && segs.length > 0
       ? segs.map(s => s.text).join(' ').trim()
       : '(transcription echouee)'
   }
 
-  // Extraire noms des intervenants depuis Whisper
-  for (let si = 0; si < sequences.length; si++) {
-    for (let vi = 0; vi < sequences[si].variants.length; vi++) {
-      const nameSegs = allResults.get(`name_${si}_${vi}`)
-      if (nameSegs && nameSegs.length > 0) {
-        const nameText = nameSegs.map(s => s.text).join(' ').trim()
-        // Nettoyer le nom (garder les mots capitalises)
-        const words = nameText.split(/[,.\s]+/).filter(w =>
-          /^[A-ZÀ-Ü]/.test(w) && w.length > 1 && w.length < 20
-        )
-        if (words.length >= 1) {
-          sequences[si].variants[vi].speaker = words.slice(0, 3).join(' ')
-        }
-      }
-    }
-  }
+  updateTaskProgress(task.id, 45, 'IPA')
 
-  logger.info(`[Linguistic] Noms detectes pour ${nameClips.length} variantes`)
-
-  updateTaskProgress(task.id, 35, 'Diarisation')
-
-  // ── Step 4 : Diarisation pyannote sur les variantes → identifier les speakers ──
-  broadcastFn(userId, null, 'linguistic:progress', {
-    taskId: task.id, step: 'diarizing', progress: 0, message: 'Identification des locuteurs (pyannote)...'
-  })
-
-  // Creer un audio concat de toutes les variantes pour diarisation
-  // On utilise WhisperX sur l'audio complet pour avoir les speakers
-  const whisperxResult = await runWhisperX(audioPath, 'tiny', language, numSpeakers, (percent) => {
-    broadcastFn(userId, null, 'linguistic:progress', {
-      taskId: task.id, step: 'diarizing', progress: percent, message: 'Diarisation pyannote...'
-    })
-    updateTaskProgress(task.id, 35 + percent * 0.15, 'Diarisation')
-  })
-
-  // Assigner les speakers aux variantes par overlap temporel
-  if (whisperxResult && whisperxResult.segments.length > 0) {
-    for (const seq of sequences) {
-      for (const variant of seq.variants) {
-        // Trouver le speaker dominant dans la plage de cette variante
-        const overlaps: Record<string, number> = {}
-        for (const wxSeg of whisperxResult.segments) {
-          const overlap = Math.max(0,
-            Math.min(variant.audio.end, wxSeg.end) - Math.max(variant.audio.start, wxSeg.start)
-          )
-          if (overlap > 0 && wxSeg.speaker) {
-            overlaps[wxSeg.speaker] = (overlaps[wxSeg.speaker] || 0) + overlap
-          }
-        }
-        // Speaker avec le plus d'overlap
-        const bestSpeaker = Object.entries(overlaps).sort((a, b) => b[1] - a[1])[0]
-        if (bestSpeaker) variant.speaker = bestSpeaker[0]
-      }
-    }
-    logger.info(`[Linguistic] Speakers assignes via pyannote`)
-  }
-
-  updateTaskProgress(task.id, 50, 'IPA')
-
-  // ── Step 5 : Allosaurus IPA sur les variantes ──
+  // ── Step 7 : Allosaurus IPA sur les variantes ──
   broadcastFn(userId, null, 'linguistic:progress', {
     taskId: task.id, step: 'phonetizing', progress: 0, message: 'Transcription phonetique (IPA)...'
   })
 
-  // IPA seulement sur la partie vernaculaire (pas le nom)
   const ipaSegments = sequences.flatMap((seq, si) =>
-    seq.variants.map((v: any, vi: number) => ({
-      id: `${si}_${vi}`,
-      start: v.speech_audio ? v.speech_audio.start : v.audio.start,
-      end: v.speech_audio ? v.speech_audio.end : v.audio.end
-    }))
+    seq.variants.map((v, vi) => ({ id: `${si}_${vi}`, start: v.audio.start, end: v.audio.end }))
   )
 
   if (ipaSegments.length > 0) {
@@ -254,7 +225,7 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
       broadcastFn(userId, null, 'linguistic:progress', {
         taskId: task.id, step: 'phonetizing', progress: percent, message: 'Transcription IPA...'
       })
-      updateTaskProgress(task.id, 50 + percent * 0.25, 'IPA')
+      updateTaskProgress(task.id, 45 + percent * 0.30, 'IPA')
     })
 
     const ipaMap = new Map(ipaResults.map((r: any) => [r.id, r.ipa]))
@@ -267,48 +238,40 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     }
   }
 
-  // ── Step 6 : Extraits audio (asynchrone pour ne pas bloquer le serveur) ──
+  // ── Step 8 : Extraits audio (asynchrone) ──
   const linguisticId = randomUUID()
   const clipDir = join(DATA_DIR, 'linguistic', linguisticId)
   mkdirSync(clipDir, { recursive: true })
 
-  // Helper asynchrone pour ffmpeg (ne bloque pas le event loop)
   const ffmpegClip = (src: string, start: number, end: number, dest: string): Promise<void> =>
     new Promise((resolve) => {
       const { exec: execAsync } = require('child_process')
       execAsync(`ffmpeg -y -i "${src}" -ss ${start} -to ${end} -ar 16000 -ac 1 "${dest}" 2>/dev/null`, () => resolve())
     })
 
-  // Extraire les clips par lots de 5 pour ne pas saturer
-  const allClipJobs: Array<() => Promise<void>> = []
-
+  const clipJobs: Array<() => Promise<void>> = []
   for (let si = 0; si < sequences.length; si++) {
     const seq = sequences[si]
-    allClipJobs.push(() => ffmpegClip(audioPath, seq.french_audio.start, seq.french_audio.end, join(clipDir, `seq_${si}_fr.wav`)))
+    clipJobs.push(() => ffmpegClip(audioPath, seq.french_audio.start, seq.french_audio.end, join(clipDir, `seq_${si}_fr.wav`)))
     for (let vi = 0; vi < seq.variants.length; vi++) {
       const v = seq.variants[vi]
-      const clipName = `seq_${si}_var_${vi}.wav`
-      allClipJobs.push(async () => {
-        await ffmpegClip(audioPath, v.audio.start, v.audio.end, join(clipDir, clipName))
-        v.audio_extract = clipName
-      })
+      const name = `seq_${si}_var_${vi}.wav`
+      clipJobs.push(async () => { await ffmpegClip(audioPath, v.audio.start, v.audio.end, join(clipDir, name)); v.audio_extract = name })
     }
   }
-
-  // Executer par lots de 5
-  for (let i = 0; i < allClipJobs.length; i += 5) {
-    await Promise.all(allClipJobs.slice(i, i + 5).map(fn => fn()))
+  for (let i = 0; i < clipJobs.length; i += 5) {
+    await Promise.all(clipJobs.slice(i, i + 5).map(fn => fn()))
   }
 
   updateTaskProgress(task.id, 90, 'Sauvegarde')
 
-  // ── Step 7 : Save DB ──
+  // ── Step 9 : Save DB ──
   const speakers = [...new Set(sequences.flatMap(s => s.variants.map(v => v.speaker)))]
   const db = getDb()
   db.prepare(
     `INSERT INTO linguistic_transcriptions (id, user_id, task_id, filename, leader_speaker, sequences, speakers, duration, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(linguisticId, userId, task.id, filename, 'meneur',
+  ).run(linguisticId, userId, task.id, filename, leaderSpeaker,
     JSON.stringify(sequences), JSON.stringify(speakers), duration, new Date().toISOString())
 
   const projectId = config.projectId as string | undefined
@@ -329,155 +292,62 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
   return { linguisticId }
 }
 
-// ── Spawn silence-segment.py ──
-function runSilenceSegment(
-  audioPath: string,
-  onProgress: (percent: number) => void
-): Promise<any | null> {
+// ── Helpers spawn ──
+
+function runSilenceSegment(audioPath: string, onProgress: (p: number) => void): Promise<any | null> {
   return new Promise((resolve) => {
-    const scriptPath = join(process.cwd(), 'scripts', 'silence-segment.py')
-    if (!existsSync(scriptPath)) {
-      logger.error('Script silence-segment.py introuvable')
-      resolve(null)
-      return
-    }
-
-    const outputPath = join(DATA_DIR, 'temp', `silence_${Date.now()}.json`)
-
-    const proc = spawn('python3', [
-      scriptPath, audioPath, '--output', outputPath, '--sequence-gap', '5.0'
-    ], { stdio: ['pipe', 'pipe', 'pipe'] })
-
-    let stdoutData = ''
-
-    proc.stderr?.on('data', (data) => {
-      for (const line of data.toString().split('\n')) {
-        if (line.startsWith('PROGRESS:')) {
-          const p = parseInt(line.replace('PROGRESS:', '').trim())
-          if (!isNaN(p)) onProgress(p)
-        } else if (line.startsWith('STATUS:')) {
-          logger.info('[SilenceSegment]', line.trim())
-        }
-      }
-    })
-
-    proc.stdout?.on('data', (data) => { stdoutData += data.toString() })
-
-    proc.on('close', (code) => {
-      if (code === 0) {
-        try {
-          const result = JSON.parse(stdoutData.trim())
-          resolve(result)
-          return
-        } catch {}
-        try {
-          if (existsSync(outputPath)) {
-            const data = JSON.parse(readFileSync(outputPath, 'utf-8'))
-            try { unlinkSync(outputPath) } catch {}
-            resolve(data)
-            return
-          }
-        } catch {}
-      }
-      logger.error(`[SilenceSegment] Code sortie ${code}`)
-      resolve(null)
-    })
-
+    const script = join(process.cwd(), 'scripts', 'silence-segment.py')
+    if (!existsSync(script)) { resolve(null); return }
+    const out = join(DATA_DIR, 'temp', `silence_${Date.now()}.json`)
+    const proc = spawn('python3', [script, audioPath, '--output', out, '--sequence-gap', '5.0'], { stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = ''
+    proc.stderr?.on('data', d => { for (const l of d.toString().split('\n')) { if (l.startsWith('PROGRESS:')) { const p = parseInt(l.replace('PROGRESS:', '').trim()); if (!isNaN(p)) onProgress(p) } else if (l.startsWith('STATUS:')) logger.info('[SilenceSegment]', l.trim()) } })
+    proc.stdout?.on('data', d => { stdout += d.toString() })
+    proc.on('close', code => { if (code === 0) { try { resolve(JSON.parse(stdout.trim())); return } catch {} try { if (existsSync(out)) { resolve(JSON.parse(readFileSync(out, 'utf-8'))); return } } catch {} } resolve(null) })
     proc.on('error', () => resolve(null))
   })
 }
 
-// ── Spawn whisperx-diarize.py (pour la diarisation seulement) ──
-function runWhisperX(
-  audioPath: string, model: string, language: string, numSpeakers: number,
-  onProgress: (percent: number) => void
-): Promise<{ segments: any[]; speakers: string[] } | null> {
+function runWhisperX(audioPath: string, model: string, language: string, numSpeakers: number, onProgress: (p: number) => void): Promise<{ segments: any[]; speakers: string[] } | null> {
   return new Promise((resolve) => {
-    const scriptPath = join(process.cwd(), 'scripts', 'whisperx-diarize.py')
-    if (!existsSync(scriptPath)) {
-      resolve(null)
-      return
-    }
-
-    const outputPath = join(DATA_DIR, 'temp', `whisperx_${Date.now()}.json`)
-    const hfToken = process.env.HF_TOKEN || ''
-
-    const proc = spawn('python3', [
-      scriptPath, audioPath, '--output', outputPath,
-      '--model', model, '--language', language,
-      '--hf-token', hfToken, '--num-speakers', String(numSpeakers)
-    ], { stdio: ['pipe', 'pipe', 'pipe'] })
-
-    let stdoutData = ''
-
-    proc.stderr?.on('data', (data) => {
-      for (const line of data.toString().split('\n')) {
-        if (line.startsWith('PROGRESS:')) {
-          const p = parseInt(line.replace('PROGRESS:', '').trim())
-          if (!isNaN(p)) onProgress(p)
-        } else if (line.startsWith('STATUS:')) {
-          logger.info('[WhisperX]', line.trim())
-        } else if (line.trim() && !line.includes('UserWarning') && !line.includes('FutureWarning') && !line.includes('std =')) {
-          logger.info('[WhisperX]', line.trim())
-        }
+    const script = join(process.cwd(), 'scripts', 'whisperx-diarize.py')
+    if (!existsSync(script)) { resolve(null); return }
+    const out = join(DATA_DIR, 'temp', `whisperx_${Date.now()}.json`)
+    const hf = process.env.HF_TOKEN || ''
+    const proc = spawn('python3', [script, audioPath, '--output', out, '--model', model, '--language', language, '--hf-token', hf, '--num-speakers', String(numSpeakers)], { stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = ''
+    proc.stderr?.on('data', (d) => {
+      for (const l of d.toString().split('\n')) {
+        if (l.startsWith('PROGRESS:')) { const p = parseInt(l.replace('PROGRESS:', '').trim()); if (!isNaN(p)) onProgress(p) }
+        else if (l.startsWith('STATUS:')) logger.info('[WhisperX]', l.trim())
+        else if (l.trim() && !l.includes('UserWarning') && !l.includes('FutureWarning')) logger.info('[WhisperX]', l.trim())
       }
     })
-
-    proc.stdout?.on('data', (data) => { stdoutData += data.toString() })
-
-    proc.on('close', (code) => {
-      try { execSync('sleep 2') } catch {}
-      if (code === 0) {
-        try { const r = JSON.parse(stdoutData.trim()); if (r.segments) { resolve(r); return } } catch {}
-        try { if (existsSync(outputPath)) { const d = JSON.parse(readFileSync(outputPath, 'utf-8')); try { unlinkSync(outputPath) } catch {}; resolve(d); return } } catch {}
-      }
-      resolve(null)
-    })
-
+    proc.stdout?.on('data', d => { stdout += d.toString() })
+    proc.on('close', code => { try { execSync('sleep 2') } catch {} if (code === 0) { try { const r = JSON.parse(stdout.trim()); if (r.segments) { resolve(r); return } } catch {} try { if (existsSync(out)) { resolve(JSON.parse(readFileSync(out, 'utf-8'))); return } } catch {} } resolve(null) })
     proc.on('error', () => resolve(null))
   })
 }
 
-// ── Spawn phonetize.py ──
-function runPhonetize(
-  audioPath: string,
-  segments: { id: string; start: number; end: number }[],
-  onProgress: (percent: number) => void
-): Promise<any[]> {
+function runPhonetize(audioPath: string, segments: { id: string; start: number; end: number }[], onProgress: (p: number) => void): Promise<any[]> {
   return new Promise((resolve) => {
-    const scriptPath = join(process.cwd(), 'scripts', 'phonetize.py')
-    if (!existsSync(scriptPath)) { resolve(segments.map(s => ({ id: s.id, ipa: '' }))); return }
-
+    const script = join(process.cwd(), 'scripts', 'phonetize.py')
+    if (!existsSync(script)) { resolve(segments.map(s => ({ id: s.id, ipa: '' }))); return }
     const ts = Date.now()
-    const segPath = join(DATA_DIR, 'temp', `phon_input_${ts}.json`)
-    const outPath = join(DATA_DIR, 'temp', `phon_output_${ts}.json`)
-    writeFileSync(segPath, JSON.stringify(segments), 'utf-8')
-
-    const proc = spawn('python3', [scriptPath, audioPath, '--segments', segPath, '--output', outPath],
-      { stdio: ['pipe', 'pipe', 'pipe'] })
-
-    let stdoutData = ''
-
-    proc.stderr?.on('data', (data) => {
-      for (const line of data.toString().split('\n')) {
-        if (line.startsWith('PROGRESS:')) { const p = parseInt(line.replace('PROGRESS:', '').trim()); if (!isNaN(p)) onProgress(p) }
-        else if (line.startsWith('ERROR:')) { logger.error('[Phonetize]', line.replace('ERROR:', '').trim()) }
-        else if (line.trim() && !line.includes('UserWarning')) { logger.info('[Phonetize]', line.trim()) }
+    const segP = join(DATA_DIR, 'temp', `phon_in_${ts}.json`)
+    const outP = join(DATA_DIR, 'temp', `phon_out_${ts}.json`)
+    writeFileSync(segP, JSON.stringify(segments), 'utf-8')
+    const proc = spawn('python3', [script, audioPath, '--segments', segP, '--output', outP], { stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = ''
+    proc.stderr?.on('data', (d) => {
+      for (const l of d.toString().split('\n')) {
+        if (l.startsWith('PROGRESS:')) { const p = parseInt(l.replace('PROGRESS:', '').trim()); if (!isNaN(p)) onProgress(p) }
+        else if (l.startsWith('ERROR:')) logger.error('[Phonetize]', l.replace('ERROR:', '').trim())
+        else if (l.trim() && !l.includes('UserWarning')) logger.info('[Phonetize]', l.trim())
       }
     })
-
-    proc.stdout?.on('data', (data) => { stdoutData += data.toString() })
-
-    proc.on('close', (code) => {
-      try { unlinkSync(segPath) } catch {}
-      try { execSync('sleep 2') } catch {}
-      if (code === 0) {
-        try { const r = JSON.parse(stdoutData.trim()); if (Array.isArray(r)) { resolve(r); return } } catch {}
-        try { if (existsSync(outPath)) { const d = JSON.parse(readFileSync(outPath, 'utf-8')); try { unlinkSync(outPath) } catch {}; resolve(d); return } } catch {}
-      }
-      resolve(segments.map(s => ({ id: s.id, ipa: '' })))
-    })
-
+    proc.stdout?.on('data', d => { stdout += d.toString() })
+    proc.on('close', code => { try { unlinkSync(segP) } catch {} try { execSync('sleep 2') } catch {} if (code === 0) { try { const r = JSON.parse(stdout.trim()); if (Array.isArray(r)) { resolve(r); return } } catch {} try { if (existsSync(outP)) { const d = JSON.parse(readFileSync(outP, 'utf-8')); try { unlinkSync(outP) } catch {} resolve(d); return } } catch {} } resolve(segments.map(s => ({ id: s.id, ipa: '' }))) })
     proc.on('error', () => resolve(segments.map(s => ({ id: s.id, ipa: '' }))))
   })
 }
@@ -494,9 +364,7 @@ export function getLinguisticTranscription(id: string, userId: string, userRole?
 
 export function getLinguisticHistory(userId: string, limit: number = 20): any[] {
   const db = getDb()
-  return db.prepare(
-    'SELECT id, filename, leader_speaker, duration, created_at FROM linguistic_transcriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?'
-  ).all(userId, limit) as any[]
+  return db.prepare('SELECT id, filename, leader_speaker, duration, created_at FROM linguistic_transcriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?').all(userId, limit) as any[]
 }
 
 export function deleteLinguisticTranscription(id: string, userId: string): boolean {
@@ -548,15 +416,8 @@ export function exportLinguistic(id: string, format: string = 'json'): { content
   const sequences = JSON.parse(row.sequences) as LinguisticSequence[]
   if (format === 'csv') {
     const lines = ['Sequence;Francais;Locuteur;IPA;Debut;Fin']
-    for (const seq of sequences) {
-      for (const v of seq.variants) {
-        lines.push(`${seq.index + 1};"${seq.french_text}";"${v.speaker}";"${v.ipa}";${v.audio.start};${v.audio.end}`)
-      }
-    }
+    for (const seq of sequences) { for (const v of seq.variants) { lines.push(`${seq.index + 1};"${seq.french_text}";"${v.speaker}";"${v.ipa}";${v.audio.start};${v.audio.end}`) } }
     return { content: lines.join('\n'), mime: 'text/csv; charset=utf-8', ext: 'csv' }
   }
-  return {
-    content: JSON.stringify({ filename: row.filename, leader: row.leader_speaker, sequences }, null, 2),
-    mime: 'application/json; charset=utf-8', ext: 'json'
-  }
+  return { content: JSON.stringify({ filename: row.filename, leader: row.leader_speaker, sequences }, null, 2), mime: 'application/json; charset=utf-8', ext: 'json' }
 }
