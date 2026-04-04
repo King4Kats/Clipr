@@ -28,14 +28,14 @@ interface TranscriptionToolProps {
   initialProject?: any
 }
 
-type ToolStatus = 'idle' | 'uploading' | 'queued' | 'extracting-audio' | 'transcribing' | 'done' | 'error'
+type ToolStatus = 'idle' | 'uploading' | 'queued' | 'extracting-audio' | 'transcribing' | 'diarizing' | 'identifying-speakers' | 'done' | 'error'
 
 // Batch file item
 interface BatchItem {
   id: string
   file: File
   filename: string
-  status: 'pending' | 'uploading' | 'uploaded' | 'queued' | 'extracting-audio' | 'transcribing' | 'done' | 'error'
+  status: 'pending' | 'uploading' | 'uploaded' | 'queued' | 'extracting-audio' | 'transcribing' | 'diarizing' | 'identifying-speakers' | 'done' | 'error'
   progress: number
   progressMessage: string
   taskId?: string
@@ -117,14 +117,17 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   useEffect(() => {
     if (allTaskIds.length === 0 && !taskId) return
 
+    let isDone = false
     const unsubProgress = api.onTranscriptionProgress((data: any) => {
+      if (isDone) return // Ignore post-save diarization progress
       if (batchMode) {
         if (!allTaskIds.includes(data.taskId)) return
-        setBatchItems(prev => prev.map(item =>
-          item.taskId === data.taskId
+        setBatchItems(prev => prev.map(item => {
+          if (item.status === 'done') return item
+          return item.taskId === data.taskId
             ? { ...item, status: data.step as BatchItem["status"], progress: data.progress || 0, progressMessage: data.message || "" }
             : item
-        ))
+        }))
       } else {
         if (data.taskId !== taskId) return
         setStatus(data.step as ToolStatus)
@@ -148,6 +151,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
     })
 
     const unsubComplete = api.onTranscriptionComplete((data: any) => {
+      isDone = true
       if (batchMode) {
         if (!allTaskIds.includes(data.taskId)) return
         setBatchItems(prev => prev.map(item =>
@@ -164,6 +168,15 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
           setSegments(result.segments)
         }).catch(() => {})
         api.getTranscriptionHistory().then(setHistory).catch(() => {})
+      }
+    })
+
+    // Refresh segments when diarization completes (speakers added post-save)
+    const unsubDiarization = api.onDiarizationComplete((data: any) => {
+      if (data.transcriptionId) {
+        api.getTranscription(data.transcriptionId).then((result: any) => {
+          if (result.segments) setSegments(result.segments)
+        }).catch(() => {})
       }
     })
 
@@ -215,6 +228,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
       unsubProgress()
       unsubSegment()
       unsubComplete()
+      unsubDiarization()
       unsubQueueStarted()
       unsubQueueFailed()
       unsubQueueUpdate()
@@ -447,7 +461,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
     setHistory(prev => prev.filter(h => h.id !== id))
   }
 
-  const isProcessing = batchProcessing || ['uploading', 'queued', 'extracting-audio', 'transcribing'].includes(status)
+  const isProcessing = batchProcessing || ['uploading', 'queued', 'extracting-audio', 'transcribing', 'diarizing', 'identifying-speakers'].includes(status)
 
   // Format time
   const fmtTime = (s: number) => {
@@ -595,14 +609,37 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         ) : (
           <div className="bg-card border border-border rounded-xl overflow-hidden">
             <div className="max-h-[600px] overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
-              {selectedItemSegments.map((seg, i) => (
-                <div key={i} className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
-                  <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
-                    {fmtTime(seg.start)}
-                  </span>
-                  <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
-                </div>
-              ))}
+              {selectedItemSegments.map((seg, i) => {
+                const prevSpeaker = i > 0 ? selectedItemSegments[i - 1].speaker : null
+                const showSpeaker = seg.speaker && seg.speaker !== prevSpeaker
+                return (
+                  <div key={i}>
+                    {showSpeaker && (
+                      <div className="mt-3 mb-1 first:mt-0">
+                        <span
+                          className="text-[10px] font-bold uppercase tracking-wider text-primary cursor-pointer hover:underline"
+                          title="Cliquer pour renommer ce locuteur"
+                          onClick={() => {
+                            const tid = selectedItem?.transcriptionId
+                            const newName = prompt(`Renommer "${seg.speaker}" en :`, seg.speaker || '')
+                            if (newName && newName !== seg.speaker && tid) {
+                              api.renameSpeaker(tid, seg.speaker!, newName).then((result) => {
+                                if (result.segments) setSelectedItemSegments(result.segments)
+                              }).catch(() => {})
+                            }
+                          }}
+                        >{seg.speaker}</span>
+                      </div>
+                    )}
+                    <div className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
+                      <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
+                        {fmtTime(seg.start)}
+                      </span>
+                      <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
@@ -790,6 +827,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
                         {item.status === 'queued' && 'Dans la file'}
                         {item.status === 'extracting-audio' && `Extraction audio... ${Math.round(item.progress)}%`}
                         {item.status === 'transcribing' && `Transcription... ${Math.round(item.progress)}%`}
+                        {item.status === 'diarizing' && `Identification locuteurs... ${Math.round(item.progress)}%`}
+                        {item.status === 'identifying-speakers' && 'Detection des noms...'}
                         {item.status === 'done' && 'Terminé'}
                         {item.status === 'error' && (item.error || 'Erreur')}
                       </p>
@@ -842,11 +881,11 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
                       </p>
                     </div>
                   )}
-                  {(status === 'extracting-audio' || status === 'transcribing') && (
+                  {(status === 'extracting-audio' || status === 'transcribing' || status === 'diarizing' || status === 'identifying-speakers') && (
                     <>
                       <div className="flex items-center justify-between text-[11px] font-bold text-muted-foreground">
                         <span className="text-primary animate-pulse uppercase tracking-wider">
-                          {status === 'extracting-audio' ? 'Extraction audio' : 'Transcription'}
+                          {status === 'extracting-audio' ? 'Extraction audio' : status === 'diarizing' ? 'Identification locuteurs' : status === 'identifying-speakers' ? 'Detection noms' : 'Transcription'}
                         </span>
                         <span className="font-mono">{Math.round(progress)}%</span>
                       </div>
@@ -929,14 +968,37 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
 
               {/* Transcript text */}
               <div className="max-h-[500px] overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
-                {segments.map((seg, i) => (
-                  <div key={i} className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
-                    <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
-                      {fmtTime(seg.start)}
-                    </span>
-                    <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
-                  </div>
-                ))}
+                {segments.map((seg, i) => {
+                  const prevSpeaker = i > 0 ? segments[i - 1].speaker : null
+                  const showSpeaker = seg.speaker && seg.speaker !== prevSpeaker
+                  return (
+                    <div key={i}>
+                      {showSpeaker && (
+                        <div className="mt-3 mb-1 first:mt-0">
+                          <span
+                            className="text-[10px] font-bold uppercase tracking-wider text-primary cursor-pointer hover:underline"
+                            title="Cliquer pour renommer ce locuteur"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const newName = prompt(`Renommer "${seg.speaker}" en :`, seg.speaker || '')
+                              if (newName && newName !== seg.speaker && transcriptionId) {
+                                api.renameSpeaker(transcriptionId, seg.speaker!, newName).then((result) => {
+                                  if (result.segments) setSegments(result.segments)
+                                }).catch(() => {})
+                              }
+                            }}
+                          >{seg.speaker}</span>
+                        </div>
+                      )}
+                      <div className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
+                        <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
+                          {fmtTime(seg.start)}
+                        </span>
+                        <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </motion.div>
           )}
@@ -1024,7 +1086,12 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
               >
                 <span className="flex items-center gap-2">
                   <Mic className="w-4 h-4" />
-                  {isProcessing ? "En cours..." : "Lancer la transcription"}
+                  {status === 'diarizing' ? "Identification locuteurs..." :
+                   status === 'identifying-speakers' ? "Detection noms..." :
+                   status === 'extracting-audio' ? "Extraction audio..." :
+                   status === 'transcribing' ? `Transcription... ${Math.round(progress)}%` :
+                   status === 'queued' ? "En file d'attente..." :
+                   isProcessing ? "En cours..." : "Lancer la transcription"}
                 </span>
               </Button>
             )}

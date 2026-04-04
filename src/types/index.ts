@@ -12,6 +12,25 @@ export interface TranscriptSegment {
   start: number
   end: number
   text: string
+  speaker?: string
+}
+
+/** Variante patois dans une sequence linguistique */
+export interface LinguisticVariant {
+  speaker: string
+  ipa: string
+  ipa_original: string
+  audio: { start: number; end: number }
+  audio_extract?: string
+}
+
+/** Sequence linguistique : phrase FR + variantes patois */
+export interface LinguisticSequence {
+  id: string
+  index: number
+  french_text: string
+  french_audio: { start: number; end: number }
+  variants: LinguisticVariant[]
 }
 
 /** Segment thématique généré par l'analyse IA (découpage logique) */

@@ -8,6 +8,7 @@
 import { extname } from 'path'
 import * as ffmpegService from './ffmpeg.js'
 import * as whisperService from './whisper.js'
+import * as diarizationService from './diarization.js'
 import { getDb } from './database.js'
 import { updateTaskProgress } from './task-queue.js'
 import { getProject, saveProject, updateProjectStatus } from './project-history.js'
@@ -97,7 +98,7 @@ export async function runTranscriptionPipeline(task: QueueTask, broadcastFn: Bro
     ? Math.max(...finalSegments.map((s: any) => s.end || 0))
     : 0
 
-  // 3. Save to transcriptions table
+  // 3. Save to transcriptions table FIRST (so transcription is not lost if diarization fails)
   const transcriptionId = randomUUID()
   const db = getDb()
 
@@ -144,6 +145,68 @@ export async function runTranscriptionPipeline(task: QueueTask, broadcastFn: Bro
     filename
   })
 
+  // 4. Speaker diarization (runs AFTER save — transcription is safe even if this fails)
+  if (finalSegments.length >= 2) {
+    try {
+      broadcastFn(userId, null, 'transcription:progress', {
+        taskId: task.id,
+        step: 'diarizing',
+        progress: 0,
+        message: 'Identification des locuteurs...'
+      })
+
+      const diarized = await diarizationService.diarize(
+        audioPath,
+        finalSegments,
+        (percent) => {
+          broadcastFn(userId, null, 'transcription:progress', {
+            taskId: task.id,
+            step: 'diarizing',
+            progress: percent,
+            message: 'Identification des locuteurs...'
+          })
+        }
+      )
+
+      // Copy speaker labels back to finalSegments
+      for (let i = 0; i < finalSegments.length && i < diarized.length; i++) {
+        if (diarized[i].speaker) finalSegments[i].speaker = diarized[i].speaker
+      }
+
+      // 5. Identify speaker names via Ollama
+      broadcastFn(userId, null, 'transcription:progress', {
+        taskId: task.id,
+        step: 'identifying-speakers',
+        progress: 0,
+        message: 'Detection des noms...'
+      })
+
+      const ollamaModel = config.ollamaModel || 'llama3.1'
+      const nameMapping = await diarizationService.identifySpeakerNames(finalSegments, ollamaModel)
+      diarizationService.applySpeakerNames(finalSegments, nameMapping)
+
+      // Update transcription in DB with speaker labels
+      db.prepare('UPDATE transcriptions SET segments = ? WHERE id = ?')
+        .run(JSON.stringify(finalSegments), transcriptionId)
+
+      logger.info(`[Transcription] Diarization complete: ${Object.values(nameMapping).join(', ')}`)
+
+      // Notify client to refresh with speaker data
+      broadcastFn(userId, null, 'transcription:diarization-complete', {
+        taskId: task.id,
+        transcriptionId
+      })
+    } catch (err: any) {
+      logger.warn('[Transcription] Diarization failed, transcription saved without speaker labels:', err.message)
+      // Notify client diarization is done (even if failed) so UI doesn't stay stuck
+      broadcastFn(userId, null, 'transcription:diarization-complete', {
+        taskId: task.id,
+        transcriptionId,
+        error: err.message
+      })
+    }
+  }
+
   return { transcriptionId }
 }
 
@@ -182,7 +245,8 @@ export function exportAsText(segments: any[]): string {
   return segments.map((s: any) => {
     const start = formatTime(s.start)
     const end = formatTime(s.end)
-    return `[${start} → ${end}] ${s.text}`
+    const speaker = s.speaker ? `${s.speaker} : ` : ''
+    return `[${start} → ${end}] ${speaker}${s.text}`
   }).join('\n')
 }
 
@@ -191,7 +255,8 @@ export function exportAsSrt(segments: any[]): string {
   return segments.map((s: any, i: number) => {
     const start = formatSrtTime(s.start)
     const end = formatSrtTime(s.end)
-    return `${i + 1}\n${start} --> ${end}\n${s.text.trim()}\n`
+    const speaker = s.speaker ? `${s.speaker} : ` : ''
+    return `${i + 1}\n${start} --> ${end}\n${speaker}${s.text.trim()}\n`
   }).join('\n')
 }
 

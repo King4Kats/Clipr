@@ -8,6 +8,7 @@ interface TranscriptSegment {
   start: number
   end: number
   text: string
+  speaker?: string
 }
 
 let whisperProcess: ChildProcess | null = null
@@ -119,6 +120,107 @@ export function transcribe(
     whisperProcess.on('error', (err) => {
       whisperProcess = null
       reject(err)
+    })
+  })
+}
+
+/**
+ * Transcription batch : charge le modele UNE FOIS, transcrit N clips.
+ * Evite de recharger le modele a chaque clip (gain ~6s par clip).
+ */
+export function transcribeBatch(
+  clips: { id: string; audioPath: string }[],
+  language: string,
+  onProgress: (percent: number) => void
+): Promise<Map<string, TranscriptSegment[]>> {
+  return new Promise((resolve, reject) => {
+    // Trouver le script batch
+    const scriptPath = join(process.cwd(), 'scripts', 'transcribe-batch.py')
+    const altPath = join(__dirname, '..', '..', 'scripts', 'transcribe-batch.py')
+    const finalScript = existsSync(scriptPath) ? scriptPath : existsSync(altPath) ? altPath : scriptPath
+
+    if (!existsSync(finalScript)) {
+      logger.warn('Script transcribe-batch.py introuvable, fallback sequentiel')
+      resolve(new Map())
+      return
+    }
+
+    const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
+    const ts = Date.now()
+    const manifestPath = join(DATA_DIR, 'temp', `batch_manifest_${ts}.json`)
+    const outputPath = join(DATA_DIR, 'temp', `batch_output_${ts}.json`)
+
+    // Ecrire le manifest
+    const manifest = clips.map(c => ({ id: c.id, path: c.audioPath }))
+    const { writeFileSync, unlinkSync: ul } = require('fs')
+    writeFileSync(manifestPath, JSON.stringify(manifest), 'utf-8')
+
+    const model = currentModel || 'large-v3'
+    logger.info(`=== Transcription batch : ${clips.length} clips, modele ${model} ===`)
+
+    const proc = spawn('python3', [
+      finalScript, '--manifest', manifestPath, '--model', model,
+      '--language', language, '--output', outputPath
+    ], { stdio: ['pipe', 'pipe', 'pipe'] })
+
+    let stdoutData = ''
+
+    proc.stderr?.on('data', (data) => {
+      for (const line of data.toString().split('\n')) {
+        if (line.startsWith('PROGRESS:')) {
+          const p = parseInt(line.replace('PROGRESS:', '').trim())
+          if (!isNaN(p)) onProgress(p)
+        } else if (line.startsWith('ERROR:')) {
+          logger.error('[Whisper-Batch]', line.replace('ERROR:', '').trim())
+        } else if (line.startsWith('SEGMENT:')) {
+          // Log de progression par clip
+          logger.info('[Whisper-Batch]', line.replace('SEGMENT:', '').trim().substring(0, 80))
+        } else if (line.trim() && !line.includes('UserWarning')) {
+          logger.info('[Whisper-Batch]', line.trim())
+        }
+      }
+    })
+
+    proc.stdout?.on('data', (data) => { stdoutData += data.toString() })
+
+    proc.on('close', (code) => {
+      try { ul(manifestPath) } catch {}
+      const { execSync: ex } = require('child_process')
+      try { ex('sleep 2') } catch {} // Attendre liberation GPU
+
+      const resultMap = new Map<string, TranscriptSegment[]>()
+
+      if (code === 0) {
+        try {
+          let results: any[] = []
+          // Essayer stdout d'abord
+          try { results = JSON.parse(stdoutData.trim()) } catch {}
+          // Sinon lire le fichier
+          if (results.length === 0 && existsSync(outputPath)) {
+            results = JSON.parse(readFileSync(outputPath, 'utf-8'))
+          }
+
+          for (const r of results) {
+            const segs: TranscriptSegment[] = (r.segments || []).map((s: any, i: number) => ({
+              id: String(s.id || i), start: s.start || 0, end: s.end || 0, text: (s.text || '').trim()
+            }))
+            resultMap.set(r.id, segs)
+          }
+        } catch (err) {
+          logger.error('[Whisper-Batch] Erreur parsing resultats:', err)
+        }
+      } else {
+        logger.error(`[Whisper-Batch] Script termine avec code ${code}`)
+      }
+
+      try { ul(outputPath) } catch {}
+      logger.info(`=== Fin batch Whisper : ${resultMap.size}/${clips.length} clips ===`)
+      resolve(resultMap)
+    })
+
+    proc.on('error', (err) => {
+      logger.error('[Whisper-Batch] Erreur process:', err)
+      resolve(new Map())
     })
   })
 }

@@ -277,6 +277,10 @@ const api = {
 
   // Standalone Transcription
   uploadMedia: async (file: File): Promise<any> => {
+    if (file.size >= CHUNK_SIZE) {
+      // Large file: use chunked upload, then server treats it as media
+      return uploadFileChunked(file)
+    }
     const formData = new FormData()
     formData.append('file', file)
     const res = await fetch(`${API_BASE}/api/upload/media`, { method: 'POST', body: formData, headers: getAuthHeaders() })
@@ -287,16 +291,36 @@ const api = {
     post<{ success: boolean; taskId: string; position: number }>('/api/transcription/start', { filePath, filename, config }),
   // Batch transcription
   uploadMediaBatch: async (files: File[]): Promise<any> => {
-    const formData = new FormData()
-    files.forEach(f => formData.append('files', f))
-    const res = await fetch(`${API_BASE}/api/upload/media/batch`, { method: 'POST', body: formData, headers: getAuthHeaders() })
-    if (!res.ok) throw new Error('Upload batch échoué')
-    return res.json()
+    // Check if any file needs chunked upload
+    const largeFiles = files.filter(f => f.size >= CHUNK_SIZE)
+    const smallFiles = files.filter(f => f.size < CHUNK_SIZE)
+
+    const results: any[] = []
+
+    // Upload large files individually via chunked
+    for (const file of largeFiles) {
+      const result = await uploadFileChunked(file)
+      results.push(result)
+    }
+
+    // Upload small files via batch endpoint
+    if (smallFiles.length > 0) {
+      const formData = new FormData()
+      smallFiles.forEach(f => formData.append('files', f))
+      const res = await fetch(`${API_BASE}/api/upload/media/batch`, { method: 'POST', body: formData, headers: getAuthHeaders() })
+      if (!res.ok) throw new Error('Upload batch échoué')
+      const batchResults = await res.json()
+      results.push(...batchResults)
+    }
+
+    return results
   },
   startTranscriptionBatch: (files: { filePath: string; filename: string }[], config: any) =>
     post<{ success: boolean; batchId: string; tasks: { taskId: string; position: number; filename: string }[] }>('/api/transcription/start/batch', { files, config }),
   getTranscriptionHistory: () => get<any[]>('/api/transcription/history'),
   getTranscription: (id: string) => get<any>(`/api/transcription/${id}`),
+  renameSpeaker: (id: string, oldName: string, newName: string) =>
+    patch<{ success: boolean; segments: any[] }>(`/api/transcription/${id}/rename-speaker`, { oldName, newName }),
   deleteTranscription: (id: string) => del(`/api/transcription/${id}`),
   getTranscriptionExportUrl: (id: string, format: 'txt' | 'srt') => {
     const token = localStorage.getItem(AUTH_STORAGE_KEY)
@@ -320,6 +344,32 @@ const api = {
   onTranscriptionProgress: (cb: (data: any) => void) => onWsEvent('transcription:progress', cb),
   onTranscriptionSegment: (cb: (data: any) => void) => onWsEvent('transcription:segment', cb),
   onTranscriptionComplete: (cb: (data: any) => void) => onWsEvent('transcription:complete', cb),
+  onDiarizationComplete: (cb: (data: any) => void) => onWsEvent('transcription:diarization-complete', cb),
+
+  // Linguistic transcription
+  startLinguistic: (filePath: string, filename: string, config: any) =>
+    post<{ success: boolean; taskId: string; position: number; projectId: string }>('/api/linguistic/start', { filePath, filename, config }),
+  getLinguistic: (id: string) => get<any>(`/api/linguistic/${id}`),
+  getLinguisticHistory: () => get<any[]>('/api/linguistic/history'),
+  updateLinguisticSequence: (id: string, seqIdx: number, updates: any) =>
+    patch<any>(`/api/linguistic/${id}/sequence/${seqIdx}`, updates),
+  updateLinguisticLeader: (id: string, leader: string) =>
+    patch<any>(`/api/linguistic/${id}/leader`, { leader }),
+  renameLinguisticSpeaker: (id: string, oldName: string, newName: string) =>
+    patch<any>(`/api/linguistic/${id}/rename-speaker`, { oldName, newName }),
+  deleteLinguistic: (id: string) => del(`/api/linguistic/${id}`),
+  getLinguisticExportUrl: (id: string, format: 'json' | 'csv') => {
+    const token = localStorage.getItem(AUTH_STORAGE_KEY)
+    return `${API_BASE}/api/linguistic/${id}/export?format=${format}${token ? `&token=${token}` : ''}`
+  },
+  getLinguisticAudioUrl: (id: string, filename: string) => {
+    const token = localStorage.getItem(AUTH_STORAGE_KEY)
+    return `${API_BASE}/api/linguistic/${id}/audio/${filename}${token ? `?token=${token}` : ''}`
+  },
+
+  // Linguistic WebSocket events
+  onLinguisticProgress: (cb: (data: any) => void) => onWsEvent('linguistic:progress', cb),
+  onLinguisticComplete: (cb: (data: any) => void) => onWsEvent('linguistic:complete', cb),
 
   // WebSocket project subscription
   subscribeToProject,
