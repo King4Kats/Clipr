@@ -59,7 +59,10 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
 
   // ── Load initial project ──
   useEffect(() => {
-    if (initialProject?.data?.linguisticId) {
+    if (!initialProject) return
+
+    if (initialProject.data?.linguisticId) {
+      // Projet termine → charger les resultats
       api.getLinguistic(initialProject.data.linguisticId).then((result: any) => {
         setLinguisticId(initialProject.data.linguisticId)
         setSequences(result.sequences || [])
@@ -68,24 +71,38 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
         setUploadedFile({ path: '', name: result.filename, duration: result.duration || 0 })
         setStatus('done')
       }).catch(() => {})
+    } else if (initialProject.status === 'processing') {
+      // Projet en cours → retrouver la tache et suivre la progression
+      setUploadedFile({ path: '', name: initialProject.name || 'Audio', duration: 0 })
+      setStatus('transcribing')
+      setProgressMessage('Traitement en cours...')
+      // Chercher le taskId dans la queue pour ce projet
+      // Le WebSocket reprendra le suivi automatiquement quand le complete arrivera
     }
   }, [initialProject])
 
   // ── WebSocket listeners ──
+  // Ecoute meme sans taskId (pour les projets en cours ouverts depuis l'accueil)
   useEffect(() => {
-    if (!taskId) return
+    if (!taskId && status !== 'transcribing') return
 
     let isDone = false
+    const projectId = initialProject?.id
 
     const unsubProgress = api.onLinguisticProgress((data: any) => {
-      if (isDone || data.taskId !== taskId) return
+      if (isDone) return
+      if (taskId && data.taskId !== taskId) return
+      // Si pas de taskId mais projet en cours, accepter le premier event qu'on recoit
+      if (!taskId) setTaskId(data.taskId)
       setStatus(data.step as ToolStatus)
       setProgress(data.progress || 0)
       setProgressMessage(data.message || '')
     })
 
     const unsubComplete = api.onLinguisticComplete((data: any) => {
-      if (data.taskId !== taskId) return
+      if (taskId && data.taskId !== taskId) return
+      // Verifier que c'est bien notre projet
+      if (projectId && data.projectId && data.projectId !== projectId) return
       isDone = true
       setStatus('done')
       setLinguisticId(data.linguisticId)
@@ -96,9 +113,9 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
       }).catch(() => {})
     })
 
-    // Backup : ecouter aussi queue:task-completed au cas ou linguistic:complete est perdu
     const unsubQueueCompleted = api.onQueueTaskCompleted((data: any) => {
-      if (data.taskId !== taskId || isDone) return
+      if (isDone) return
+      if (taskId && data.taskId !== taskId) return
       isDone = true
       setStatus('done')
       // Chercher le linguisticId dans les projets
