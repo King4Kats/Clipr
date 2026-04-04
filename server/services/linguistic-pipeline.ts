@@ -215,23 +215,37 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     }
   }
 
-  // ── Step 6 : Extraits audio ──
+  // ── Step 6 : Extraits audio (asynchrone pour ne pas bloquer le serveur) ──
   const linguisticId = randomUUID()
   const clipDir = join(DATA_DIR, 'linguistic', linguisticId)
   mkdirSync(clipDir, { recursive: true })
 
+  // Helper asynchrone pour ffmpeg (ne bloque pas le event loop)
+  const ffmpegClip = (src: string, start: number, end: number, dest: string): Promise<void> =>
+    new Promise((resolve) => {
+      const { exec: execAsync } = require('child_process')
+      execAsync(`ffmpeg -y -i "${src}" -ss ${start} -to ${end} -ar 16000 -ac 1 "${dest}" 2>/dev/null`, () => resolve())
+    })
+
+  // Extraire les clips par lots de 5 pour ne pas saturer
+  const allClipJobs: Array<() => Promise<void>> = []
+
   for (let si = 0; si < sequences.length; si++) {
     const seq = sequences[si]
-    try {
-      execSync(`ffmpeg -y -i "${audioPath}" -ss ${seq.french_audio.start} -to ${seq.french_audio.end} -ar 16000 -ac 1 "${join(clipDir, `seq_${si}_fr.wav`)}" 2>/dev/null`)
-    } catch {}
+    allClipJobs.push(() => ffmpegClip(audioPath, seq.french_audio.start, seq.french_audio.end, join(clipDir, `seq_${si}_fr.wav`)))
     for (let vi = 0; vi < seq.variants.length; vi++) {
       const v = seq.variants[vi]
-      try {
-        execSync(`ffmpeg -y -i "${audioPath}" -ss ${v.audio.start} -to ${v.audio.end} -ar 16000 -ac 1 "${join(clipDir, `seq_${si}_var_${vi}.wav`)}" 2>/dev/null`)
-        v.audio_extract = `seq_${si}_var_${vi}.wav`
-      } catch {}
+      const clipName = `seq_${si}_var_${vi}.wav`
+      allClipJobs.push(async () => {
+        await ffmpegClip(audioPath, v.audio.start, v.audio.end, join(clipDir, clipName))
+        v.audio_extract = clipName
+      })
     }
+  }
+
+  // Executer par lots de 5
+  for (let i = 0; i < allClipJobs.length; i += 5) {
+    await Promise.all(allClipJobs.slice(i, i + 5).map(fn => fn()))
   }
 
   updateTaskProgress(task.id, 90, 'Sauvegarde')
