@@ -81,6 +81,15 @@ interface AppState {
   loadFromHistory: (projectRecord: any) => void
   autoSave: () => Promise<void>
 
+  // Undo / Redo
+  undoStack: Array<{ segments: VideoSegment[]; transcript: TranscriptSegment[] }>
+  redoStack: Array<{ segments: VideoSegment[]; transcript: TranscriptSegment[] }>
+  pushUndo: () => void
+  undo: () => void
+  redo: () => void
+  canUndo: boolean
+  canRedo: boolean
+
   // Nouvelles actions multi-projets
   createProject: (name: string, type?: 'manual' | 'ai') => Promise<string | null>
   renameProject: (id: string, name: string) => Promise<void>
@@ -115,6 +124,49 @@ export const useStore = create<AppState>((set, get) => ({
   // --- Projet actif ---
   activeProjectId: null,
   activeProjectName: '',
+
+  // --- Undo / Redo ---
+  undoStack: [],
+  redoStack: [],
+  canUndo: false,
+  canRedo: false,
+
+  pushUndo: () => {
+    const { segments, transcript, undoStack } = get()
+    const snapshot = { segments: [...segments], transcript: [...transcript] }
+    const newStack = [...undoStack, snapshot].slice(-30) // Max 30 niveaux
+    set({ undoStack: newStack, redoStack: [], canUndo: true, canRedo: false })
+  },
+
+  undo: () => {
+    const { undoStack, segments, transcript } = get()
+    if (undoStack.length === 0) return
+    const prev = undoStack[undoStack.length - 1]
+    const currentSnapshot = { segments: [...segments], transcript: [...transcript] }
+    set({
+      segments: prev.segments,
+      transcript: prev.transcript,
+      undoStack: undoStack.slice(0, -1),
+      redoStack: [...get().redoStack, currentSnapshot],
+      canUndo: undoStack.length > 1,
+      canRedo: true
+    })
+  },
+
+  redo: () => {
+    const { redoStack, segments, transcript } = get()
+    if (redoStack.length === 0) return
+    const next = redoStack[redoStack.length - 1]
+    const currentSnapshot = { segments: [...segments], transcript: [...transcript] }
+    set({
+      segments: next.segments,
+      transcript: next.transcript,
+      redoStack: redoStack.slice(0, -1),
+      undoStack: [...get().undoStack, currentSnapshot],
+      canUndo: true,
+      canRedo: redoStack.length > 1
+    })
+  },
 
   // --- Gestion de la collection de fichiers vidéo ---
   videoFiles: [],
@@ -506,3 +558,25 @@ export const useStore = create<AppState>((set, get) => ({
     get().loadFromHistory(projectRecord)
   }
 }))
+
+// ── Auto-save debounce : sauvegarde automatique 5s apres le dernier changement ──
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let lastAutoSaveHash = ''
+
+useStore.subscribe((state) => {
+  // Ne sauvegarder que s'il y a un projet actif avec du contenu
+  if (!state.activeProjectId || state.videoFiles.length === 0) return
+  // Ne pas sauvegarder pendant le traitement
+  const step = state.processingStep
+  if (step !== 'idle' && step !== 'ready' && step !== 'done') return
+
+  // Verifier si les donnees ont change (hash simple)
+  const hash = `${state.segments.length}_${state.transcript.length}_${state.activeProjectName}`
+  if (hash === lastAutoSaveHash) return
+  lastAutoSaveHash = hash
+
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  autoSaveTimer = setTimeout(() => {
+    useStore.getState().autoSave()
+  }, 5000)
+})
