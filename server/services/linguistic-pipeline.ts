@@ -73,99 +73,38 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     })
   }
 
-  // ── Step 2 : WhisperX/pyannote → timeline des speakers ──
+  // ── Step 2 : Silence detect → blocs de parole + sequences ──
   broadcastFn(userId, null, 'linguistic:progress', {
-    taskId: task.id, step: 'diarizing', progress: 0, message: 'Identification des voix (pyannote)...'
-  })
-
-  const whisperxResult = await runWhisperX(audioPath, 'tiny', language, numSpeakers, (percent) => {
-    broadcastFn(userId, null, 'linguistic:progress', {
-      taskId: task.id, step: 'diarizing', progress: percent, message: 'Diarisation pyannote...'
-    })
-    updateTaskProgress(task.id, 5 + percent * 0.20, 'Diarisation')
-  })
-
-  // Identifier le meneur = premier speaker du fichier
-  let leaderSpeaker = 'UNKNOWN'
-  const speakerTimeline: Array<{ start: number; end: number; speaker: string }> = []
-
-  if (whisperxResult && whisperxResult.segments.length > 0) {
-    leaderSpeaker = config.leaderSpeaker || whisperxResult.segments[0].speaker || 'UNKNOWN'
-
-    // Construire la timeline speaker
-    for (const seg of whisperxResult.segments) {
-      if (seg.speaker) {
-        speakerTimeline.push({ start: seg.start, end: seg.end, speaker: seg.speaker })
-      }
-    }
-  }
-
-  logger.info(`[Linguistic] Meneur identifie : ${leaderSpeaker} (${speakerTimeline.length} segments pyannote)`)
-
-  // ── Step 3 : Silence detect → blocs de parole ──
-  broadcastFn(userId, null, 'linguistic:progress', {
-    taskId: task.id, step: 'segmenting', progress: 0, message: 'Detection des silences...'
+    taskId: task.id, step: 'segmenting', progress: 0, message: 'Detection des silences et segmentation...'
   })
 
   const silenceResult = await runSilenceSegment(audioPath, (percent) => {
     broadcastFn(userId, null, 'linguistic:progress', {
       taskId: task.id, step: 'segmenting', progress: percent, message: 'Segmentation par silences...'
     })
-    updateTaskProgress(task.id, 25 + percent * 0.05, 'Segmentation')
+    updateTaskProgress(task.id, 5 + percent * 0.10, 'Segmentation')
   })
 
-  if (!silenceResult || silenceResult.speech_blocks.length === 0) {
-    throw new Error('Aucun bloc de parole detecte')
+  if (!silenceResult || silenceResult.sequences.length === 0) {
+    throw new Error('Aucune sequence detectee')
   }
 
-  const speechBlocks = silenceResult.speech_blocks
-  logger.info(`[Linguistic] ${speechBlocks.length} blocs de parole detectes`)
+  logger.info(`[Linguistic] Silence detect : ${silenceResult.sequences.length} sequences, ${silenceResult.speech_blocks.length} blocs`)
 
-  // ── Step 4 : Croiser blocs + timeline speakers ──
-  // Pour chaque bloc de parole, trouver le speaker dominant via pyannote
-  for (const block of speechBlocks) {
-    const overlaps: Record<string, number> = {}
-    for (const seg of speakerTimeline) {
-      const overlap = Math.max(0, Math.min(block.end, seg.end) - Math.max(block.start, seg.start))
-      if (overlap > 0) {
-        overlaps[seg.speaker] = (overlaps[seg.speaker] || 0) + overlap
-      }
-    }
-    const best = Object.entries(overlaps).sort((a, b) => b[1] - a[1])[0]
-    block.speaker = best ? best[0] : 'UNKNOWN'
-    block.is_leader = block.speaker === leaderSpeaker
-  }
-
-  const leaderBlocks = speechBlocks.filter((b: any) => b.is_leader)
-  const variantBlocks = speechBlocks.filter((b: any) => !b.is_leader)
-  logger.info(`[Linguistic] ${leaderBlocks.length} blocs meneur, ${variantBlocks.length} blocs intervenants`)
-
-  // ── Step 5 : Construire les sequences ──
-  // Chaque bloc meneur = nouvelle sequence
-  // Les blocs intervenants entre deux meneurs = variantes de la sequence
-  let sequences: LinguisticSequence[] = []
-  let currentSeq: LinguisticSequence | null = null
-
-  for (const block of speechBlocks) {
-    if (block.is_leader) {
-      if (currentSeq) sequences.push(currentSeq)
-      currentSeq = {
-        id: randomUUID(),
-        index: sequences.length,
-        french_text: '',
-        french_audio: { start: block.start, end: block.end },
-        variants: []
-      }
-    } else if (currentSeq && block.end - block.start >= 1.0) {
-      currentSeq.variants.push({
-        speaker: block.speaker || 'LOCUTEUR',
-        ipa: '',
-        ipa_original: '',
-        audio: { start: block.start, end: block.end }
-      })
-    }
-  }
-  if (currentSeq) sequences.push(currentSeq)
+  // Construire les sequences : le silence detect a deja identifie
+  // le premier bloc de chaque groupe comme meneur
+  let sequences: LinguisticSequence[] = silenceResult.sequences.map((seq: any, i: number) => ({
+    id: randomUUID(),
+    index: i,
+    french_text: '',
+    french_audio: { start: seq.leader.start, end: seq.leader.end },
+    variants: seq.variants.map((v: any) => ({
+      speaker: 'LOCUTEUR',
+      ipa: '',
+      ipa_original: '',
+      audio: { start: v.start, end: v.end }
+    }))
+  }))
 
   sequences = sequences.filter(s => s.variants.length >= 1)
   sequences.forEach((s, i) => s.index = i)
@@ -271,7 +210,7 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
   db.prepare(
     `INSERT INTO linguistic_transcriptions (id, user_id, task_id, filename, leader_speaker, sequences, speakers, duration, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(linguisticId, userId, task.id, filename, leaderSpeaker,
+  ).run(linguisticId, userId, task.id, filename, 'meneur',
     JSON.stringify(sequences), JSON.stringify(speakers), duration, new Date().toISOString())
 
   const projectId = config.projectId as string | undefined
