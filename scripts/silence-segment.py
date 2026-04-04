@@ -148,7 +148,43 @@ def main():
             'variants': current_blocks[1:]
         })
 
-    print(f"STATUS: {len(sequences)} sequences detectees", file=sys.stderr)
+    print(f"STATUS: {len(sequences)} sequences brutes", file=sys.stderr)
+    print("PROGRESS: 70", file=sys.stderr)
+
+    # Post-traitement : redecouper les sequences avec trop de variantes
+    # Si > max_variants, chercher les sous-coupures internes
+    MAX_VARIANTS = 10  # ~9 intervenants + petite marge
+
+    CHUNK_SIZE = 9  # ~9 intervenants par phrase
+
+    final_sequences = []
+    for seq in sequences:
+        if len(seq['variants']) <= MAX_VARIANTS:
+            final_sequences.append(seq)
+        else:
+            # Trop de variantes = plusieurs phrases fusionnees
+            # On decoupe par paquets de CHUNK_SIZE
+            # Le 1er bloc de chaque paquet = meneur (il dit la phrase FR)
+            variants = seq['variants']
+
+            # Premier paquet : garder le leader original
+            first_chunk = variants[:CHUNK_SIZE]
+            final_sequences.append({
+                'leader': seq['leader'],
+                'variants': first_chunk
+            })
+
+            # Paquets suivants : le premier bloc = nouveau meneur
+            for k in range(CHUNK_SIZE, len(variants), CHUNK_SIZE):
+                chunk = variants[k:k + CHUNK_SIZE]
+                if len(chunk) >= 1:
+                    final_sequences.append({
+                        'leader': chunk[0],  # Premier bloc = meneur
+                        'variants': chunk[1:] if len(chunk) > 1 else []
+                    })
+
+    sequences = final_sequences
+    print(f"STATUS: {len(sequences)} sequences apres redecoupage", file=sys.stderr)
     print("PROGRESS: 80", file=sys.stderr)
 
     # Stats
