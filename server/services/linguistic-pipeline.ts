@@ -124,19 +124,14 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
 
   for (const turn of turns) {
     if (turn.speaker === leaderSpeaker) {
-      if (currentSeq && currentSeq.variants.length === 0) {
-        // Meneur continue
-        currentSeq.french_text += ' ' + turn.text
-        currentSeq.french_audio.end = turn.end
-      } else {
-        if (currentSeq) sequences.push(currentSeq)
-        currentSeq = {
-          id: randomUUID(),
-          index: sequences.length,
-          french_text: turn.text,
-          french_audio: { start: turn.start, end: turn.end },
-          variants: []
-        }
+      // Chaque tour du meneur = UNE nouvelle sequence (jamais de merge)
+      if (currentSeq) sequences.push(currentSeq)
+      currentSeq = {
+        id: randomUUID(),
+        index: sequences.length,
+        french_text: turn.text,
+        french_audio: { start: turn.start, end: turn.end },
+        variants: []
       }
     } else if (currentSeq && turn.end - turn.start >= 1.0) {
       currentSeq.variants.push({
@@ -149,8 +144,8 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
   }
   if (currentSeq) sequences.push(currentSeq)
 
-  // Filtrer les sequences sans variantes
-  sequences = sequences.filter(s => s.variants.length >= 2)
+  // Filtrer les sequences sans variantes (garder celles avec au moins 1)
+  sequences = sequences.filter(s => s.variants.length >= 1)
   sequences.forEach((s, i) => s.index = i)
 
   logger.info(`[Linguistic] ${sequences.length} sequences (${sequences.reduce((s, q) => s + q.variants.length, 0)} variantes)`)
