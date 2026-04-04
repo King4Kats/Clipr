@@ -183,6 +183,10 @@
     <a href="#u-lock">L'IA est occupee ?</a>
     <a href="#u-admin">Espace admin</a>
     <a href="#u-config">Reglages</a>
+    <div class="sidebar-label">Outils</div>
+    <a href="#u-transcription">Transcription audio/video</a>
+    <a href="#u-linguistique">Transcription linguistique</a>
+    <a href="#u-diarisation">Identification locuteurs</a>
   </div>
   <div class="dev-section visible" id="sidebarDev">
     <div class="sidebar-label">Demarrage</div>
@@ -203,6 +207,13 @@
     <a href="#d-share-api">Partage</a>
     <a href="#d-ai-api">IA &amp; Fichiers</a>
     <a href="#d-admin-api">Administration</a>
+    <div class="sidebar-label">Pipelines</div>
+    <a href="#d-pipeline-transcription">Transcription + Diarisation</a>
+    <a href="#d-pipeline-linguistique">Transcription linguistique</a>
+    <a href="#d-chunked-upload">Upload chunked</a>
+    <div class="sidebar-label">API Reference (suite)</div>
+    <a href="#d-transcription-api">Transcription</a>
+    <a href="#d-linguistic-api">Linguistique</a>
     <div class="sidebar-label">Deploiement</div>
     <a href="#d-securite">Securite</a>
     <a href="#d-production">Mise en production</a>
@@ -436,6 +447,106 @@
   </div>
 </section>
 
+<section class="section" id="u-transcription">
+  <h2 class="section-title">Transcription audio/video</h2>
+  <div class="card">
+    <h3>Transcrire un fichier</h3>
+    <p>L'outil de transcription convertit vos fichiers audio ou video en texte grace a <strong>Whisper</strong> (IA de reconnaissance vocale).</p>
+    <ol>
+      <li>Depuis l'accueil, cliquez sur <strong>Transcrire un media</strong> ou choisissez <strong>+ Nouveau → Transcription audio/video</strong></li>
+      <li>Glissez un fichier audio (WAV, MP3, FLAC, M4A) ou video (MP4, MOV, AVI, MKV, MTS)</li>
+      <li>Configurez le modele Whisper et la langue</li>
+      <li>Cliquez <strong>Lancer la transcription</strong></li>
+    </ol>
+    <div class="tip">Les fichiers video sont automatiquement convertis : l'audio est extrait avant la transcription. Les fichiers MTS sont remuxes en MP4 pour la lecture dans le navigateur.</div>
+  </div>
+  <div class="card">
+    <h3>Identification des locuteurs</h3>
+    <p>Apres la transcription, l'IA identifie automatiquement <strong>qui parle</strong> dans l'enregistrement :</p>
+    <ul>
+      <li>Les locuteurs sont detectes par analyse vocale (SpeechBrain / pyannote)</li>
+      <li>Le nombre de speakers est auto-detecte (ou configurable)</li>
+      <li>Les noms sont identifies via Ollama si possible, sinon "Intervenant" / "Intervieweur"</li>
+      <li><strong>Cliquez sur un nom de speaker</strong> pour le renommer — ca change partout dans la transcription</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Resultats et export</h3>
+    <ul>
+      <li>La transcription s'affiche en temps reel pendant le traitement</li>
+      <li>Telechargez en <strong>.txt</strong> (texte brut avec timestamps) ou <strong>.srt</strong> (sous-titres)</li>
+      <li>Les exports incluent les noms des locuteurs</li>
+      <li>Les projets sont accessibles depuis l'historique et la page d'accueil</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Gros fichiers</h3>
+    <p>Les fichiers de plus de 90 Mo sont automatiquement decoupes en morceaux (chunked upload) pour passer a travers le tunnel Cloudflare. Une barre de progression s'affiche pendant l'upload.</p>
+  </div>
+</section>
+
+<section class="section" id="u-linguistique">
+  <h2 class="section-title">Transcription linguistique</h2>
+  <div class="card">
+    <h3>A quoi ca sert ?</h3>
+    <p>Cet outil est concu pour <strong>documenter les langues vernaculaires</strong> (patois, dialectes locaux). Il traite des enregistrements ou un <strong>meneur</strong> dit une phrase en francais, puis plusieurs personnes la repetent dans leur langue vernaculaire.</p>
+    <p>L'outil produit pour chaque phrase :</p>
+    <ul>
+      <li>Le <strong>texte francais</strong> (transcription Whisper)</li>
+      <li>La <strong>transcription phonetique IPA</strong> de chaque variante vernaculaire (Allosaurus)</li>
+      <li>Un <strong>extrait audio</strong> par variante (ecoutable dans l'interface)</li>
+      <li>L'identification du <strong>locuteur</strong> (renommable)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Comment l'utiliser</h3>
+    <ol>
+      <li>Depuis l'accueil, cliquez sur <strong>Transcription linguistique</strong> (carte verte)</li>
+      <li>Glissez votre fichier audio</li>
+      <li>Indiquez le <strong>nombre de locuteurs</strong> (meneur + intervenants)</li>
+      <li>Lancez l'analyse — le pipeline s'execute automatiquement</li>
+    </ol>
+    <div class="tip">Le meneur est automatiquement identifie comme le <strong>premier speaker du fichier</strong>. Vous pouvez le changer via le selecteur dans les resultats.</div>
+  </div>
+  <div class="card">
+    <h3>Editer les resultats</h3>
+    <ul>
+      <li><strong>Texte francais</strong> : cliquez dessus pour modifier (correction Whisper)</li>
+      <li><strong>IPA</strong> : cliquez sur la transcription phonetique pour la corriger manuellement</li>
+      <li><strong>Reset IPA</strong> : bouton pour revenir a la version Allosaurus originale</li>
+      <li><strong>Renommer un speaker</strong> : cliquez sur le nom du locuteur</li>
+      <li><strong>Ecouter</strong> : bouton play a cote de chaque variante</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Export</h3>
+    <p>Exportez vos resultats en <strong>JSON</strong> (structure complete) ou <strong>CSV</strong> (tableau : sequence, francais, locuteur, IPA, debut, fin).</p>
+  </div>
+</section>
+
+<section class="section" id="u-diarisation">
+  <h2 class="section-title">Identification des locuteurs</h2>
+  <div class="card">
+    <h3>Comment ca marche</h3>
+    <p>La diarisation identifie automatiquement les differentes voix dans un enregistrement. Elle est utilisee dans les deux outils de transcription :</p>
+    <ul>
+      <li><strong>Transcription audio/video</strong> : identifie "Intervenant" et "Intervieweur" (ou les prenoms si detectes)</li>
+      <li><strong>Transcription linguistique</strong> : identifie le meneur et chaque personne qui repete en vernaculaire</li>
+    </ul>
+    <p>La technologie utilisee est <strong>pyannote</strong> (via WhisperX), le modele de diarisation le plus precis disponible.</p>
+  </div>
+  <div class="card">
+    <h3>Renommer les locuteurs</h3>
+    <p>Les locuteurs sont nommes automatiquement (SPEAKER_00, SPEAKER_01...). Pour les renommer :</p>
+    <ol>
+      <li>Cliquez sur le nom du locuteur dans la transcription</li>
+      <li>Tapez le nouveau nom</li>
+      <li>Le renommage s'applique a <strong>tous les segments</strong> de ce locuteur</li>
+      <li>Les exports (.txt, .srt, JSON, CSV) refletent les nouveaux noms</li>
+    </ol>
+  </div>
+</section>
+
 </div><!-- /contentUser -->
 
 <!-- ======== DEVELOPPEUR ======== -->
@@ -586,31 +697,70 @@ npm start            # Lance le serveur de production sur :3000</pre>
 <section class="section" id="d-docker">
   <h2 class="section-title">Services Docker en detail</h2>
   <div class="card">
+    <h3>Architecture 3 containers</h3>
+    <div class="schema">
+┌─────────────────────────────────────────────────────────┐
+│  <span class="hl">clipr</span> (Dockerfile multi-stage, NVIDIA CUDA)            │
+│                                                         │
+│  Node.js 20 ── Express API + WebSocket                  │
+│  Python 3.10 ── Whisper, WhisperX, SpeechBrain,         │
+│                 Allosaurus, pyannote                     │
+│  FFmpeg ── Extraction audio, decoupe clips              │
+│  GPU ── Partage VRAM (pipeline sequentiel)              │
+│                                                         │
+│  Volume /data : DB, uploads, exports, clips, logs       │
+└─────────────────────┬───────────────────────────────────┘
+                      │ HTTP :11434
+                      ▼
+┌─────────────────────────────────────────────────────────┐
+│  <span class="g">clipr-ollama</span> (ollama/ollama)                          │
+│  LLM : analyse IA, detection noms locuteurs             │
+│  Modele : qwen2.5:14b                                   │
+│  GPU : partage avec clipr (sequentiel)                  │
+│  Volume ollama-data : modeles caches                    │
+└─────────────────────────────────────────────────────────┘
+    </div>
+  </div>
+  <div class="card">
     <h3>clipr (Dockerfile multi-stage)</h3>
     <p>L'image est construite en 3 etapes :</p>
     <ol>
       <li><strong>deps</strong> — Installe les node_modules (production only)</li>
       <li><strong>build</strong> — Compile le client (Vite) et le serveur (TypeScript)</li>
-      <li><strong>runtime</strong> — Image finale avec Node.js 20, FFmpeg, Python 3, faster-whisper, Docker CLI, Git</li>
+      <li><strong>runtime</strong> — Image finale basee sur <code>nvidia/cuda:12.8.0-runtime-ubuntu22.04</code></li>
     </ol>
-    <p>Le conteneur expose le port <strong>3000</strong> et stocke toutes les donnees dans le volume <code>/data</code> :</p>
+    <p>Packages Python installes dans <code>/opt/whisper-venv</code> :</p>
+    <table>
+      <tr><th>Package</th><th>Role</th></tr>
+      <tr><td>faster-whisper</td><td>Transcription vocale (Whisper optimise)</td></tr>
+      <tr><td>torch + torchaudio</td><td>Framework ML (CUDA 12.8)</td></tr>
+      <tr><td>speechbrain</td><td>Embeddings vocaux (ECAPA-TDNN)</td></tr>
+      <tr><td>scikit-learn</td><td>Clustering spectral (diarisation)</td></tr>
+      <tr><td>allosaurus</td><td>Transcription phonetique IPA universelle</td></tr>
+      <tr><td>whisperx</td><td>Whisper + pyannote + alignement mot par mot</td></tr>
+      <tr><td>soundfile</td><td>Lecture audio</td></tr>
+    </table>
+    <p>Le conteneur expose le port <strong>3000</strong> et stocke les donnees dans le volume <code>/data</code> :</p>
     <pre>/data/
-  clipr.db          # Base SQLite (users, projects, shares, locks)
-  uploads/          # Videos uploadees par les utilisateurs
+  clipr.db          # Base SQLite
+  uploads/          # Fichiers uploades
   exports/          # Fichiers exportes (MP4, TXT, JSON)
-  temp/             # Fichiers temporaires (audio WAV, clips)
-  logs/             # Logs serveur (clipr.log)</pre>
+  temp/             # Temporaires (audio WAV, transcripts JSON)
+  logs/             # Logs serveur
+  chunks/           # Chunks upload en cours (cleanup auto 30min)
+  linguistic/       # Clips audio par projet linguistique
+  projects/         # Donnees projets</pre>
   </div>
   <div class="card">
-    <h3>ollama</h3>
-    <p>Image officielle <code>ollama/ollama</code>. Stocke les modeles LLM dans le volume <code>ollama-data</code>. Healthcheck toutes les 15s sur <code>/api/tags</code>.</p>
-    <p>Clipr attend qu'Ollama soit healthy avant de demarrer (<code>depends_on: condition: service_healthy</code>).</p>
-    <div class="tip">Pour utiliser le GPU NVIDIA, decommentez la section <code>deploy.resources</code> dans le <code>docker-compose.yml</code>.</div>
+    <h3>clipr-ollama</h3>
+    <p>Image officielle <code>ollama/ollama</code>. Stocke les modeles LLM dans le volume <code>ollama-data</code>.</p>
+    <p>Healthcheck toutes les 15s. Clipr attend qu'Ollama soit healthy avant de demarrer.</p>
   </div>
   <div class="card">
-    <h3>caddy</h3>
-    <p>Reverse proxy avec HTTPS automatique (Let's Encrypt). Configure via <code>caddy/Caddyfile</code>. Optionnel pour le dev local.</p>
-    <p>Pour lancer sans Caddy : <code>docker compose up -d clipr ollama</code></p>
+    <h3>Variables d'environnement (.env)</h3>
+    <pre>HF_TOKEN=hf_xxx...                 # Token HuggingFace (pyannote)
+JWT_SECRET=xxx...                  # Secret JWT pour l'authentification</pre>
+    <div class="tip">Le fichier <code>.env</code> est dans le <code>.gitignore</code>. Ne jamais commiter les tokens.</div>
   </div>
 </section>
 
@@ -663,6 +813,9 @@ scripts/transcribe.py     # Python faster-whisper</pre>
       <tr><td><code>projects</code></td><td>id, user_id, name, type, status, data (JSON), created_at, updated_at, deleted_at</td><td>Projets (soft delete)</td></tr>
       <tr><td><code>project_shares</code></td><td>project_id, user_id, role (viewer/editor)</td><td>Partages</td></tr>
       <tr><td><code>ai_locks</code></td><td>user_id, project_id, started_at, expires_at</td><td>Verrous IA (30min)</td></tr>
+      <tr><td><code>task_queue</code></td><td>id, user_id, type, status, project_id, config, progress, created_at</td><td>File d'attente (analysis, transcription, linguistic)</td></tr>
+      <tr><td><code>transcriptions</code></td><td>id, user_id, task_id, filename, language, whisper_model, segments (JSON), duration</td><td>Transcriptions Whisper + speakers</td></tr>
+      <tr><td><code>linguistic_transcriptions</code></td><td>id, user_id, task_id, filename, leader_speaker, sequences (JSON), speakers (JSON), duration</td><td>Transcriptions linguistiques (IPA)</td></tr>
     </table>
     <div class="tip">Le champ <code>data</code> de la table projects stocke l'etat complet du projet en JSON : videos, transcription, segments, config.</div>
   </div>
@@ -850,6 +1003,233 @@ cd Clipr
 git pull origin main
 docker compose up -d --build</pre>
     <p>Ou depuis le dashboard admin (icone bouclier → Mise a jour).</p>
+  </div>
+</section>
+
+<section class="section" id="d-pipeline-transcription">
+  <h2 class="section-title">Pipeline — Transcription + Diarisation</h2>
+  <div class="card">
+    <h3>Vue d'ensemble</h3>
+    <p>Le pipeline de transcription audio/video execute les etapes suivantes en <strong>sequentiel</strong> (partage VRAM GPU) :</p>
+    <div class="schema">
+<span class="hl">Audio/Video</span>
+    │
+    ▼
+<span class="g">1. FFmpeg</span> ── Extraction audio (WAV 16kHz mono)
+    │         Si video MTS → remux automatique en MP4
+    ▼
+<span class="g">2. Whisper</span> ── Transcription (faster-whisper, GPU)
+    │           Modele: large-v3 | Langue: fr
+    │           → segments [{start, end, text}]
+    │           → <span class="y">FREE GPU</span>
+    ▼
+<span class="g">3. Diarisation</span> ── SpeechBrain ECAPA-TDNN (GPU)
+    │                Sliding window 1.5s → embeddings → clustering
+    │                → speaker labels par segment
+    │                → <span class="y">FREE GPU</span>
+    ▼
+<span class="g">4. Ollama</span> ── Detection des noms (analyse texte)
+    │          Fallback: Intervenant / Intervieweur
+    ▼
+<span class="hl">Save DB</span> → transcription:complete (WebSocket)
+    │
+    ▼
+<span class="g">5. Update DB</span> ── Segments avec speakers → diarization-complete
+    </div>
+  </div>
+  <div class="card">
+    <h3>Scripts Python</h3>
+    <table>
+      <tr><th>Script</th><th>Role</th><th>GPU</th></tr>
+      <tr><td><code>scripts/transcribe.py</code></td><td>Transcription Whisper (single file)</td><td>Oui</td></tr>
+      <tr><td><code>scripts/transcribe-batch.py</code></td><td>Transcription Whisper batch (N clips, modele charge 1 fois)</td><td>Oui</td></tr>
+      <tr><td><code>scripts/diarize.py</code></td><td>Diarisation SpeechBrain (sliding window + clustering)</td><td>Oui</td></tr>
+      <tr><td><code>scripts/phonetize.py</code></td><td>Transcription IPA via Allosaurus</td><td>Oui</td></tr>
+      <tr><td><code>scripts/whisperx-diarize.py</code></td><td>WhisperX tout-en-un (Whisper + pyannote + alignement)</td><td>Oui</td></tr>
+    </table>
+    <p>Tous les scripts suivent le meme protocole <code>stderr</code> :</p>
+    <pre>PROGRESS: 42          // Pourcentage (0-100)
+STATUS: Transcribing  // Message de statut
+SEGMENT: {"id":0,...} // Segment en temps reel
+ERROR: message        // Erreur</pre>
+  </div>
+  <div class="card">
+    <h3>Gestion VRAM</h3>
+    <p>Chaque script Python libere explicitement la VRAM GPU avant de quitter :</p>
+    <pre>del model
+torch.cuda.empty_cache()
+gc.collect()</pre>
+    <p>Le service Node attend 2 secondes apres chaque script (<code>sleep 2</code>) pour laisser le temps au driver CUDA de liberer la memoire.</p>
+    <div class="warn">Ne jamais lancer deux scripts GPU en parallele. Le pipeline est strictement sequentiel via la task queue (1 tache a la fois).</div>
+  </div>
+</section>
+
+<section class="section" id="d-pipeline-linguistique">
+  <h2 class="section-title">Pipeline — Transcription linguistique</h2>
+  <div class="card">
+    <h3>Objectif</h3>
+    <p>Documenter les langues vernaculaires. Un <strong>meneur</strong> dit une phrase en francais, puis 1 a 9 personnes la repetent dans leur dialecte.</p>
+  </div>
+  <div class="card">
+    <h3>Pipeline WhisperX</h3>
+    <div class="schema">
+<span class="hl">Audio</span>
+    │
+    ▼
+<span class="g">1. WhisperX</span> ── Transcription + Diarisation + Alignement mot par mot
+    │             Whisper (transcription) → <span class="y">FREE GPU</span>
+    │             Alignement (timestamps mots) → <span class="y">FREE GPU</span>
+    │             pyannote (diarisation) → <span class="y">FREE GPU</span>
+    │             → segments [{start, end, text, speaker, words}]
+    ▼
+<span class="g">2. Identification meneur</span> ── Premier speaker du fichier = meneur FR
+    ▼
+<span class="g">3. Segmentation</span> ── Tours meneur = sequences FR
+    │                  Tours autres = variantes vernaculaires
+    │                  Filtrage: sequences avec &lt; 2 variantes supprimees
+    ▼
+<span class="g">4. Allosaurus IPA</span> ── Transcription phonetique des variantes (GPU)
+    │                    → <span class="y">FREE GPU</span>
+    ▼
+<span class="g">5. FFmpeg</span> ── Decoupe clips audio par variante
+    ▼
+<span class="hl">Save DB</span> → linguistic:complete (WebSocket)
+    </div>
+  </div>
+  <div class="card">
+    <h3>Structure de donnees</h3>
+    <pre>{
+  "sequences": [
+    {
+      "id": "uuid",
+      "index": 0,
+      "french_text": "Elle se sert de l'entonnoir",
+      "french_audio": {"start": 0.5, "end": 5.2},
+      "variants": [
+        {
+          "speaker": "SPEAKER_01",
+          "ipa": "l u k a t m ĩ ʒ ɛ",
+          "ipa_original": "l u k a t m ĩ ʒ ɛ",
+          "audio": {"start": 6.0, "end": 9.5},
+          "audio_extract": "seq_0_var_0.wav"
+        }
+      ]
+    }
+  ],
+  "speakers": ["SPEAKER_00", "SPEAKER_01", ...],
+  "leader_speaker": "SPEAKER_00"
+}</pre>
+  </div>
+  <div class="card">
+    <h3>Table DB : <code>linguistic_transcriptions</code></h3>
+    <table>
+      <tr><th>Colonne</th><th>Type</th><th>Description</th></tr>
+      <tr><td><code>id</code></td><td>TEXT PK</td><td>UUID</td></tr>
+      <tr><td><code>user_id</code></td><td>TEXT</td><td>FK → users</td></tr>
+      <tr><td><code>task_id</code></td><td>TEXT</td><td>FK → task_queue</td></tr>
+      <tr><td><code>filename</code></td><td>TEXT</td><td>Nom fichier original</td></tr>
+      <tr><td><code>leader_speaker</code></td><td>TEXT</td><td>ID du meneur</td></tr>
+      <tr><td><code>sequences</code></td><td>TEXT</td><td>JSON array de LinguisticSequence</td></tr>
+      <tr><td><code>speakers</code></td><td>TEXT</td><td>JSON array des speakers</td></tr>
+      <tr><td><code>duration</code></td><td>REAL</td><td>Duree totale en secondes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Modeles IA utilises</h3>
+    <table>
+      <tr><th>Modele</th><th>Role</th><th>Taille</th><th>Source</th></tr>
+      <tr><td>Whisper large-v3</td><td>Transcription FR du meneur</td><td>~5 GB</td><td>faster-whisper / WhisperX</td></tr>
+      <tr><td>pyannote 3.1</td><td>Diarisation (identification locuteurs)</td><td>~2 GB</td><td>HuggingFace (token requis)</td></tr>
+      <tr><td>SpeechBrain ECAPA-TDNN</td><td>Embeddings vocaux (fallback diarisation)</td><td>~80 MB</td><td>HuggingFace (public)</td></tr>
+      <tr><td>Allosaurus</td><td>Transcription IPA phonetique</td><td>~100 MB</td><td>pip (universel)</td></tr>
+      <tr><td>Ollama (qwen2.5:14b)</td><td>Detection noms locuteurs</td><td>~9 GB</td><td>Ollama registry</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="section" id="d-chunked-upload">
+  <h2 class="section-title">Upload chunked</h2>
+  <div class="card">
+    <h3>Probleme</h3>
+    <p>Le tunnel Cloudflare limite les requetes a ~100 Mo. Les fichiers video depassent souvent cette limite.</p>
+    <h3>Solution</h3>
+    <p>Cote client, les fichiers de plus de 90 Mo sont automatiquement decoupes en chunks :</p>
+    <div class="schema">
+<span class="hl">Fichier &gt; 90 Mo</span>
+    │
+    ▼
+<span class="g">Client</span> ── File.slice() → chunks de 90 Mo
+    │       uploadId = timestamp + random
+    │
+    ▼  (pour chaque chunk)
+<span class="g">POST /api/upload/chunk</span>
+    │   body: FormData {chunk, uploadId, chunkIndex, totalChunks, fileName}
+    │   → stocke dans data/chunks/{uploadId}/chunk_00000
+    │
+    ▼  (apres le dernier chunk)
+<span class="g">POST /api/upload/chunk/complete</span>
+    │   body: {uploadId, fileName, totalChunks}
+    │   → assemble les chunks en streaming
+    │   → supprime le dossier chunks
+    │   → ffprobe duration
+    │   → retourne {id, path, name, duration, size}
+    ▼
+<span class="hl">Fichier assemble</span> dans data/uploads/
+    </div>
+    <p>Cleanup automatique : les chunks abandonnes (&gt; 1h) sont supprimes toutes les 30 minutes.</p>
+    <div class="tip">L'upload chunked est transparent pour l'utilisateur. Une barre de progression s'affiche avec le pourcentage.</div>
+  </div>
+</section>
+
+<section class="section" id="d-transcription-api">
+  <h2 class="section-title">API — Transcription</h2>
+  <div class="card">
+    <table>
+      <tr><th>Methode</th><th>Route</th><th>Description</th></tr>
+      <tr><td>POST</td><td><code>/api/upload/media</code></td><td>Upload fichier audio/video (single)</td></tr>
+      <tr><td>POST</td><td><code>/api/upload/media/batch</code></td><td>Upload batch (max 20 fichiers)</td></tr>
+      <tr><td>POST</td><td><code>/api/upload/chunk</code></td><td>Upload un chunk (fichiers &gt; 90 Mo)</td></tr>
+      <tr><td>POST</td><td><code>/api/upload/chunk/complete</code></td><td>Assembler les chunks</td></tr>
+      <tr><td>POST</td><td><code>/api/transcription/start</code></td><td>Lancer une transcription <code>{filePath, filename, config}</code></td></tr>
+      <tr><td>POST</td><td><code>/api/transcription/start/batch</code></td><td>Lancer un batch de transcriptions</td></tr>
+      <tr><td>GET</td><td><code>/api/transcription/history</code></td><td>Historique des transcriptions</td></tr>
+      <tr><td>GET</td><td><code>/api/transcription/:id</code></td><td>Recuperer une transcription (segments + speakers)</td></tr>
+      <tr><td>PATCH</td><td><code>/api/transcription/:id/rename-speaker</code></td><td>Renommer un speaker <code>{oldName, newName}</code></td></tr>
+      <tr><td>GET</td><td><code>/api/transcription/:id/export?format=txt|srt</code></td><td>Exporter en TXT ou SRT</td></tr>
+      <tr><td>DELETE</td><td><code>/api/transcription/:id</code></td><td>Supprimer une transcription</td></tr>
+    </table>
+    <h3>WebSocket events</h3>
+    <pre>transcription:progress   {taskId, step, progress, message}
+transcription:segment    {taskId, segment}
+transcription:complete   {taskId, transcriptionId, segmentCount, duration}
+transcription:diarization-complete  {taskId, transcriptionId}</pre>
+  </div>
+</section>
+
+<section class="section" id="d-linguistic-api">
+  <h2 class="section-title">API — Transcription linguistique</h2>
+  <div class="card">
+    <table>
+      <tr><th>Methode</th><th>Route</th><th>Description</th></tr>
+      <tr><td>POST</td><td><code>/api/linguistic/start</code></td><td>Lancer une analyse <code>{filePath, filename, config}</code></td></tr>
+      <tr><td>GET</td><td><code>/api/linguistic/history</code></td><td>Historique</td></tr>
+      <tr><td>GET</td><td><code>/api/linguistic/:id</code></td><td>Recuperer les sequences + IPA</td></tr>
+      <tr><td>PATCH</td><td><code>/api/linguistic/:id/sequence/:idx</code></td><td>Modifier texte FR ou IPA d'une variante</td></tr>
+      <tr><td>PATCH</td><td><code>/api/linguistic/:id/leader</code></td><td>Changer le meneur <code>{leader}</code></td></tr>
+      <tr><td>PATCH</td><td><code>/api/linguistic/:id/rename-speaker</code></td><td>Renommer un speaker <code>{oldName, newName}</code></td></tr>
+      <tr><td>GET</td><td><code>/api/linguistic/:id/export?format=json|csv</code></td><td>Exporter</td></tr>
+      <tr><td>GET</td><td><code>/api/linguistic/:id/audio/:filename</code></td><td>Servir un extrait audio WAV</td></tr>
+      <tr><td>DELETE</td><td><code>/api/linguistic/:id</code></td><td>Supprimer (+ clips audio)</td></tr>
+    </table>
+    <h3>WebSocket events</h3>
+    <pre>linguistic:progress   {taskId, step, progress, message}
+linguistic:complete   {taskId, linguisticId, sequenceCount, duration}</pre>
+    <h3>Config</h3>
+    <pre>{
+  "whisperModel": "large-v3",    // Modele Whisper
+  "language": "fr",              // Langue du meneur
+  "numSpeakers": 10              // Nombre total de locuteurs
+}</pre>
   </div>
 </section>
 
