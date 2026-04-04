@@ -96,6 +96,22 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
       }).catch(() => {})
     })
 
+    // Backup : ecouter aussi queue:task-completed au cas ou linguistic:complete est perdu
+    const unsubQueueCompleted = api.onQueueTaskCompleted((data: any) => {
+      if (data.taskId !== taskId || isDone) return
+      isDone = true
+      setStatus('done')
+      // Chercher le linguisticId dans les projets
+      if (data.result?.linguisticId) {
+        setLinguisticId(data.result.linguisticId)
+        api.getLinguistic(data.result.linguisticId).then((result: any) => {
+          setSequences(result.sequences || [])
+          setSpeakers(result.speakers || [])
+          setLeaderSpeaker(result.leader_speaker || '')
+        }).catch(() => {})
+      }
+    })
+
     const unsubStarted = api.onQueueTaskStarted((data: any) => {
       if (data.taskId !== taskId) return
       setStatus('extracting-audio')
@@ -108,7 +124,7 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
       setProgressMessage(data.error || 'Erreur inconnue')
     })
 
-    return () => { unsubProgress(); unsubComplete(); unsubStarted(); unsubFailed() }
+    return () => { unsubProgress(); unsubComplete(); unsubQueueCompleted(); unsubStarted(); unsubFailed() }
   }, [taskId])
 
   // ── Upload ──

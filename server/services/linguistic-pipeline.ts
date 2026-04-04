@@ -179,10 +179,7 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     }
   }
 
-  // ── Step 6 : Extraits audio ──
-  broadcastFn(userId, null, 'linguistic:progress', {
-    taskId: task.id, step: 'extracting-clips', progress: 0, message: 'Extraction extraits audio...'
-  })
+  // ── Step 6 : Extraits audio (pas de broadcast progress ici pour eviter de bloquer l'UI) ──
 
   const linguisticId = randomUUID()
   const clipDir = join(DATA_DIR, 'linguistic', linguisticId)
