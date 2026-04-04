@@ -18,9 +18,10 @@ import logo from "@/assets/Clipr.svg";
 interface HeaderProps {
   onOpenSetup?: () => void;
   onOpenAdmin?: () => void;
+  onHome?: () => void;
 }
 
-const Header = ({ onOpenSetup, onOpenAdmin }: HeaderProps) => {
+const Header = ({ onOpenSetup, onOpenAdmin, onHome }: HeaderProps) => {
   const { videoFiles, processingStep, reset, saveProject, activeProjectId, activeProjectName, renameProject } = useStore();
   const { user, logout } = useAuthStore();
   const { theme, setTheme } = useTheme();
@@ -57,7 +58,7 @@ const Header = ({ onOpenSetup, onOpenAdmin }: HeaderProps) => {
     <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-[60]">
       <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
         {/* Logo et nom de l'application */}
-        <div className="flex items-center gap-3 select-none">
+        <div className="flex items-center gap-3 select-none cursor-pointer" onClick={() => { reset(); onHome?.(); }}>
           <div className="w-8 h-8 rounded-xl bg-primary/10 p-1 flex items-center justify-center overflow-hidden">
             <img src={logo} alt="Clipr Logo" className="w-6 h-6" />
           </div>
@@ -114,7 +115,7 @@ const Header = ({ onOpenSetup, onOpenAdmin }: HeaderProps) => {
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={reset}
+                onClick={() => { reset(); onHome?.(); }}
                 className="h-8 gap-2 bg-primary/10 hover:bg-primary/20 text-primary border-primary/30"
                 title="Retour à l'accueil (l'analyse continue en arrière-plan)"
               >

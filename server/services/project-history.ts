@@ -33,8 +33,11 @@ export interface ProjectData {
   config: any
   timestamp: number
   projectName: string
-  toolType?: 'transcription'
+  toolType?: 'transcription' | 'linguistic'
   transcriptionItems?: TranscriptionItem[]
+  linguisticId?: string
+  linguisticItems?: any[]
+  sequenceCount?: number
 }
 
 export interface ProjectRecord {

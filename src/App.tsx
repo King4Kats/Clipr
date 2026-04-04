@@ -20,6 +20,7 @@ import ProgressPanel from "@/components/new/ProgressPanel";
 import VideoPreview from "@/components/new/VideoPreview";
 import EditorLayout from "@/components/new/EditorLayout";
 import TranscriptionTool from "@/components/new/TranscriptionTool";
+import LinguisticTool from "@/components/new/LinguisticTool";
 import SetupWizard from "@/components/SetupWizard";
 import AuthScreen from "@/components/AuthScreen";
 import AdminDashboard from "@/components/AdminDashboard";
@@ -27,7 +28,7 @@ import AdminDashboard from "@/components/AdminDashboard";
 import ShareDialog from "@/components/ShareDialog";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check, Share2, Users, Brain, Scissors, Mic } from "lucide-react";
+import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check, Share2, Users, Brain, Scissors, Mic, BookOpen } from "lucide-react";
 import logo from "@/assets/Clipr.svg";
 
 function App() {
@@ -62,6 +63,8 @@ function App() {
   const [showTranscriptionTool, setShowTranscriptionTool] = useState(false);
   const [activeTranscriptionProject, setActiveTranscriptionProject] = useState<any>(null);
   const [showVideoSegmentation, setShowVideoSegmentation] = useState(false);
+  const [showLinguisticTool, setShowLinguisticTool] = useState(false);
+  const [activeLinguisticProject, setActiveLinguisticProject] = useState<any>(null);
   const [showNewProjectChoice, setShowNewProjectChoice] = useState(false);
 
   // Reset segmentation screen once files are uploaded — ensure mode choice is shown
@@ -77,6 +80,22 @@ function App() {
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
+
+  // Raccourcis clavier : Ctrl+Z (annuler) / Ctrl+Shift+Z (retablir)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          useStore.getState().redo();
+        } else {
+          useStore.getState().undo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -183,6 +202,11 @@ function App() {
       return <TranscriptionTool onBack={() => { setShowTranscriptionTool(false); setActiveTranscriptionProject(null); loadHistory(); }} initialProject={activeTranscriptionProject} />;
     }
 
+    // ── Outil de transcription linguistique ──
+    if (showLinguisticTool) {
+      return <LinguisticTool onBack={() => { setShowLinguisticTool(false); setActiveLinguisticProject(null); loadHistory(); }} initialProject={activeLinguisticProject} />;
+    }
+
     // ── Écran segmentation d'interview vidéo (upload) ──
     if (showVideoSegmentation && videoFiles.length === 0 && !useStore.getState().activeProjectId) {
       return (
@@ -255,6 +279,9 @@ function App() {
                     if (project.data?.toolType === 'transcription') {
                       setActiveTranscriptionProject(project);
                       setShowTranscriptionTool(true);
+                    } else if (project.data?.toolType === 'linguistic') {
+                      setActiveLinguisticProject(project);
+                      setShowLinguisticTool(true);
                     } else {
                       loadFromHistory(project);
                     }
@@ -265,7 +292,7 @@ function App() {
                 >
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors shrink-0">
-                      {project.data?.toolType === 'transcription' ? <Mic className="w-5 h-5" /> : project.type === 'ai' ? <Cpu className="w-5 h-5" /> : <Film className="w-5 h-5" />}
+                      {project.data?.toolType === 'transcription' ? <Mic className="w-5 h-5" /> : project.data?.toolType === 'linguistic' ? <BookOpen className="w-5 h-5" /> : project.type === 'ai' ? <Cpu className="w-5 h-5" /> : <Film className="w-5 h-5" />}
                     </div>
                     <div className="min-w-0 flex-1">
                       {editingId === project.id ? (
@@ -296,7 +323,7 @@ function App() {
                             ? 'bg-violet-500/10 text-violet-400'
                             : 'bg-blue-500/10 text-blue-400'
                         }`}>
-                          {project.data?.toolType === 'transcription' ? 'Audio' : project.type === 'ai' ? 'IA' : 'Manuel'}
+                          {project.data?.toolType === 'transcription' ? 'Audio' : project.data?.toolType === 'linguistic' ? 'Linguistique' : project.type === 'ai' ? 'IA' : 'Manuel'}
                         </span>
                         <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
                           project.status === 'done'
@@ -388,6 +415,13 @@ function App() {
                       >
                         <Scissors className="w-4 h-4 text-violet-400 shrink-0" />
                         <span className="text-xs font-medium text-foreground">Segmentation vidéo</span>
+                      </button>
+                      <button
+                        onClick={() => { setShowNewProjectChoice(false); setShowLinguisticTool(true) }}
+                        className="w-full flex items-center gap-2.5 p-2.5 rounded-lg hover:bg-emerald-500/10 transition-colors text-left"
+                      >
+                        <BookOpen className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span className="text-xs font-medium text-foreground">Transcription linguistique</span>
                       </button>
                     </div>
                   ) : (
@@ -483,6 +517,25 @@ function App() {
                     <h3 className="text-sm font-bold text-foreground">Segmentation d'interview vidéo</h3>
                     <p className="text-[10px] text-muted-foreground mt-0.5">
                       Analyse IA pour découper automatiquement une interview en segments
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.1 }}
+                onClick={() => setShowLinguisticTool(true)}
+                className="group p-5 bg-card border-2 border-border hover:border-emerald-500/50 rounded-xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 group-hover:bg-emerald-500 group-hover:text-white transition-colors">
+                    <BookOpen className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground">Transcription linguistique</h3>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Segmentation francais / langue vernaculaire + transcription IPA
                     </p>
                   </div>
                 </div>
@@ -633,7 +686,15 @@ function App() {
         {showSetup && <SetupWizard onComplete={handleSetupComplete} />}
       </AnimatePresence>
 
-      <Header onOpenSetup={() => setShowSetup(true)} onOpenAdmin={() => setShowAdmin(true)} />
+      <Header onOpenSetup={() => setShowSetup(true)} onOpenAdmin={() => setShowAdmin(true)} onHome={() => {
+        setShowTranscriptionTool(false);
+        setActiveTranscriptionProject(null);
+        setShowVideoSegmentation(false);
+        setShowLinguisticTool(false);
+        setActiveLinguisticProject(null);
+        setShowAdmin(false);
+        loadHistory();
+      }} />
 
       {showAdmin && user?.role === 'admin' ? (
         <AdminDashboard onBack={() => setShowAdmin(false)} onLoadProject={(data) => {
@@ -641,6 +702,9 @@ function App() {
           if (data.data?.toolType === 'transcription' || data.toolType === 'transcription') {
             setActiveTranscriptionProject(data);
             setShowTranscriptionTool(true);
+          } else if (data.data?.toolType === 'linguistic' || data.toolType === 'linguistic') {
+            setActiveLinguisticProject(data);
+            setShowLinguisticTool(true);
           } else {
             loadFromHistory(data);
           }

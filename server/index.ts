@@ -19,6 +19,8 @@ import * as sharingService from './services/sharing.js'
 import * as taskQueueService from './services/task-queue.js'
 import { runAnalysisPipeline } from './services/analysis-pipeline.js'
 import { runTranscriptionPipeline, getTranscription, getTranscriptionHistory, deleteTranscription, exportAsText, exportAsSrt } from './services/transcription-pipeline.js'
+import { runLinguisticPipeline, getLinguisticTranscription, getLinguisticHistory, deleteLinguisticTranscription, updateLinguisticSequence, updateLinguisticLeader, renameLinguisticSpeaker, exportLinguistic } from './services/linguistic-pipeline.js'
+import { getDb } from './services/database.js'
 import { requireAuth, requireAdmin, optionalAuth } from './middleware/auth.js'
 
 // ── Config ──
@@ -262,7 +264,8 @@ async function remuxToMp4(inputPath: string): Promise<{ path: string, filename: 
 taskQueueService.initQueue(
   {
     analysis: runAnalysisPipeline,
-    transcription: runTranscriptionPipeline
+    transcription: runTranscriptionPipeline,
+    linguistic: runLinguisticPipeline
   },
   queueBroadcast
 )
@@ -935,10 +938,133 @@ app.get('/api/transcription/:id/export', (req, res) => {
   }
 })
 
+// Rename a speaker in a transcription (updates all segments)
+app.patch('/api/transcription/:id/rename-speaker', requireAuth, (req, res) => {
+  const { oldName, newName } = req.body
+  if (!oldName || !newName) return res.status(400).json({ error: 'oldName et newName requis' })
+
+  const transcription = getTranscription(req.params.id, req.user!.userId, req.user!.role)
+  if (!transcription) return res.status(404).json({ error: 'Transcription introuvable' })
+
+  const segments = transcription.segments.map((s: any) =>
+    s.speaker === oldName ? { ...s, speaker: newName } : s
+  )
+
+  const db = getDb()
+  db.prepare('UPDATE transcriptions SET segments = ? WHERE id = ?')
+    .run(JSON.stringify(segments), req.params.id)
+
+  res.json({ success: true, segments })
+})
+
 app.delete('/api/transcription/:id', requireAuth, (req, res) => {
   const ok = deleteTranscription(req.params.id, req.user!.userId)
   if (!ok) return res.status(404).json({ error: 'Transcription introuvable' })
   res.json({ success: true })
+})
+
+// ── Linguistic transcription routes ──
+
+// Start linguistic transcription
+app.post('/api/linguistic/start', requireAuth, (req, res) => {
+  try {
+    const { filePath, filename, config, projectName } = req.body
+    if (!filePath) return res.status(400).json({ error: 'filePath requis' })
+
+    const userId = req.user!.userId
+    const name = projectName || filename || 'Transcription linguistique'
+
+    const project = projectService.createProject(name, 'manual', userId)
+    projectService.saveProject(project.id, {
+      videoFiles: [], transcript: [], segments: [], audioPaths: [],
+      config: config || {}, timestamp: Date.now(), projectName: name,
+      toolType: 'linguistic',
+      linguisticItems: [{ filename: filename || 'audio', status: 'processing', filePath }]
+    })
+    projectService.updateProjectStatus(project.id, 'processing')
+
+    const taskConfig = {
+      filePath, filename,
+      whisperModel: config?.whisperModel || 'large-v3',
+      language: config?.language || 'fr',
+      whisperPrompt: config?.whisperPrompt || '',
+      numSpeakers: config?.numSpeakers || 10,
+      projectId: project.id,
+      leaderSpeaker: config?.leaderSpeaker || ''
+    }
+
+    const task = taskQueueService.enqueueTask(userId, 'linguistic', taskConfig)
+    res.json({ success: true, taskId: task.id, position: task.position, projectId: project.id })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Get linguistic transcription history
+app.get('/api/linguistic/history', requireAuth, (req, res) => {
+  res.json(getLinguisticHistory(req.user!.userId))
+})
+
+// Get linguistic transcription by id
+app.get('/api/linguistic/:id', requireAuth, (req, res) => {
+  const result = getLinguisticTranscription(req.params.id, req.user!.userId, req.user!.role)
+  if (!result) return res.status(404).json({ error: 'Transcription introuvable' })
+  res.json(result)
+})
+
+// Update a sequence (french text or variant IPA)
+app.patch('/api/linguistic/:id/sequence/:seqIdx', requireAuth, (req, res) => {
+  const seqIdx = parseInt(req.params.seqIdx, 10)
+  const result = updateLinguisticSequence(req.params.id, seqIdx, req.body)
+  if (!result) return res.status(404).json({ error: 'Sequence introuvable' })
+  res.json({ success: true, sequences: result })
+})
+
+// Update leader speaker
+app.patch('/api/linguistic/:id/leader', requireAuth, (req, res) => {
+  const { leader } = req.body
+  if (!leader) return res.status(400).json({ error: 'leader requis' })
+  updateLinguisticLeader(req.params.id, leader)
+  res.json({ success: true })
+})
+
+// Rename speaker globally
+app.patch('/api/linguistic/:id/rename-speaker', requireAuth, (req, res) => {
+  const { oldName, newName } = req.body
+  if (!oldName || !newName) return res.status(400).json({ error: 'oldName et newName requis' })
+  const result = renameLinguisticSpeaker(req.params.id, oldName, newName)
+  if (!result) return res.status(404).json({ error: 'Transcription introuvable' })
+  res.json(result)
+})
+
+// Delete linguistic transcription
+app.delete('/api/linguistic/:id', requireAuth, (req, res) => {
+  const ok = deleteLinguisticTranscription(req.params.id, req.user!.userId)
+  if (!ok) return res.status(404).json({ error: 'Transcription introuvable' })
+  res.json({ success: true })
+})
+
+// Export linguistic transcription
+app.get('/api/linguistic/:id/export', requireAuth, (req, res) => {
+  try {
+    const format = req.query.format as string || 'json'
+    const result = exportLinguistic(req.params.id, format)
+    res.setHeader('Content-Type', result.mime)
+    res.setHeader('Content-Disposition', `attachment; filename="linguistic.${result.ext}"`)
+    res.send(result.content)
+  } catch (err: any) { res.status(404).json({ error: err.message }) }
+})
+
+// Serve linguistic audio extract
+app.get('/api/linguistic/:id/audio/:filename', (req, res) => {
+  const token = req.headers.authorization?.slice(7) || (req.query.token as string)
+  if (!token) return res.status(401).json({ error: 'Authentification requise' })
+  try { authService.verifyToken(token) } catch { return res.status(401).json({ error: 'Token invalide' }) }
+
+  const DATA_DIR_L = process.env.DATA_DIR || join(process.cwd(), 'data')
+  const clipPath = join(DATA_DIR_L, 'linguistic', req.params.id, req.params.filename)
+  if (!existsSync(clipPath)) return res.status(404).json({ error: 'Fichier introuvable' })
+
+  res.setHeader('Content-Type', 'audio/wav')
+  createReadStream(clipPath).pipe(res)
 })
 
 // Project export (auth required)
