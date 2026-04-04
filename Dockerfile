@@ -34,12 +34,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
     python3-dev \
+    libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Installer faster-whisper dans un venv (avec support large-v3)
 RUN python3 -m venv /opt/whisper-venv \
     && /opt/whisper-venv/bin/pip install --no-cache-dir faster-whisper \
-    && /opt/whisper-venv/bin/pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu128
+    && /opt/whisper-venv/bin/pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu128 \
+    && /opt/whisper-venv/bin/pip install --no-cache-dir speechbrain scikit-learn soundfile \
+    && /opt/whisper-venv/bin/pip install --no-cache-dir allosaurus \
+    && /opt/whisper-venv/bin/pip install --no-cache-dir whisperx
 ENV PATH="/opt/whisper-venv/bin:$PATH"
 
 # Installer Docker CLI (pour self-rebuild)

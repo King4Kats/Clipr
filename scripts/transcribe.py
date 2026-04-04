@@ -88,7 +88,9 @@ def main():
                 'id': i,
                 'start': round(segment.start, 2),
                 'end': round(segment.end, 2),
-                'text': segment.text.strip()
+                'text': segment.text.strip(),
+                'avg_logprob': round(segment.avg_logprob, 3) if hasattr(segment, 'avg_logprob') else None,
+                'no_speech_prob': round(segment.no_speech_prob, 3) if hasattr(segment, 'no_speech_prob') else None
             }
             segments_list.append(seg_data)
 

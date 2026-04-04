@@ -118,4 +118,57 @@ function initSchema() {
     db.exec('ALTER TABLE projects ADD COLUMN user_id TEXT REFERENCES users(id)')
     logger.info('Migration: added user_id column to projects')
   }
+
+  // Migration: expand task_queue.type CHECK to include 'linguistic'
+  try {
+    db.prepare("INSERT INTO task_queue (id, user_id, type, status, config, created_at) VALUES ('__test_ling', '__test', 'linguistic', 'cancelled', '{}', datetime('now'))").run()
+    db.prepare("DELETE FROM task_queue WHERE id = '__test_ling'").run()
+  } catch {
+    logger.info('Migration: expanding task_queue type constraint to include linguistic...')
+    db.pragma('foreign_keys = OFF')
+    db.exec(`
+      DROP TABLE IF EXISTS task_queue_new;
+      CREATE TABLE task_queue_new (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('analysis', 'transcription', 'linguistic')),
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+        project_id TEXT,
+        config TEXT NOT NULL DEFAULT '{}',
+        result TEXT,
+        progress INTEGER NOT NULL DEFAULT 0,
+        progress_message TEXT,
+        position INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        started_at TEXT,
+        completed_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      INSERT INTO task_queue_new SELECT * FROM task_queue;
+      DROP TABLE task_queue;
+      ALTER TABLE task_queue_new RENAME TO task_queue;
+      CREATE INDEX IF NOT EXISTS idx_task_queue_status ON task_queue(status);
+      CREATE INDEX IF NOT EXISTS idx_task_queue_user ON task_queue(user_id);
+    `)
+    db.pragma('foreign_keys = ON')
+    logger.info('Migration: task_queue type constraint updated')
+  }
+
+  // Linguistic transcriptions table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS linguistic_transcriptions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      leader_speaker TEXT NOT NULL DEFAULT '',
+      sequences TEXT NOT NULL DEFAULT '[]',
+      speakers TEXT NOT NULL DEFAULT '[]',
+      duration REAL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (task_id) REFERENCES task_queue(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_linguistic_user ON linguistic_transcriptions(user_id);
+  `)
 }

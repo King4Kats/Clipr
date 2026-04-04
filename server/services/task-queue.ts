@@ -10,7 +10,7 @@ import { getDb } from './database.js'
 import { randomUUID } from 'crypto'
 import { logger } from '../logger.js'
 
-export type TaskType = 'analysis' | 'transcription'
+export type TaskType = 'analysis' | 'transcription' | 'linguistic'
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface QueueTask {
