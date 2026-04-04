@@ -2,6 +2,7 @@
   "name": "clipr",
   "version": "2.0.0",
   "description": "Clipr — Decoupage intelligent de videos par IA locale",
+  "license": "GPL-3.0-only",
   "scripts": {
     "dev:client": "vite",
     "dev:server": "npx tsx --watch server/index.ts",
