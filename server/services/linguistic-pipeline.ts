@@ -109,35 +109,136 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     throw new Error('Classification de langue echouee')
   }
 
-  const frBlocks = classifiedBlocks.filter((b: any) => b.is_french)
+  let frBlocks = classifiedBlocks.filter((b: any) => b.is_french)
   const vernBlocks = classifiedBlocks.filter((b: any) => !b.is_french)
   logger.info(`[Linguistic] Lang-id : ${frBlocks.length} blocs FR, ${vernBlocks.length} blocs vernaculaires`)
 
-  // ── Step 4 : Construire les sequences par la LANGUE (pas par le gap) ──
-  // Chaque bloc FR = debut d'une nouvelle sequence
-  // Les blocs vernaculaires qui suivent = variantes
+  // ── Step 3.5 : VALIDATION FR — Whisper + Ollama anti-hallucination ──
+  broadcastFn(userId, null, 'linguistic:progress', {
+    taskId: task.id, step: 'transcribing', progress: 0, message: 'Validation des blocs francais...'
+  })
+
+  // Whisper batch sur tous les blocs FR candidats
+  const tempDir = join(DATA_DIR, 'temp')
+  const frCandidateClips: { id: string; audioPath: string }[] = []
+
+  for (let i = 0; i < frBlocks.length; i++) {
+    const block = frBlocks[i]
+    const clipPath = join(tempDir, `ling_validate_${task.id}_${i}.wav`)
+    try {
+      execSync(`ffmpeg -y -i "${audioPath}" -ss ${block.start} -to ${block.end} -ar 16000 -ac 1 "${clipPath}" 2>/dev/null`)
+      frCandidateClips.push({ id: `validate_${i}`, audioPath: clipPath })
+    } catch {}
+  }
+
+  await whisperService.loadWhisperModel(whisperModel)
+  const validateResults = await whisperService.transcribeBatch(
+    frCandidateClips, language,
+    (percent) => {
+      broadcastFn(userId, null, 'linguistic:progress', {
+        taskId: task.id, step: 'transcribing', progress: Math.round(percent * 0.3),
+        message: `Validation FR (${frCandidateClips.length} blocs)...`
+      })
+      updateTaskProgress(task.id, 25 + percent * 0.10, 'Validation FR')
+    }
+  )
+
+  // Nettoyer clips
+  for (const clip of frCandidateClips) { try { unlinkSync(clip.audioPath) } catch {} }
+
+  // Stocker le texte Whisper dans chaque bloc FR
+  for (let i = 0; i < frBlocks.length; i++) {
+    const segs = validateResults.get(`validate_${i}`)
+    frBlocks[i].whisper_text = segs && segs.length > 0
+      ? segs.map((s: any) => s.text).join(' ').trim()
+      : ''
+  }
+
+  // Ollama : verifier si chaque texte FR est du francais coherent
+  broadcastFn(userId, null, 'linguistic:progress', {
+    taskId: task.id, step: 'transcribing', progress: 30, message: 'Verification coherence (Ollama)...'
+  })
+
+  const textsToValidate = frBlocks.map((b: any) => b.whisper_text).filter((t: string) => t.length > 0)
+  const allTexts = frBlocks.map((b: any, i: number) => `${i+1}. "${b.whisper_text}"`).join('\n')
+
+  try {
+    const ollamaModel = config.ollamaModel || 'llama3.1'
+    const prompt = `Tu analyses une liste de phrases transcrites depuis un audio. Certaines sont du VRAI francais (phrases coherentes), d'autres sont des HALLUCINATIONS de Whisper sur du patois/dialecte (charabia, noms etranges, phrases sans sens).
+
+${allTexts}
+
+Pour chaque numero, reponds UNIQUEMENT "FR" (vrai francais coherent) ou "FAUX" (hallucination/charabia).
+Format: un par ligne, juste le numero et FR ou FAUX.
+Exemple:
+1. FR
+2. FAUX
+3. FR`
+
+    const ollamaResponse = await ollamaGenerate(ollamaModel, prompt)
+
+    // Parser la reponse Ollama
+    const lines = ollamaResponse.split('\n')
+    for (const line of lines) {
+      const match = line.match(/(\d+)\.\s*(FR|FAUX)/i)
+      if (match) {
+        const idx = parseInt(match[1]) - 1
+        const isFR = match[2].toUpperCase() === 'FR'
+        if (idx >= 0 && idx < frBlocks.length) {
+          if (!isFR) {
+            // Reclasser en vernaculaire
+            frBlocks[idx].is_french = false
+            frBlocks[idx].validated = false
+            logger.info(`[Linguistic] Bloc ${idx} reclasse vernaculaire: "${frBlocks[idx].whisper_text?.substring(0, 40)}"`)
+          } else {
+            frBlocks[idx].validated = true
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    logger.warn(`[Linguistic] Ollama validation echouee: ${err.message}. On garde tous les blocs FR.`)
+  }
+
+  // Mettre a jour classifiedBlocks avec les reclassifications
+  const validFrCount = frBlocks.filter((b: any) => b.is_french).length
+  const reclassifiedCount = frBlocks.filter((b: any) => !b.is_french).length
+  logger.info(`[Linguistic] Validation : ${validFrCount} FR confirmes, ${reclassifiedCount} reclasses en vernaculaire`)
+
+  updateTaskProgress(task.id, 35, 'Sequences')
+
+  // ── Step 4 : Construire les sequences par la LANGUE VALIDEE ──
+  broadcastFn(userId, null, 'linguistic:progress', {
+    taskId: task.id, step: 'segmenting', progress: 0, message: 'Construction des sequences...'
+  })
+
   let sequences: LinguisticSequence[] = []
   let currentSeq: LinguisticSequence | null = null
 
   for (const block of classifiedBlocks) {
     if (block.is_french) {
-      // Bloc FR = nouvelle sequence
+      // Bloc FR valide = nouvelle sequence
       if (currentSeq) sequences.push(currentSeq)
       currentSeq = {
         id: randomUUID(),
         index: sequences.length,
-        french_text: '',
+        french_text: block.whisper_text || '',
         french_audio: { start: block.start, end: block.end },
         variants: []
       }
-    } else if (currentSeq && block.end - block.start >= 1.0) {
-      // Bloc vernaculaire = variante de la sequence courante
-      currentSeq.variants.push({
-        speaker: 'LOCUTEUR',
-        ipa: '',
-        ipa_original: '',
-        audio: { start: block.start, end: block.end }
-      })
+    } else if (currentSeq) {
+      // Bloc vernaculaire ou FR reclasse
+      // Ignorer les blocs trop courts (<1s) sauf si type='name' (prenom)
+      const dur = block.end - block.start
+      if (dur >= 1.0 || block.type === 'name') {
+        currentSeq.variants.push({
+          speaker: 'LOCUTEUR',
+          ipa: '',
+          ipa_original: '',
+          audio: { start: block.start, end: block.end },
+          ...(block.type === 'name' ? { _isName: true } : {})
+        } as any)
+      }
     }
   }
   if (currentSeq) sequences.push(currentSeq)
@@ -147,51 +248,21 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
 
   logger.info(`[Linguistic] ${sequences.length} sequences, ${sequences.reduce((s, q) => s + q.variants.length, 0)} variantes`)
 
-  // ── Step 5 : Whisper batch sur les blocs FR → texte ──
-  broadcastFn(userId, null, 'linguistic:progress', {
-    taskId: task.id, step: 'transcribing', progress: 0, message: 'Transcription francais...'
-  })
+  // Le texte FR est deja rempli par Whisper (step 3.5)
+  // Pas besoin de refaire Whisper ici
 
-  const tempDir = join(DATA_DIR, 'temp')
-  const frClips: { id: string; audioPath: string }[] = []
+  updateTaskProgress(task.id, 40, 'IPA')
 
-  for (let si = 0; si < sequences.length; si++) {
-    const seq = sequences[si]
-    const clipPath = join(tempDir, `ling_fr_${task.id}_${si}.wav`)
-    try {
-      execSync(`ffmpeg -y -i "${audioPath}" -ss ${seq.french_audio.start} -to ${seq.french_audio.end} -ar 16000 -ac 1 "${clipPath}" 2>/dev/null`)
-      frClips.push({ id: `fr_${si}`, audioPath: clipPath })
-    } catch {}
-  }
-
-  await whisperService.loadWhisperModel(whisperModel)
-  const frResults = await whisperService.transcribeBatch(
-    frClips, language,
-    (percent) => {
-      broadcastFn(userId, null, 'linguistic:progress', {
-        taskId: task.id, step: 'transcribing', progress: percent, message: `Transcription FR (${frClips.length} phrases)...`
-      })
-      updateTaskProgress(task.id, 30 + percent * 0.15, 'Transcription FR')
-    }
-  )
-
-  for (const clip of frClips) { try { unlinkSync(clip.audioPath) } catch {} }
-  for (let si = 0; si < sequences.length; si++) {
-    const segs = frResults.get(`fr_${si}`)
-    sequences[si].french_text = segs && segs.length > 0
-      ? segs.map(s => s.text).join(' ').trim()
-      : '(transcription echouee)'
-  }
-
-  updateTaskProgress(task.id, 45, 'IPA')
-
-  // ── Step 7 : Allosaurus IPA sur les variantes ──
+  // ── Step 5 : Allosaurus IPA sur les variantes (PAS les blocs 'name') ──
   broadcastFn(userId, null, 'linguistic:progress', {
     taskId: task.id, step: 'phonetizing', progress: 0, message: 'Transcription phonetique (IPA)...'
   })
 
+  // Filtrer : IPA seulement sur les variantes qui ne sont PAS des noms
   const ipaSegments = sequences.flatMap((seq, si) =>
-    seq.variants.map((v, vi) => ({ id: `${si}_${vi}`, start: v.audio.start, end: v.audio.end }))
+    seq.variants
+      .map((v: any, vi: number) => ({ id: `${si}_${vi}`, start: v.audio.start, end: v.audio.end, isName: v._isName }))
+      .filter((s: any) => !s.isName)
   )
 
   if (ipaSegments.length > 0) {
@@ -375,6 +446,34 @@ function runPhonetize(audioPath: string, segments: { id: string; start: number; 
     proc.stdout?.on('data', d => { stdout += d.toString() })
     proc.on('close', code => { try { unlinkSync(segP) } catch {} try { execSync('sleep 2') } catch {} if (code === 0) { try { const r = JSON.parse(stdout.trim()); if (Array.isArray(r)) { resolve(r); return } } catch {} try { if (existsSync(outP)) { const d = JSON.parse(readFileSync(outP, 'utf-8')); try { unlinkSync(outP) } catch {} resolve(d); return } } catch {} } resolve(segments.map(s => ({ id: s.id, ipa: '' }))) })
     proc.on('error', () => resolve(segments.map(s => ({ id: s.id, ipa: '' }))))
+  })
+}
+
+// ── Ollama helper ──
+const OLLAMA_HOST = process.env.OLLAMA_HOST || 'ollama'
+const OLLAMA_PORT = parseInt(process.env.OLLAMA_PORT || '11434')
+
+function ollamaGenerate(model: string, prompt: string): Promise<string> {
+  const http = require('http')
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ model, prompt, stream: false })
+    const req = http.request({
+      hostname: OLLAMA_HOST, port: OLLAMA_PORT,
+      path: '/api/generate', method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      timeout: 180000
+    }, (res: any) => {
+      let data = ''
+      res.on('data', (chunk: string) => { data += chunk })
+      res.on('end', () => {
+        try { resolve(JSON.parse(data).response || '') }
+        catch { reject(new Error('Reponse Ollama invalide')) }
+      })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => { req.destroy(); reject(new Error('Ollama timeout')) })
+    req.write(body)
+    req.end()
   })
 }
 

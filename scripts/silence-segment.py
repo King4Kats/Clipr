@@ -102,38 +102,42 @@ def main():
                 'end': round(block_end, 2)
             })
 
-    # Grouper les blocs en paires "nom + vernaculaire"
-    # Un bloc court (< 1.5s) suivi d'un bloc plus long avec un petit gap = meme intervenant
-    # Le bloc court = prenom nom, le bloc long = phrase vernaculaire
+    # Garder tous les blocs separes, mais tagger les paires nom+vernaculaire
+    # Un bloc court (< 1.5s) suivi d'un bloc plus long avec petit gap = nom puis vernaculaire
     speech_blocks = []
     i = 0
+    pair_id = 0
     while i < len(raw_blocks):
         block = raw_blocks[i]
         dur = block['end'] - block['start']
 
-        # Si bloc court ET suivi d'un autre bloc avec petit gap → paire nom+vernaculaire
         if dur < 1.5 and i + 1 < len(raw_blocks):
             next_block = raw_blocks[i + 1]
             gap = next_block['start'] - block['end']
             if gap < 1.5:
-                # Paire detectee : stocker comme bloc composite
+                # Paire detectee : 2 blocs distincts mais lies
                 speech_blocks.append({
                     'start': round(block['start'], 2),
-                    'end': round(next_block['end'], 2),
-                    'name_start': round(block['start'], 2),
-                    'name_end': round(block['end'], 2),
-                    'speech_start': round(next_block['start'], 2),
-                    'speech_end': round(next_block['end'], 2),
-                    'has_name': True
+                    'end': round(block['end'], 2),
+                    'type': 'name',          # bloc court = prenom nom
+                    'pair_id': pair_id
                 })
+                speech_blocks.append({
+                    'start': round(next_block['start'], 2),
+                    'end': round(next_block['end'], 2),
+                    'type': 'speech',        # bloc long = phrase vernaculaire
+                    'pair_id': pair_id
+                })
+                pair_id += 1
                 i += 2
                 continue
 
-        # Bloc normal (pas de paire)
+        # Bloc normal (pas de paire detectee)
         speech_blocks.append({
             'start': round(block['start'], 2),
             'end': round(block['end'], 2),
-            'has_name': False
+            'type': 'unknown',
+            'pair_id': -1
         })
         i += 1
 
