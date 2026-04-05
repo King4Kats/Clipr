@@ -61,6 +61,9 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
   useEffect(() => {
     if (!initialProject) return
 
+    // Recuperer le filePath original depuis les donnees du projet
+    const origPath = initialProject.data?.linguisticItems?.[0]?.filePath || initialProject.data?.filePath || ''
+
     if (initialProject.data?.linguisticId) {
       // Projet termine → charger les resultats
       api.getLinguistic(initialProject.data.linguisticId).then((result: any) => {
@@ -68,12 +71,12 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
         setSequences(result.sequences || [])
         setSpeakers(result.speakers || [])
         setLeaderSpeaker(result.leader_speaker || '')
-        setUploadedFile({ path: '', name: result.filename, duration: result.duration || 0 })
+        setUploadedFile({ path: origPath, name: result.filename, duration: result.duration || 0 })
         setStatus('done')
       }).catch(() => {})
     } else if (initialProject.status === 'processing') {
-      // Projet en cours → retrouver la tache et suivre la progression
-      setUploadedFile({ path: '', name: initialProject.name || 'Audio', duration: 0 })
+      // Projet en cours
+      setUploadedFile({ path: origPath, name: initialProject.name || 'Audio', duration: 0 })
       setStatus('transcribing')
       setProgressMessage('Traitement en cours...')
       // Chercher le taskId dans la queue pour ce projet
