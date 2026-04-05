@@ -164,16 +164,22 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
 
   try {
     const ollamaModel = config.ollamaModel || 'llama3.1'
-    const prompt = `Tu analyses une liste de phrases transcrites depuis un audio. Certaines sont du VRAI francais (phrases coherentes), d'autres sont des HALLUCINATIONS de Whisper sur du patois/dialecte (charabia, noms etranges, phrases sans sens).
+    const prompt = `Tu analyses une liste de phrases transcrites depuis un enregistrement audio de collectage linguistique. Un meneur dit des phrases en francais, puis des intervenants repetent en patois/dialecte.
+
+Whisper a transcrit TOUS les blocs audio. Certains sont du VRAI francais du meneur (phrases coherentes, descriptions d'objets ou d'actions du quotidien). D'autres sont des HALLUCINATIONS de Whisper sur du patois (charabia, mots inventes, phrases sans sens).
+
+Indices pour identifier les FAUX :
+- Si la phrase commence par un prenom/nom de personne ("Pierre Billet...", "Yvette Raballand...", "Renaud Dinorne...") c'est probablement un intervenant qui parle en patois, pas le meneur → FAUX
+- Si la phrase contient des mots inventes ou du charabia → FAUX
+- Si la phrase est une vraie description en francais courant (ex: "Elle se sert de l'entonnoir de cuisine") → FR
+- Les phrases du meneur decrivent des objets, des ustensiles, des actions domestiques
 
 ${allTexts}
 
-Pour chaque numero, reponds UNIQUEMENT "FR" (vrai francais coherent) ou "FAUX" (hallucination/charabia).
-Format: un par ligne, juste le numero et FR ou FAUX.
-Exemple:
+Pour chaque numero, reponds UNIQUEMENT "FR" ou "FAUX".
+Format strict, un par ligne :
 1. FR
-2. FAUX
-3. FR`
+2. FAUX`
 
     const ollamaResponse = await ollamaGenerate(ollamaModel, prompt)
 
