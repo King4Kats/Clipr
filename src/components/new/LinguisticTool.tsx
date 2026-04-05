@@ -399,6 +399,19 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
               )}
             </div>
             <div className="flex gap-2">
+              {uploadedFile && (
+                <Button variant="outline" size="sm" className="text-xs gap-1.5"
+                  onClick={() => {
+                    setStatus('idle')
+                    setSequences([])
+                    setSpeakers([])
+                    setLinguisticId(null)
+                    setProgress(0)
+                    setTaskId(null)
+                  }}>
+                  <RotateCcw className="w-3.5 h-3.5" /> Relancer
+                </Button>
+              )}
               {linguisticId && (
                 <>
                   <a href={api.getLinguisticExportUrl(linguisticId, 'json')} download>
