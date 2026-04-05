@@ -206,10 +206,32 @@ Format strict, un par ligne :
     logger.warn(`[Linguistic] Ollama validation echouee: ${err.message}. On garde tous les blocs FR.`)
   }
 
-  // Mettre a jour classifiedBlocks avec les reclassifications
-  const validFrCount = frBlocks.filter((b: any) => b.is_french).length
-  const reclassifiedCount = frBlocks.filter((b: any) => !b.is_french).length
-  logger.info(`[Linguistic] Validation : ${validFrCount} FR confirmes, ${reclassifiedCount} reclasses en vernaculaire`)
+  // Mettre a jour classifiedBlocks avec les reclassifications Ollama
+  let validFrCount = frBlocks.filter((b: any) => b.is_french).length
+  let reclassifiedCount = frBlocks.filter((b: any) => !b.is_french).length
+  logger.info(`[Linguistic] Validation Ollama : ${validFrCount} FR confirmes, ${reclassifiedCount} reclasses`)
+
+  // ── Step 3.7 : Regle des FR consecutifs ──
+  // Si plusieurs blocs FR se suivent sans bloc vernaculaire entre eux,
+  // seul le PREMIER est le vrai meneur. Les suivants = vernaculaire mal classe.
+  // Le meneur dit UNE phrase puis les intervenants parlent en vernaculaire.
+  let lastWasFr = false
+  for (const block of classifiedBlocks) {
+    if (block.is_french) {
+      if (lastWasFr) {
+        // Deuxieme FR consecutif → reclasser en vernaculaire
+        block.is_french = false
+        block.reclassified_consecutive = true
+        reclassifiedCount++
+        validFrCount--
+      }
+      lastWasFr = true
+    } else {
+      lastWasFr = false
+    }
+  }
+
+  logger.info(`[Linguistic] Apres regle consecutifs : ${validFrCount} FR, ${reclassifiedCount} reclasses total`)
 
   updateTaskProgress(task.id, 35, 'Sequences')
 
