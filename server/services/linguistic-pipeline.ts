@@ -73,46 +73,81 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     })
   }
 
-  // ── Step 2 : Silence detect → blocs de parole + sequences ──
+  // ── Step 2 : Silence detect → blocs de parole ──
   broadcastFn(userId, null, 'linguistic:progress', {
-    taskId: task.id, step: 'segmenting', progress: 0, message: 'Detection des silences et segmentation...'
+    taskId: task.id, step: 'segmenting', progress: 0, message: 'Detection des silences...'
   })
 
   const silenceResult = await runSilenceSegment(audioPath, (percent) => {
     broadcastFn(userId, null, 'linguistic:progress', {
       taskId: task.id, step: 'segmenting', progress: percent, message: 'Segmentation par silences...'
     })
-    updateTaskProgress(task.id, 5 + percent * 0.10, 'Segmentation')
+    updateTaskProgress(task.id, 5 + percent * 0.05, 'Segmentation')
   })
 
-  if (!silenceResult || silenceResult.sequences.length === 0) {
-    throw new Error('Aucune sequence detectee')
+  if (!silenceResult || silenceResult.speech_blocks.length === 0) {
+    throw new Error('Aucun bloc de parole detecte')
   }
 
-  logger.info(`[Linguistic] Silence detect : ${silenceResult.sequences.length} sequences, ${silenceResult.speech_blocks.length} blocs`)
+  const speechBlocks = silenceResult.speech_blocks
+  const duration = silenceResult.stats?.total_duration || 0
+  logger.info(`[Linguistic] ${speechBlocks.length} blocs de parole`)
 
-  // Construire les sequences : le silence detect a deja identifie
-  // le premier bloc de chaque groupe comme meneur
-  let sequences: LinguisticSequence[] = silenceResult.sequences.map((seq: any, i: number) => ({
-    id: randomUUID(),
-    index: i,
-    french_text: '',
-    french_audio: { start: seq.leader.start, end: seq.leader.end },
-    variants: seq.variants.map((v: any) => ({
-      speaker: 'LOCUTEUR',
-      ipa: '',
-      ipa_original: '',
-      audio: { start: v.start, end: v.end }
-    }))
-  }))
+  // ── Step 3 : Detection de langue sur chaque bloc (FR vs vernaculaire) ──
+  broadcastFn(userId, null, 'linguistic:progress', {
+    taskId: task.id, step: 'diarizing', progress: 0, message: 'Detection de langue (FR / vernaculaire)...'
+  })
+
+  const classifiedBlocks = await runLangClassify(audioPath, speechBlocks, (percent) => {
+    broadcastFn(userId, null, 'linguistic:progress', {
+      taskId: task.id, step: 'diarizing', progress: percent, message: 'Classification linguistique...'
+    })
+    updateTaskProgress(task.id, 10 + percent * 0.15, 'Detection langue')
+  })
+
+  if (!classifiedBlocks || classifiedBlocks.length === 0) {
+    throw new Error('Classification de langue echouee')
+  }
+
+  const frBlocks = classifiedBlocks.filter((b: any) => b.is_french)
+  const vernBlocks = classifiedBlocks.filter((b: any) => !b.is_french)
+  logger.info(`[Linguistic] Lang-id : ${frBlocks.length} blocs FR, ${vernBlocks.length} blocs vernaculaires`)
+
+  // ── Step 4 : Construire les sequences par la LANGUE (pas par le gap) ──
+  // Chaque bloc FR = debut d'une nouvelle sequence
+  // Les blocs vernaculaires qui suivent = variantes
+  let sequences: LinguisticSequence[] = []
+  let currentSeq: LinguisticSequence | null = null
+
+  for (const block of classifiedBlocks) {
+    if (block.is_french) {
+      // Bloc FR = nouvelle sequence
+      if (currentSeq) sequences.push(currentSeq)
+      currentSeq = {
+        id: randomUUID(),
+        index: sequences.length,
+        french_text: '',
+        french_audio: { start: block.start, end: block.end },
+        variants: []
+      }
+    } else if (currentSeq && block.end - block.start >= 1.0) {
+      // Bloc vernaculaire = variante de la sequence courante
+      currentSeq.variants.push({
+        speaker: 'LOCUTEUR',
+        ipa: '',
+        ipa_original: '',
+        audio: { start: block.start, end: block.end }
+      })
+    }
+  }
+  if (currentSeq) sequences.push(currentSeq)
 
   sequences = sequences.filter(s => s.variants.length >= 1)
   sequences.forEach((s, i) => s.index = i)
 
-  const duration = silenceResult.stats?.total_duration || 0
   logger.info(`[Linguistic] ${sequences.length} sequences, ${sequences.reduce((s, q) => s + q.variants.length, 0)} variantes`)
 
-  // ── Step 6 : Whisper batch sur les blocs meneur → texte FR ──
+  // ── Step 5 : Whisper batch sur les blocs FR → texte ──
   broadcastFn(userId, null, 'linguistic:progress', {
     taskId: task.id, step: 'transcribing', progress: 0, message: 'Transcription francais...'
   })
@@ -232,6 +267,58 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
 }
 
 // ── Helpers spawn ──
+
+function runLangClassify(
+  audioPath: string,
+  blocks: Array<{ start: number; end: number }>,
+  onProgress: (p: number) => void
+): Promise<any[] | null> {
+  return new Promise((resolve) => {
+    const script = join(process.cwd(), 'scripts', 'lang-classify.py')
+    if (!existsSync(script)) { logger.error('lang-classify.py introuvable'); resolve(null); return }
+
+    const ts = Date.now()
+    const blocksPath = join(DATA_DIR, 'temp', `langblocks_${ts}.json`)
+    const outPath = join(DATA_DIR, 'temp', `langresult_${ts}.json`)
+
+    writeFileSync(blocksPath, JSON.stringify(blocks), 'utf-8')
+
+    const proc = spawn('python3', [script, audioPath, '--blocks', blocksPath, '--output', outPath],
+      { stdio: ['pipe', 'pipe', 'pipe'] })
+
+    let stdout = ''
+
+    proc.stderr?.on('data', (d) => {
+      for (const l of d.toString().split('\n')) {
+        if (l.startsWith('PROGRESS:')) { const p = parseInt(l.replace('PROGRESS:', '').trim()); if (!isNaN(p)) onProgress(p) }
+        else if (l.startsWith('STATUS:')) logger.info('[LangClassify]', l.trim())
+        else if (l.startsWith('ERROR:')) logger.error('[LangClassify]', l.trim())
+      }
+    })
+
+    proc.stdout?.on('data', (d) => { stdout += d.toString() })
+
+    proc.on('close', (code) => {
+      try { unlinkSync(blocksPath) } catch {}
+      try { execSync('sleep 2') } catch {}
+
+      if (code === 0) {
+        try { const r = JSON.parse(stdout.trim()); if (Array.isArray(r)) { resolve(r); return } } catch {}
+        try {
+          if (existsSync(outPath)) {
+            const d = JSON.parse(readFileSync(outPath, 'utf-8'))
+            try { unlinkSync(outPath) } catch {}
+            resolve(d); return
+          }
+        } catch {}
+      }
+      logger.error(`[LangClassify] Code sortie ${code}`)
+      resolve(null)
+    })
+
+    proc.on('error', () => resolve(null))
+  })
+}
 
 function runSilenceSegment(audioPath: string, onProgress: (p: number) => void): Promise<any | null> {
   return new Promise((resolve) => {
