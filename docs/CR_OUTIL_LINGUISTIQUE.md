@@ -1,219 +1,232 @@
 # Compte-rendu — Outil de Transcription Linguistique
+## Derniere mise a jour : 4 avril 2026
+
+---
 
 ## Cahier des charges
 
 ### Objectif
-Documenter les langues vernaculaires (patois, dialectes locaux) en transcrivant des enregistrements audio structurés.
+Documenter les langues vernaculaires (patois, dialectes locaux) en transcrivant des enregistrements audio structures.
 
 ### Format des enregistrements
 - Un **meneur** dit une phrase en **francais standard**
 - **1 a 9 personnes** repetent cette phrase dans leur **langue vernaculaire**
 - Chaque intervenant dit son **prenom nom** avant de prononcer la phrase
-- Le nombre d'intervenants varie selon les phrases
+- Le nombre d'intervenants varie selon les phrases (certains n'interviennent pas)
 - Le meneur est **toujours le premier a parler** dans le fichier
+- Le meneur ne dit JAMAIS son nom, il enchaine les phrases
 - Duree typique : 30min a 2h+
-- ~10 phrases par session (variable)
-- 3-5 secondes par intervention (nom + vernaculaire)
+- Interventions de 3-5 secondes (nom ~1s + vernaculaire ~2-4s)
 - Format audio : WAV (test), supporte aussi MP4, MTS, etc.
 
 ### Dialecte de test
-Maraichin (dialecte d'oil, Vendee/Marais poitevin). Pas de modele Whisper fine-tune existant. Pas d'orthographe standardisee — l'IPA phonetique est la seule transcription fiable.
+Maraichin (dialecte d'oil, Vendee/Marais poitevin). Pas d'orthographe standardisee — l'IPA phonetique est la seule transcription fiable.
 
-### Resultats attendus
-Pour chaque phrase :
-- Le **texte francais** (transcription Whisper du meneur)
-- Pour chaque intervenant : **transcription IPA** de la partie vernaculaire + **extrait audio** + **identification du locuteur**
-
-### Interface
-- Edition du texte francais, de l'IPA, des noms de speakers
-- Lecture audio par variante
-- Export JSON/CSV
+### Resultats attendus par sequence
+- Le **texte francais** du meneur (transcription Whisper)
+- Pour chaque intervenant :
+  - **Prenom/nom** (separe de la phrase vernaculaire)
+  - **Transcription IPA** de la partie vernaculaire uniquement
+  - **Extrait audio** individuel
+- Le tout editable manuellement dans l'interface
 
 ---
 
-## Pipeline actuel (fonctionnel)
+## Pipeline actuel (v2 — lang-id + Ollama)
 
 ```
-Audio
-  |
-  v
-WhisperX (Whisper + pyannote + alignement mot par mot)
-  → 360 segments avec texte + speaker + timestamps
-  → 10 speakers identifies
-  |
-  v
-Identification meneur = premier speaker du fichier (SPEAKER_06)
-  |
-  v
-Construction des tours de parole
-  → Groupement segments contigus du meme speaker
-  → 299 tours
-  |
-  v
-Segmentation en sequences
-  → Chaque tour du meneur = nouvelle sequence FR
-  → Autres tours = variantes vernaculaires
-  → Filtrage sequences < 2 variantes
-  → 16 sequences, 260 variantes
-  |
-  v
-Allosaurus IPA sur chaque variante
-  → Transcription phonetique universelle
-  |
-  v
-FFmpeg extraction clips audio par variante
-  |
-  v
-Save DB + WebSocket complete
+AUDIO
+  │
+  ▼
+Step 1 : FFmpeg extraction audio (si video)
+  │
+  ▼
+Step 2 : SILENCE DETECT (silence-segment.py)
+  │  FFmpeg silencedetect (seuil -35dB, 0.3s)
+  │  Produit ~392 blocs de parole bruts
+  │  Blocs courts (<1.5s) tagges "name", longs tagges "speech"
+  │  Paires nom+vernaculaire detectees mais PAS fusionnees
+  │  GPU: NON
+  │
+  ▼
+Step 3 : DETECTION DE LANGUE (lang-classify.py)
+  │  SpeechBrain lang-id-voxlingua107-ecapa
+  │  Classifie chaque bloc : FR (is_french=true) ou vernaculaire
+  │  Resultat typique : ~71 blocs FR, ~321 vernaculaires
+  │  GPU: OUI → libere apres
+  │
+  ▼
+Step 3.5 : VALIDATION FR (Whisper + Ollama)
+  │  Whisper batch (large-v3) transcrit tous les blocs FR candidats
+  │  Ollama verifie la coherence du texte :
+  │    - Phrases coherentes en francais courant → FR
+  │    - Charabia, noms de personnes au debut → FAUX (reclasse vernaculaire)
+  │  Resultat : ~76 FR → Ollama filtre → ~76 (Ollama ne filtre pas assez)
+  │
+  ▼
+Step 3.7 : REGLE FR CONSECUTIFS
+  │  Si plusieurs blocs FR se suivent sans vernaculaire entre eux,
+  │  seul le PREMIER est le meneur. Les suivants = vernaculaire mal classe.
+  │  Resultat : 76 → 63 blocs FR
+  │  GPU: NON
+  │
+  ▼
+Step 4 : CONSTRUCTION SEQUENCES
+  │  Chaque bloc FR valide = nouvelle sequence
+  │  Blocs vernaculaires suivants = variantes
+  │  Filtre : sequences avec < 1 variante supprimees
+  │  Resultat : 63 sequences, ~313 variantes
+  │
+  ▼
+Step 5 : ALLOSAURUS IPA (phonetize.py)
+  │  Transcription IPA sur les blocs vernaculaires (pas les noms)
+  │  GPU: OUI → libere apres
+  │
+  ▼
+Step 6 : EXTRACTION CLIPS (FFmpeg asynchrone, lots de 5)
+  │  1 clip FR + N clips variantes par sequence
+  │  Asynchrone pour ne pas bloquer le serveur
+  │
+  ▼
+Step 7 : SAVE DB + WebSocket linguistic:complete
 ```
 
-### Technologies
-| Composant | Technologie | Role |
-|-----------|-------------|------|
-| Transcription | Whisper large-v3 (via WhisperX) | Transcription du francais |
-| Diarisation | pyannote 3.1 (via WhisperX) | Identification des locuteurs |
-| Alignement | WhisperX align | Timestamps mot par mot |
-| IPA | Allosaurus | Transcription phonetique universelle |
-| Audio | FFmpeg | Extraction, decoupe, conversion |
-| GPU | NVIDIA CUDA 12.8 | Acceleration (pipeline sequentiel) |
-| DB | SQLite | Stockage sequences + IPA |
-| API | Express.js | Endpoints REST + WebSocket |
+### Modeles IA (sequentiels, jamais en parallele)
+| Step | Modele | Taille | GPU |
+|------|--------|--------|-----|
+| 2 | FFmpeg silencedetect | - | Non |
+| 3 | SpeechBrain lang-id-voxlingua107-ecapa | ~300MB | Oui |
+| 3.5 | Whisper large-v3 (faster-whisper) | ~5GB | Oui |
+| 3.5 | Ollama (qwen2.5:14b ou llama3.1) | ~9GB | Via Ollama |
+| 5 | Allosaurus | ~100MB | Oui |
 
 ---
 
-## Historique des approches testees
+## Resultats du dernier test (4 avril 2026)
 
-### Piste 1 : Whisper sur tout + diarisation 2 speakers
-- Whisper transcrit TOUT l'audio en francais
-- Diarisation SpeechBrain a 2 speakers
-- **Resultat** : Whisper hallucine sur le vernaculaire ("Louis Hait", "Brugo Doni"), 2 speakers au lieu de 10, sequences geantes
-- **Verdict** : ECHEC
+- **Fichier** : 01.10.WAV (35min, maraichin, ~9 intervenants)
+- **Sequences produites** : 63
+- **Bonnes phrases FR identifiees** : ~20
+- **Faux positifs** : ~43 (vernaculaire classe comme FR)
 
-### Piste 2 : Diarisation 10 speakers + segmentation par texte Whisper
-- Diarisation forcee a 10 speakers
-- Whisper sur tout, distinction FR/vernaculaire par le texte
-- **Resultat** : Whisper ne distingue pas FR/vernaculaire, invente du francais pour tout
-- **Verdict** : ECHEC
+### Phrases correctement identifiees
+| Seq | Timing | Texte FR | Correct |
+|-----|--------|----------|---------|
+| 1 | 4-7s | "Elle se sert de l'entonnoir de cuisine" | ✅ |
+| 3 | 53-55s | "une ecumoire" | ✅ |
+| 6 | 153-156s | "Elle a mis le pote a vin sur la table" | ✅ |
+| 11 | 250-252s | "Elle a une cruche en terre" | ✅ |
+| 12 | 296-299s | "Il a rempli les quelles du chien" | ✅ |
+| 14 | 344-347s | "Elle a des tasses en terre allant au feu" | ✅ |
+| 15 | 375-378s | "Il a fait une grillee de pain pour le petit dejeuner" | ✅ |
+| 18 | 524-526s | "Une casserole sur le feu" | ✅ |
+| 28 | 922-924s | "Elle se sert de la louche" | ✅ |
+| 30 | 972-976s | "Il vide son assiette de soupe a petits coups de cuillere" | ✅ |
+| 35 | 1082-1084s | "Il a un vieux couteau" | ✅ |
+| 37 | 1134-1136s | "Il se sert d'un couteau hachoir" | ✅ |
+| 39 | 1178-1179s | "La lame de couteau" | ✅ |
+| 43 | 1299-1300s | "Il coupe sa viande" | ✅ |
+| 47 | 1479-1483s | "Il a emporte a boire au champ dans un recipient" | ✅ |
+| 49 | 1605-1607s | "Elle a allume une chandelle de resine" | ✅ |
+| 52 | 1657-1660s | "Elle a mis la chandelle de resine dans le chandelier" | ✅ |
+| 54 | 1718-1721s | "Elle a une petite lampe a huile" | ✅ |
+| 55 | 1745-1748s | "Elle a fait une meche pour la lampe a huile" | ✅ |
+| 59 | 2039-2042s | "Elle a son plein panier de fruits" | ✅ |
 
-### Piste 3 : Whisper cible par segment (N+M appels)
-- Diarisation identifie les voix
-- Whisper sur chaque segment individuellement
-- Extraction noms depuis les premiers mots de chaque variante
-- **Resultat** : Trop lent (6s chargement x 60 appels), noms hallucines
-- **Verdict** : ECHEC (perf + qualite)
-
-### Piste 4 : Whisper batch + noms par premier passage speaker
-- Nouveau script transcribe-batch.py (charge modele 1 fois)
-- Noms detectes 1 fois sur le premier passage de chaque speaker
-- IPA skip les 3 premieres secondes (le nom)
-- **Resultat** : Plus rapide, noms approximatifs, IPA coupee arbitrairement
-- **Verdict** : AMELIORATION perf, qualite moyenne
-
-### Piste 5 : Dummy segments 3s pour diarisation
-- Segments artificiels de 3s pour la diarisation SpeechBrain
-- Merge tours avec gap de 3s
-- **Resultat** : 174 sequences au lieu de ~10
-- **Verdict** : ECHEC (segments ne correspondent pas aux vrais tours)
-
-### Piste 6 : Dummy segments 1s + lissage labels + merge agressif
-- Segments de 1s pour meilleure resolution
-- Lissage par vote majoritaire (fenetre 7)
-- Suppression micro-tours < 1.5s
-- Merge tours contigus + merge sequences leader sans variantes
-- **Resultat** : 70 sequences (~mieux mais encore trop)
-- **Verdict** : AMELIORATION insuffisante
-
-### Piste 7 : Noms via Whisper tiny + coupure IPA mesuree
-- Whisper tiny (rapide) sur premier passage de chaque speaker
-- Mesure duree du nom via timestamps Whisper
-- IPA Allosaurus apres la duree du nom
-- 2 batch Whisper : tiny pour noms + large-v3 pour FR
-- **Resultat** : Noms parfois detectes, IPA meilleure
-- **Verdict** : AMELIORATION, mais diarisation toujours mauvaise
-
-### Piste 8 : Detection par la langue (confiance Whisper)
-- Whisper sur tout l'audio avec avg_logprob par segment
-- Classifier : confiance haute = FR, confiance basse = vernaculaire
-- **Resultat** : Whisper confiant meme sur ses hallucinations (logprob > -0.3 pour tout), 0 sequences
-- **Verdict** : ECHEC (Whisper est confiant dans ses hallucinations)
-
-### Piste 9 : VAD (Silero) + diarisation SpeechBrain
-- Silero VAD detecte les vrais segments de parole (silences)
-- SpeechBrain embed chaque segment VAD
-- Clustering spectral pour les speakers
-- **Resultat** : Non teste completement (passe a WhisperX avant)
-- **Verdict** : ABANDONNE pour WhisperX
-
-### Piste 10 : WhisperX (Whisper + pyannote) ← ACTUELLE
-- WhisperX fait tout en un pass : transcription + alignement + diarisation
-- pyannote 3.1 pour la diarisation (SOTA)
-- Premier speaker = meneur
-- **Resultat** : 16 sequences, 260 variantes, 10 speakers identifies correctement
-- **Verdict** : SUCCES — meilleur resultat obtenu
+### Exemples de faux positifs (vernaculaire classe comme FR)
+| Seq | Texte | Pourquoi c'est faux |
+|-----|-------|---------------------|
+| 2 | "Pierre Billet se sert de l'huillette de chusine" | Nom + hallucination Whisper sur vernaculaire |
+| 5 | "Pierre-Marie Duguay, a la tafriquette" | Nom + charabia |
+| 7 | "Elle a mis le pichet de pain et de vin sur la table" | Whisper traduit le vernaculaire en pseudo-FR |
+| 8 | "Yvette Raballin a mis le pichet ravane dessus la table" | Nom + traduction approximative du patois |
+| 9 | "sur la table" | Fragment sans sens seul |
+| 26 | "creuse" | Mot isole |
 
 ---
 
-## Problemes connus
+## Historique des approches testees (14 iterations)
 
-### Pipeline
-1. **Le texte FR du meneur inclut parfois du vernaculaire** : Whisper hallucine sur les premieres phrases vernaculaires si elles sont trop proches du tour meneur → le FR est "pollue"
-2. **Les noms des locuteurs sont perdus** : Whisper ne capte pas correctement les prenoms dits en vernaculaire, les speakers restent SPEAKER_00 a SPEAKER_09 → renommage manuel necessaire
-3. **Le meneur n'est pas toujours SPEAKER_06** : pyannote numerate les speakers dans l'ordre de premiere apparition, le premier n'est pas toujours 00
-4. **La sequence 9 a 36 variantes** : pyannote a fusionne plusieurs phrases du meneur en un seul "tour" → une mega-sequence au lieu de 3-4
-
-### UI
-5. **La progression reste bloquee a 0%** sur l'etape "extraction extraits audio" → le linguistic:complete n'est pas recu par l'UI
-6. **Ouvrir un projet termine** ne montre pas toujours les bons resultats → probleme de chargement des donnees
-7. **Pas de preview audio** pendant le traitement
-
-### Performance
-8. **Le build Docker est tres long** (~15min) a cause des dependances CUDA + whisperx + pyannote
-9. **Le premier lancement telecharge les modeles** pyannote (~2GB) ce qui ajoute du temps
-10. **L'IPA Allosaurus est brute** : contient le nom + le vernaculaire melanges → pas de separation automatique
-
----
-
-## Resultats du dernier test (WhisperX + pyannote)
-
-- **Fichier** : 01.10.WAV (35min, maraichin)
-- **Speakers detectes** : 10 (SPEAKER_00 a SPEAKER_09)
-- **Meneur identifie** : SPEAKER_06
-- **Sequences** : 16
-- **Variantes totales** : 260
-- **IPA generee** : Oui pour toutes les variantes
-
-### Distribution des variantes par sequence
-| Seq | Variantes | FR (debut) |
-|-----|-----------|------------|
-| 1 | 15 | "Ouillette. Elle se sert de l'entonnoir..." |
-| 2 | 12 | "Burgodonier, il y a eu ce point." |
-| 3 | 13 | "Albert Averti, elle a mis le pichet..." |
-| 4 | 14 | "Il a rempli l'ecuelle du chien..." |
-| 5 | 5 | "La fete du gralai avec le grillepan." |
-| 6 | 15 | "Burgo Doigny, elle a mis sa casserole..." |
-| 7 | 10 | "Une casserole bosselee..." |
-| 8 | 15 | "Burgo Doni, elle a fait une tracette..." |
-| 9 | 36 | "Je vais lui donner la deux douzaines..." |
-| 10 | 15 | "Burgo Doni, il se sert d'un hachoir." |
-| 11 | 16 | "Il a une lame de couteau ebrechee." |
-| 12 | 17 | "Pierre-Marie Duguay, les charognes..." |
-| 13 | 17 | "Bourgogne, il a ete une bonne empaille..." |
-| 14 | 30 | "Albert Averti a allume une chandelle..." |
-| 15 | 14 | "Virgo Donnier, elle a un peu d'oeil..." |
-| 16 | 16 | "Elle a son plein panier de fruits..." |
-
-### Observations
-- Les sequences 9 et 14 ont beaucoup trop de variantes (36 et 30) → pyannote a fusionne plusieurs tours du meneur
-- Le texte FR est souvent pollue par des noms de locuteurs que Whisper hallucine
-- Les 10 speakers sont stables (les memes reviennent dans chaque sequence)
-- L'IPA est generee pour toutes les variantes mais inclut le prenom/nom
+| # | Approche | Resultat |
+|---|----------|----------|
+| 1 | Whisper tout + diarisation SpeechBrain 2 spk | ECHEC — Whisper hallucine, 2 spk au lieu de 10 |
+| 2 | Diarisation 10 spk + texte Whisper | ECHEC — Whisper ne distingue pas FR/vernaculaire |
+| 3 | Whisper cible par segment (N+M appels) | ECHEC — Trop lent, noms hallucines |
+| 4 | Whisper batch + noms par 1er passage | Mieux en perf, noms approximatifs |
+| 5 | Dummy segments 3s pour diarisation | ECHEC — 174 sequences au lieu de ~10 |
+| 6 | Dummy segments 1s + lissage + merge | 70 sequences — insuffisant |
+| 7 | Noms via Whisper tiny + coupure IPA | Noms parfois detectes, diarisation mauvaise |
+| 8 | Detection par confiance Whisper (logprob) | ECHEC — Whisper confiant sur ses hallucinations |
+| 9 | VAD Silero + diarisation SpeechBrain | Abandonne pour WhisperX |
+| 10 | WhisperX (pyannote + Whisper) | 16-25 sequences, pyannote confond les voix |
+| 11 | Silence detect pur (gap 5s) | Bonne decoupe temporelle, mauvais meneur |
+| 12 | Silence detect + pyannote pour meneur | pyannote identifie le mauvais speaker comme meneur |
+| 13 | Silence detect + lang-id SpeechBrain | **PERCEE** — FR/vernaculaire bien distingues |
+| 14 | Lang-id + Ollama validation + regle consecutifs | 63 seq, ~20 bonnes — meilleur resultat |
 
 ---
 
-## Prochaines etapes
+## Problemes restants (par priorite)
 
-1. **Separer le nom de l'IPA** : detecter la micro-pause entre le prenom et le vernaculaire dans chaque variante, ou utiliser Whisper tiny pour capter le nom et couper l'IPA apres
-2. **Ameliorer la segmentation** : empecher pyannote de fusionner plusieurs tours du meneur (sequences trop longues)
-3. **Fix UI** : la progression ne se met pas a jour correctement, l'ouverture des projets est buggee
-4. **Pre-telecharger les modeles** pyannote dans le Dockerfile pour eviter le long premier lancement
-5. **Fine-tuner Allosaurus** sur des corrections manuelles pour ameliorer la qualite IPA
+### P1 : Trop de faux positifs FR (~43/63)
+Le lang-id classe certains blocs vernaculaires comme FR. Whisper produit du pseudo-francais coherent sur ces blocs, et Ollama valide. La regle des consecutifs aide mais pas assez.
+
+**Pistes non explorees :**
+- Demander a Ollama de grouper les phrases similaires et garder l'originale
+- Utiliser le score lang-id (pas juste FR/non-FR) : les vrais FR ont un score proche de 0, les faux ont un score plus negatif
+- Approche semi-manuelle : timeline visuelle, l'utilisateur marque les blocs meneur
+
+### P2 : UI bloquee apres le pipeline
+Le `linguistic:complete` n'est pas toujours recu par l'UI. L'utilisateur doit revenir a l'accueil et ouvrir le projet manuellement.
+
+### P3 : Separation nom/vernaculaire dans l'IPA
+Le silence detect detecte les paires nom+vernaculaire (blocs courts + longs) mais l'IPA est encore sur le bloc complet. Il faut n'appliquer Allosaurus que sur le bloc "speech" et utiliser le bloc "name" pour le label speaker.
+
+### P4 : Speakers tous "LOCUTEUR"
+Pas de diarisation pour identifier qui est qui. pyannote confond les voix sur cet audio. Le renommage est manuel.
+
+---
+
+## Architecture technique
+
+### Fichiers principaux
+```
+scripts/
+  silence-segment.py      # Detection silences FFmpeg → blocs de parole
+  lang-classify.py         # Classification langue (SpeechBrain lang-id)
+  transcribe-batch.py      # Whisper batch (charge modele 1 fois)
+  phonetize.py             # Allosaurus IPA
+  whisperx-diarize.py      # WhisperX (plus utilise pour le linguistique)
+  diarize.py               # Diarisation SpeechBrain (utilise pour transcription classique)
+
+server/services/
+  linguistic-pipeline.ts   # Pipeline complet
+  whisper.ts               # Service Whisper (transcribe + transcribeBatch)
+  diarization.ts           # Service diarisation (diarize + vadDiarize)
+
+src/components/new/
+  LinguisticTool.tsx       # Interface utilisateur
+
+docs/
+  CR_OUTIL_LINGUISTIQUE.md # Ce fichier
+```
+
+### Docker
+- Container `clipr` : Node.js + Python (Whisper, SpeechBrain, Allosaurus, WhisperX)
+- Container `clipr-ollama` : Ollama (LLM)
+- Container `clipr-tunnel` : Cloudflare tunnel
+- GPU partage sequentiellement entre les modeles
+- HF_TOKEN requis pour pyannote (dans .env)
+
+### DB : table `linguistic_transcriptions`
+```sql
+id TEXT PRIMARY KEY,
+user_id TEXT,
+task_id TEXT,
+filename TEXT,
+leader_speaker TEXT,
+sequences TEXT (JSON),    -- [{french_text, french_audio, variants: [{speaker, ipa, audio}]}]
+speakers TEXT (JSON),
+duration REAL,
+created_at TEXT
+```
