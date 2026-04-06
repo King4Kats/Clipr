@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from '
 import { execSync, spawn } from 'child_process'
 import * as ffmpegService from './ffmpeg.js'
 import * as whisperService from './whisper.js'
+import { vadDiarize } from './diarization.js'
 import { getDb } from './database.js'
 import { updateTaskProgress } from './task-queue.js'
 import { getProject, saveProject, updateProjectStatus } from './project-history.js'
@@ -569,7 +570,181 @@ Pour chaque numero, reponds UNIQUEMENT "FR" ou "FAUX". Format strict :
     }
   }
 
-  updateTaskProgress(task.id, 40, 'IPA')
+  // ── Step 4.7 : RESCUE DIARISATION — scanner les grosses sequences ──
+  // Pour les sequences avec trop de variantes, le meneur a probablement dit d'autres phrases
+  // que le lang-id a ratees. On utilise la diarisation pour identifier la voix du meneur
+  // parmi les variantes, puis Whisper + meneur-pattern pour valider.
+  const DIAR_RESCUE_THRESHOLD = 15
+  const oversizedSeqs = sequences.filter(s => s.variants.length > DIAR_RESCUE_THRESHOLD)
+
+  if (oversizedSeqs.length > 0) {
+    logger.info(`[Linguistic] Diar-rescue : ${oversizedSeqs.length} sequences avec >${DIAR_RESCUE_THRESHOLD} variantes`)
+    broadcastFn(userId, null, 'linguistic:progress', {
+      taskId: task.id, step: 'diarizing', progress: 0, message: `Diarisation des sequences longues (${oversizedSeqs.length})...`
+    })
+
+    let totalDiarRescued = 0
+
+    for (let oi = 0; oi < oversizedSeqs.length; oi++) {
+      const seq = oversizedSeqs[oi]
+      const seqIdx = sequences.indexOf(seq)
+      const nextSeq = sequences[seqIdx + 1]
+      const segStart = seq.french_audio.start
+      const segEnd = nextSeq ? nextSeq.french_audio.start : duration
+
+      logger.info(`[Linguistic] Diar-rescue seq ${seq.index} : ${segStart.toFixed(1)}-${segEnd.toFixed(1)}s (${seq.variants.length} variantes)`)
+
+      // Extraire l'audio de cette zone
+      const segAudioPath = join(tempDir, `ling_diarseg_${task.id}_${oi}.wav`)
+      try {
+        execSync(`ffmpeg -y -i "${audioPath}" -ss ${segStart} -to ${segEnd} -ar 16000 -ac 1 "${segAudioPath}" 2>/dev/null`)
+      } catch { continue }
+
+      // Diariser cette zone
+      const diarResult = await vadDiarize(segAudioPath, (p) => {
+        broadcastFn(userId, null, 'linguistic:progress', {
+          taskId: task.id, step: 'diarizing',
+          progress: Math.round(((oi + p / 100) / oversizedSeqs.length) * 100),
+          message: `Diarisation sequence ${oi + 1}/${oversizedSeqs.length}...`
+        })
+      }, numSpeakers)
+
+      try { unlinkSync(segAudioPath) } catch {}
+
+      if (!diarResult || diarResult.length < 2) {
+        logger.info(`[Linguistic] Diar-rescue seq ${seq.index} : pas assez de segments (${diarResult?.length || 0})`)
+        continue
+      }
+
+      // Le meneur = le speaker du tout premier segment (il parle en premier)
+      const meneurSpeaker = diarResult[0].speaker
+      logger.info(`[Linguistic] Diar-rescue seq ${seq.index} : meneur=${meneurSpeaker}, ${diarResult.length} turns, ${new Set(diarResult.map(d => d.speaker)).size} speakers`)
+
+      // Trouver les autres blocs du meneur (pas le premier, c'est deja notre sequence leader)
+      // Les timestamps sont relatifs au segment → ajouter segStart
+      const meneurBlocks = diarResult
+        .filter(d => d.speaker === meneurSpeaker)
+        .map(d => ({ start: d.start + segStart, end: d.end + segStart }))
+        .filter(d => d.start > seq.french_audio.end + 2.0) // Exclure le leader deja connu (avec marge)
+
+      if (meneurBlocks.length === 0) {
+        logger.info(`[Linguistic] Diar-rescue seq ${seq.index} : aucun autre bloc meneur`)
+        continue
+      }
+
+      logger.info(`[Linguistic] Diar-rescue seq ${seq.index} : ${meneurBlocks.length} blocs meneur candidats`)
+
+      // Whisper batch sur les blocs meneur candidats
+      const diarClips: { id: string; audioPath: string }[] = []
+      for (let i = 0; i < meneurBlocks.length; i++) {
+        const mb = meneurBlocks[i]
+        const clipPath = join(tempDir, `ling_diarrescue_${task.id}_${oi}_${i}.wav`)
+        try {
+          execSync(`ffmpeg -y -i "${audioPath}" -ss ${mb.start} -to ${mb.end} -ar 16000 -ac 1 "${clipPath}" 2>/dev/null`)
+          diarClips.push({ id: `diar_${oi}_${i}`, audioPath: clipPath })
+        } catch {}
+      }
+
+      if (diarClips.length === 0) continue
+
+      const diarWhisperResults = await whisperService.transcribeBatch(
+        diarClips, language, () => {}
+      )
+      for (const clip of diarClips) { try { unlinkSync(clip.audioPath) } catch {} }
+
+      // Evaluer chaque bloc : meneur-pattern + collect pour Ollama
+      const diarTexts: { text: string; start: number; end: number; ollamaOK?: boolean }[] = []
+      for (let i = 0; i < meneurBlocks.length; i++) {
+        const segs = diarWhisperResults.get(`diar_${oi}_${i}`)
+        const text = segs && segs.length > 0 ? segs.map((s: any) => s.text).join(' ').trim() : ''
+        if (!text || text.length < 5) continue
+
+        let firstWord = text.split(/[\s,;:.]+/)[0].toLowerCase()
+        const apoM = firstWord.match(/^([a-zà-ü]+')/i)
+        if (apoM) firstWord = apoM[1]
+
+        const isName = confirmedFirstNames.has(firstWord)
+        const isMeneur = MENEUR_STARTERS.has(firstWord)
+
+        if (isMeneur && !isName) {
+          diarTexts.push({ text, start: meneurBlocks[i].start, end: meneurBlocks[i].end })
+        } else {
+          logger.info(`[Linguistic] Diar-rescue SKIP : ${meneurBlocks[i].start.toFixed(1)}s "${text.substring(0, 50)}" (${isName ? 'nom' : 'pas meneur'})`)
+        }
+      }
+
+      // Ollama validation sur les candidats
+      if (diarTexts.length > 0) {
+        try {
+          const ollamaModel = config.ollamaModel || 'qwen2.5:14b'
+          const diarOllamaTexts = diarTexts.map((r, i) => `${i + 1}. "${r.text}"`).join('\n')
+          const diarPrompt = `Tu analyses des phrases transcrites depuis un enregistrement audio. Un meneur dit des phrases en francais standard decrivant des objets, ustensiles ou actions du quotidien.
+
+Pour chaque phrase, reponds "FR" si c'est du vrai francais coherent et comprehensible, ou "FAUX" si c'est du charabia, des mots inventes, ou des phrases sans sens clair.
+
+${diarOllamaTexts}
+
+Format strict, un par ligne : 1. FR ou 1. FAUX`
+
+          const diarOllamaResp = await ollamaGenerate(ollamaModel, diarPrompt)
+          const diarLines = diarOllamaResp.split('\n')
+          for (const line of diarLines) {
+            const match = line.match(/(\d+)\.\s*(FR|FAUX)/i)
+            if (match) {
+              const idx = parseInt(match[1]) - 1
+              if (idx >= 0 && idx < diarTexts.length) {
+                diarTexts[idx].ollamaOK = match[2].toUpperCase() === 'FR'
+              }
+            }
+          }
+        } catch {
+          for (const d of diarTexts) d.ollamaOK = true
+        }
+      }
+
+      // Ajouter les sequences rescuees
+      for (const d of diarTexts) {
+        if (d.ollamaOK === false) {
+          logger.info(`[Linguistic] Diar-rescue Ollama FAUX : ${d.start.toFixed(1)}s "${d.text.substring(0, 60)}"`)
+          continue
+        }
+        sequences.push({
+          id: randomUUID(),
+          index: 0,
+          french_text: d.text,
+          french_audio: { start: d.start, end: d.end },
+          variants: []
+        })
+        totalDiarRescued++
+        logger.info(`[Linguistic] Diar-rescue OK : ${d.start.toFixed(1)}s "${d.text.substring(0, 60)}"`)
+      }
+    }
+
+    if (totalDiarRescued > 0) {
+      // Re-trier, re-distribuer les variantes
+      sequences.sort((a, b) => a.french_audio.start - b.french_audio.start)
+      const allVarBlocks = classifiedBlocks.filter((b: any) =>
+        !b.is_french && b.type !== 'name' && (b.end - b.start) >= 1.0
+      ).sort((a: any, b: any) => a.start - b.start)
+      for (const s of sequences) s.variants = []
+      for (const block of allVarBlocks) {
+        let target: LinguisticSequence | null = null
+        for (let si = sequences.length - 1; si >= 0; si--) {
+          if (sequences[si].french_audio.start < block.start) { target = sequences[si]; break }
+        }
+        if (target) {
+          let speaker = 'LOCUTEUR'
+          if (block.pair_id >= 0 && nameByPairId.has(block.pair_id)) speaker = nameByPairId.get(block.pair_id)!
+          target.variants.push({ speaker, ipa: '', ipa_original: '', audio: { start: block.start, end: block.end } })
+        }
+      }
+      sequences = sequences.filter(s => s.variants.length >= 1)
+      sequences.forEach((s, i) => s.index = i)
+      logger.info(`[Linguistic] Apres diar-rescue : ${sequences.length} sequences (+${totalDiarRescued}), ${sequences.reduce((s, q) => s + q.variants.length, 0)} variantes`)
+    }
+  }
+
+  updateTaskProgress(task.id, 55, 'IPA')
 
   // ── Step 5 : Allosaurus IPA sur les variantes (PAS les blocs 'name') ──
   broadcastFn(userId, null, 'linguistic:progress', {
