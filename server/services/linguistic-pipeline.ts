@@ -109,120 +109,232 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     throw new Error('Classification de langue echouee')
   }
 
+  const initialFrCount = classifiedBlocks.filter((b: any) => b.is_french).length
+  logger.info(`[Linguistic] Lang-id initial : ${initialFrCount} FR, ${classifiedBlocks.length - initialFrCount} vernaculaires`)
+
+  // ── Step 3.1 : Filtre par score lang-id ──
+  // Les vrais FR ont score ~0, les faux positifs < -0.5.
+  // Seuil permissif (-0.8) car les filtres name-text + meneur-pattern rattrapent en aval.
+  const SCORE_THRESHOLD = -0.8
+  let scoreReclassified = 0
+  for (const block of classifiedBlocks) {
+    if (block.is_french && typeof block.score === 'number' && block.score < SCORE_THRESHOLD) {
+      block.is_french = false
+      block.reclassified_score = true
+      scoreReclassified++
+    }
+  }
+  logger.info(`[Linguistic] Filtre score (<${SCORE_THRESHOLD}) : -${scoreReclassified} → ${initialFrCount - scoreReclassified} FR`)
+
+  // ── Step 3.2 : Filtre name-paired ──
+  // Le meneur ne dit JAMAIS son nom. Un bloc FR precede d'un bloc "name" = intervenant → vernaculaire.
+  const namePairIds = new Set(
+    classifiedBlocks.filter((b: any) => b.type === 'name' && b.pair_id >= 0).map((b: any) => b.pair_id)
+  )
+  let namePairedReclassified = 0
+  for (const block of classifiedBlocks) {
+    if (block.is_french && block.type === 'name') {
+      block.is_french = false
+      block.reclassified_name = true
+      namePairedReclassified++
+    } else if (block.is_french && block.type === 'speech' && block.pair_id >= 0 && namePairIds.has(block.pair_id)) {
+      block.is_french = false
+      block.reclassified_name_paired = true
+      namePairedReclassified++
+    }
+  }
+  const afterPreFilters = classifiedBlocks.filter((b: any) => b.is_french).length
+  logger.info(`[Linguistic] Filtre name-paired : -${namePairedReclassified} → ${afterPreFilters} FR`)
+
   let frBlocks = classifiedBlocks.filter((b: any) => b.is_french)
-  const vernBlocks = classifiedBlocks.filter((b: any) => !b.is_french)
-  logger.info(`[Linguistic] Lang-id : ${frBlocks.length} blocs FR, ${vernBlocks.length} blocs vernaculaires`)
 
   // ── Step 3.5 : VALIDATION FR — Whisper + Ollama anti-hallucination ──
   broadcastFn(userId, null, 'linguistic:progress', {
     taskId: task.id, step: 'transcribing', progress: 0, message: 'Validation des blocs francais...'
   })
 
-  // Whisper batch sur tous les blocs FR candidats
+  // Whisper batch sur blocs FR candidats + blocs name (extraction noms)
   const tempDir = join(DATA_DIR, 'temp')
-  const frCandidateClips: { id: string; audioPath: string }[] = []
+  const batchClips: { id: string; audioPath: string }[] = []
 
+  // Clips FR pour validation
   for (let i = 0; i < frBlocks.length; i++) {
     const block = frBlocks[i]
     const clipPath = join(tempDir, `ling_validate_${task.id}_${i}.wav`)
     try {
       execSync(`ffmpeg -y -i "${audioPath}" -ss ${block.start} -to ${block.end} -ar 16000 -ac 1 "${clipPath}" 2>/dev/null`)
-      frCandidateClips.push({ id: `validate_${i}`, audioPath: clipPath })
+      batchClips.push({ id: `validate_${i}`, audioPath: clipPath })
     } catch {}
   }
 
+  // Clips name pour extraction des noms de speakers
+  const nameBlocks = classifiedBlocks.filter((b: any) => b.type === 'name' && b.pair_id >= 0)
+  for (let i = 0; i < nameBlocks.length; i++) {
+    const block = nameBlocks[i]
+    const clipPath = join(tempDir, `ling_name_${task.id}_${i}.wav`)
+    try {
+      execSync(`ffmpeg -y -i "${audioPath}" -ss ${block.start} -to ${block.end} -ar 16000 -ac 1 "${clipPath}" 2>/dev/null`)
+      batchClips.push({ id: `name_${i}`, audioPath: clipPath })
+    } catch {}
+  }
+  logger.info(`[Linguistic] Whisper batch : ${frBlocks.length} FR + ${nameBlocks.length} noms = ${batchClips.length} clips`)
+
   await whisperService.loadWhisperModel(whisperModel)
-  const validateResults = await whisperService.transcribeBatch(
-    frCandidateClips, language,
+  const batchResults = await whisperService.transcribeBatch(
+    batchClips, language,
     (percent) => {
       broadcastFn(userId, null, 'linguistic:progress', {
         taskId: task.id, step: 'transcribing', progress: Math.round(percent * 0.3),
-        message: `Validation FR (${frCandidateClips.length} blocs)...`
+        message: `Transcription (${batchClips.length} blocs)...`
       })
-      updateTaskProgress(task.id, 25 + percent * 0.10, 'Validation FR')
+      updateTaskProgress(task.id, 25 + percent * 0.10, 'Validation FR + noms')
     }
   )
 
   // Nettoyer clips
-  for (const clip of frCandidateClips) { try { unlinkSync(clip.audioPath) } catch {} }
+  for (const clip of batchClips) { try { unlinkSync(clip.audioPath) } catch {} }
 
   // Stocker le texte Whisper dans chaque bloc FR
   for (let i = 0; i < frBlocks.length; i++) {
-    const segs = validateResults.get(`validate_${i}`)
+    const segs = batchResults.get(`validate_${i}`)
     frBlocks[i].whisper_text = segs && segs.length > 0
       ? segs.map((s: any) => s.text).join(' ').trim()
       : ''
   }
 
-  // Ollama : verifier si chaque texte FR est du francais coherent
-  broadcastFn(userId, null, 'linguistic:progress', {
-    taskId: task.id, step: 'transcribing', progress: 30, message: 'Verification coherence (Ollama)...'
-  })
-
-  const textsToValidate = frBlocks.map((b: any) => b.whisper_text).filter((t: string) => t.length > 0)
-  const allTexts = frBlocks.map((b: any, i: number) => `${i+1}. "${b.whisper_text}"`).join('\n')
-
-  try {
-    const ollamaModel = config.ollamaModel || 'llama3.1'
-    const prompt = `Tu analyses une liste de phrases transcrites depuis un enregistrement audio de collectage linguistique. Un meneur dit des phrases en francais, puis des intervenants repetent en patois/dialecte.
-
-Whisper a transcrit TOUS les blocs audio. Certains sont du VRAI francais du meneur (phrases coherentes, descriptions d'objets ou d'actions du quotidien). D'autres sont des HALLUCINATIONS de Whisper sur du patois (charabia, mots inventes, phrases sans sens).
-
-Indices pour identifier les FAUX :
-- Si la phrase commence par un prenom/nom de personne ("Pierre Billet...", "Yvette Raballand...", "Renaud Dinorne...") c'est probablement un intervenant qui parle en patois, pas le meneur → FAUX
-- Si la phrase contient des mots inventes ou du charabia → FAUX
-- Si la phrase est une vraie description en francais courant (ex: "Elle se sert de l'entonnoir de cuisine") → FR
-- Les phrases du meneur decrivent des objets, des ustensiles, des actions domestiques
-
-${allTexts}
-
-Pour chaque numero, reponds UNIQUEMENT "FR" ou "FAUX".
-Format strict, un par ligne :
-1. FR
-2. FAUX`
-
-    const ollamaResponse = await ollamaGenerate(ollamaModel, prompt)
-
-    // Parser la reponse Ollama
-    const lines = ollamaResponse.split('\n')
-    for (const line of lines) {
-      const match = line.match(/(\d+)\.\s*(FR|FAUX)/i)
-      if (match) {
-        const idx = parseInt(match[1]) - 1
-        const isFR = match[2].toUpperCase() === 'FR'
-        if (idx >= 0 && idx < frBlocks.length) {
-          if (!isFR) {
-            // Reclasser en vernaculaire
-            frBlocks[idx].is_french = false
-            frBlocks[idx].validated = false
-            logger.info(`[Linguistic] Bloc ${idx} reclasse vernaculaire: "${frBlocks[idx].whisper_text?.substring(0, 40)}"`)
-          } else {
-            frBlocks[idx].validated = true
-          }
-        }
-      }
+  // Construire nameByPairId : pair_id → nom nettoye
+  // Phase 1 : extraire tous les noms bruts
+  const rawNames = new Map<number, string>()
+  for (let i = 0; i < nameBlocks.length; i++) {
+    const segs = batchResults.get(`name_${i}`)
+    let name = segs && segs.length > 0
+      ? segs.map((s: any) => s.text).join(' ').trim()
+      : ''
+    name = name.replace(/^[\s.,!?;:'"«»]+|[\s.,!?;:'"«»]+$/g, '').trim()
+    if (name.length >= 2) {
+      const words = name.split(/\s+/)
+      // Capitaliser
+      name = words.map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+      rawNames.set(nameBlocks[i].pair_id, name)
     }
-  } catch (err: any) {
-    logger.warn(`[Linguistic] Ollama validation echouee: ${err.message}. On garde tous les blocs FR.`)
   }
 
-  // Mettre a jour classifiedBlocks avec les reclassifications Ollama
-  let validFrCount = frBlocks.filter((b: any) => b.is_french).length
-  let reclassifiedCount = frBlocks.filter((b: any) => !b.is_french).length
-  logger.info(`[Linguistic] Validation Ollama : ${validFrCount} FR confirmes, ${reclassifiedCount} reclasses`)
+  // Phase 2 : compter la frequence de chaque prenom (1er mot)
+  // Les vrais speakers parlent plusieurs fois → leur prenom apparait >= 2 fois
+  // Les hallucinations sont aleatoires → apparaissent 1 seule fois
+  // IMPORTANT : exclure les mots courants FR — Whisper hallucine "Elle...", "Il..." sur les blocs courts
+  const NOT_A_FIRST_NAME = new Set([
+    'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'il', 'elle', 'ils', 'elles',
+    'on', 'je', 'tu', 'nous', 'vous', 'au', 'aux', 'ce', 'cette', 'ces', 'son', 'sa',
+    'ses', 'et', 'ou', 'mais', 'donc', 'car', 'en', 'sur', 'dans', 'pour', 'par',
+    'avec', 'sans', 'que', 'qui', 'ne', 'pas', 'se', 'est', 'a', 'sont', 'fait',
+    'mis', 'dit', 'va', 'bien', 'bon', 'tout', 'tous', 'toute', 'alors', 'euh',
+    "qu'est-ce", "d'un", "l'a", "c'est"
+  ])
+  const firstNameCounts = new Map<string, number>()
+  for (const fullName of rawNames.values()) {
+    const firstName = fullName.split(/\s+/)[0].toLowerCase()
+    if (NOT_A_FIRST_NAME.has(firstName)) continue
+    firstNameCounts.set(firstName, (firstNameCounts.get(firstName) || 0) + 1)
+  }
+
+  // Ne garder que les noms dont le prenom apparait >= 2 fois
+  const nameByPairId = new Map<number, string>()
+  const confirmedFirstNames = new Set<string>()
+  for (const [pairId, fullName] of rawNames) {
+    const firstName = fullName.split(/\s+/)[0].toLowerCase()
+    if ((firstNameCounts.get(firstName) || 0) >= 2) {
+      nameByPairId.set(pairId, fullName)
+      confirmedFirstNames.add(firstName)
+    }
+  }
+  const uniqueSpeakers = [...new Set(nameByPairId.values())]
+  logger.info(`[Linguistic] Noms confirmes : ${uniqueSpeakers.length} speakers (${uniqueSpeakers.join(', ')})`)
+  logger.info(`[Linguistic] Prenoms confirmes : ${[...confirmedFirstNames].join(', ')}`)
+
+  // ── Step 3.6 : Filtre post-Whisper par nom en debut de texte ──
+  // Le meneur ne commence JAMAIS par un prenom. Si le texte Whisper d'un bloc FR
+  // commence par un prenom confirme → c'est un intervenant, pas le meneur.
+  let nameTextReclassified = 0
+  if (confirmedFirstNames.size > 0) {
+    for (const block of frBlocks) {
+      if (!block.is_french) continue
+      const text = (block.whisper_text || '').trim()
+      if (!text) continue
+      // Prendre le premier mot du texte Whisper (avant espace, virgule, point)
+      const firstWord = text.split(/[\s,;:.]+/)[0]
+      if (firstWord && confirmedFirstNames.has(firstWord.toLowerCase())) {
+        block.is_french = false
+        block.reclassified_name_text = true
+        nameTextReclassified++
+        logger.info(`[Linguistic] Filtre name-text : "${text.substring(0, 60)}" (commence par ${firstWord})`)
+      }
+    }
+  }
+  logger.info(`[Linguistic] Filtre name-text : -${nameTextReclassified} → ${frBlocks.filter((b: any) => b.is_french).length} FR`)
+
+  // ── Step 3.7 : Filtre meneur-pattern ──
+  // Les phrases du meneur commencent TOUJOURS par un pronom sujet ou article.
+  // Un texte FR qui commence par autre chose (nom propre, charabia) = faux positif.
+  const MENEUR_STARTERS = new Set([
+    'elle', 'il', 'ils', 'elles', 'on', 'un', 'une', 'le', 'la', 'les', 'des',
+    'du', 'de', 'au', 'aux', 'ce', 'cette', 'ces', 'nous', 'vous', 'je', 'tu',
+    'son', 'sa', 'ses', "l'", "c'est", "qu'elle", "qu'il"
+  ])
+  let meneurPatternReclassified = 0
+  for (const block of frBlocks) {
+    if (!block.is_french) continue
+    const text = (block.whisper_text || '').trim()
+    if (!text) continue
+    // Extraire le 1er mot, normaliser (gerer l'apostrophe : "L'homme" → "l'")
+    let firstWord = text.split(/[\s,;:.]+/)[0].toLowerCase()
+    // Gerer les contractions : "l'entonnoir" → "l'"
+    const apoMatch = firstWord.match(/^([a-zà-ü]+')/i)
+    if (apoMatch) firstWord = apoMatch[1]
+    if (!MENEUR_STARTERS.has(firstWord)) {
+      block.is_french = false
+      block.reclassified_meneur_pattern = true
+      meneurPatternReclassified++
+      logger.info(`[Linguistic] Filtre meneur-pattern : "${text.substring(0, 60)}" (commence par "${firstWord}")`)
+    }
+  }
+  logger.info(`[Linguistic] Filtre meneur-pattern : -${meneurPatternReclassified} → ${frBlocks.filter((b: any) => b.is_french).length} FR`)
+
+  // ── DEBUG : dump complet de tous les blocs FR initiaux avec leur statut ──
+  logger.info(`[Linguistic] === DUMP blocs FR (${classifiedBlocks.filter((b: any) => b.lang === 'fr' || b.reclassified_score || b.reclassified_name || b.reclassified_name_paired || b.reclassified_name_text || b.reclassified_meneur_pattern).length} blocs) ===`)
+  for (const block of classifiedBlocks) {
+    // Trouver tous les blocs qui etaient FR au depart (is_french === true OU reclassifies par un filtre)
+    const wasInitiallyFR = block.is_french || block.reclassified_score || block.reclassified_name || block.reclassified_name_paired || block.reclassified_name_text || block.reclassified_meneur_pattern
+    if (!wasInitiallyFR) continue
+    const filters: string[] = []
+    if (block.reclassified_score) filters.push('SCORE')
+    if (block.reclassified_name) filters.push('NAME-BLOCK')
+    if (block.reclassified_name_paired) filters.push('NAME-PAIRED')
+    if (block.reclassified_name_text) filters.push('NAME-TEXT')
+    if (block.reclassified_meneur_pattern) filters.push('MENEUR-PAT')
+    const status = block.is_french ? '✓ FR' : `✗ ${filters.join('+')}`
+    const text = block.whisper_text ? ` "${block.whisper_text.substring(0, 50)}"` : ''
+    logger.info(`[Linguistic]   ${block.start.toFixed(1)}-${block.end.toFixed(1)}s [${block.type}|p${block.pair_id}|s${block.score?.toFixed(2)}] ${status}${text}`)
+  }
+  logger.info(`[Linguistic] === FIN DUMP ===`)
+
+  // Ollama desactive sur le pipeline principal — fait plus de mal que de bien
+  // (tue des bonnes phrases FR). Les filtres score + name-paired + name-text + meneur-pattern suffisent.
+  // Ollama reste actif pour le rescue pass (filtrage gibberish sur les candidats recuperes).
+  let validFrCount = classifiedBlocks.filter((b: any) => b.is_french).length
 
   // ── Step 3.7 : Regle des FR consecutifs ──
   // Si plusieurs blocs FR se suivent sans bloc vernaculaire entre eux,
   // seul le PREMIER est le vrai meneur. Les suivants = vernaculaire mal classe.
   // Le meneur dit UNE phrase puis les intervenants parlent en vernaculaire.
   let lastWasFr = false
+  let consecutiveReclassified = 0
   for (const block of classifiedBlocks) {
     if (block.is_french) {
       if (lastWasFr) {
-        // Deuxieme FR consecutif → reclasser en vernaculaire
         block.is_french = false
         block.reclassified_consecutive = true
-        reclassifiedCount++
+        consecutiveReclassified++
         validFrCount--
       }
       lastWasFr = true
@@ -231,7 +343,8 @@ Format strict, un par ligne :
     }
   }
 
-  logger.info(`[Linguistic] Apres regle consecutifs : ${validFrCount} FR, ${reclassifiedCount} reclasses total`)
+  logger.info(`[Linguistic] Consecutifs : -${consecutiveReclassified} → ${validFrCount} FR`)
+  logger.info(`[Linguistic] Bilan filtres : ${initialFrCount} initial → ${validFrCount} final (score: -${scoreReclassified}, name-paired: -${namePairedReclassified}, name-text: -${nameTextReclassified}, meneur-pattern: -${meneurPatternReclassified}, consec: -${consecutiveReclassified})`)
 
   updateTaskProgress(task.id, 35, 'Sequences')
 
@@ -255,17 +368,22 @@ Format strict, un par ligne :
         variants: []
       }
     } else if (currentSeq) {
-      // Bloc vernaculaire ou FR reclasse
-      // Ignorer les blocs trop courts (<1s) sauf si type='name' (prenom)
+      // Les blocs "name" servent a identifier le speaker, pas comme variantes
+      if (block.type === 'name') continue
+
       const dur = block.end - block.start
-      if (dur >= 1.0 || block.type === 'name') {
+      if (dur >= 1.0) {
+        // Chercher le nom du speaker via le pair_id
+        let speaker = 'LOCUTEUR'
+        if (block.pair_id >= 0 && nameByPairId.has(block.pair_id)) {
+          speaker = nameByPairId.get(block.pair_id)!
+        }
         currentSeq.variants.push({
-          speaker: 'LOCUTEUR',
+          speaker,
           ipa: '',
           ipa_original: '',
-          audio: { start: block.start, end: block.end },
-          ...(block.type === 'name' ? { _isName: true } : {})
-        } as any)
+          audio: { start: block.start, end: block.end }
+        })
       }
     }
   }
@@ -274,10 +392,182 @@ Format strict, un par ligne :
   sequences = sequences.filter(s => s.variants.length >= 1)
   sequences.forEach((s, i) => s.index = i)
 
-  logger.info(`[Linguistic] ${sequences.length} sequences, ${sequences.reduce((s, q) => s + q.variants.length, 0)} variantes`)
+  logger.info(`[Linguistic] ${sequences.length} sequences (avant rescue), ${sequences.reduce((s, q) => s + q.variants.length, 0)} variantes`)
 
-  // Le texte FR est deja rempli par Whisper (step 3.5)
-  // Pas besoin de refaire Whisper ici
+  // ── Step 4.5 : RESCUE PASS — recuperer les leaders rates par le lang-id ──
+  // Le silence-segment a detecte N sequences (gap > 5s), chacune avec un "leader" (1er bloc).
+  // Notre pipeline n'en garde qu'une partie. Pour les leaders manquants, on Whisper le bloc
+  // et si c'est du vrai FR (meneur pattern), on split la sequence.
+  broadcastFn(userId, null, 'linguistic:progress', {
+    taskId: task.id, step: 'transcribing', progress: 50, message: 'Rescue des phrases manquantes...'
+  })
+
+  const silenceSequences = silenceResult.sequences || []
+  const existingFrStarts = sequences.map(s => s.french_audio.start)
+
+  // Trouver les leaders de silence-segment qui ne sont pas dans nos sequences
+  // Un leader est "deja trouve" si une sequence existante commence dans un rayon de 5s
+  const rescueCandidates: { start: number; end: number }[] = []
+  for (const silSeq of silenceSequences) {
+    const leader = silSeq.leader
+    if (!leader) continue
+    const alreadyFound = existingFrStarts.some(t => Math.abs(t - leader.start) <= 5.0)
+    if (!alreadyFound) {
+      rescueCandidates.push({ start: leader.start, end: leader.end })
+    }
+  }
+
+  logger.info(`[Linguistic] Rescue : ${rescueCandidates.length} leaders manquants sur ${silenceSequences.length} sequences silence-segment`)
+
+  if (rescueCandidates.length > 0) {
+    // Whisper batch sur les rescue candidates
+    const rescueClips: { id: string; audioPath: string }[] = []
+    for (let i = 0; i < rescueCandidates.length; i++) {
+      const c = rescueCandidates[i]
+      const clipPath = join(tempDir, `ling_rescue_${task.id}_${i}.wav`)
+      try {
+        execSync(`ffmpeg -y -i "${audioPath}" -ss ${c.start} -to ${c.end} -ar 16000 -ac 1 "${clipPath}" 2>/dev/null`)
+        rescueClips.push({ id: `rescue_${i}`, audioPath: clipPath })
+      } catch {}
+    }
+
+    if (rescueClips.length > 0) {
+      const rescueResults = await whisperService.transcribeBatch(
+        rescueClips, language,
+        (percent) => {
+          broadcastFn(userId, null, 'linguistic:progress', {
+            taskId: task.id, step: 'transcribing', progress: 50 + Math.round(percent * 0.1),
+            message: `Rescue (${rescueClips.length} blocs)...`
+          })
+        }
+      )
+
+      // Nettoyer clips
+      for (const clip of rescueClips) { try { unlinkSync(clip.audioPath) } catch {} }
+
+      // Evaluer chaque rescue : meneur-pattern + Ollama
+      const rescueTexts: { idx: number; text: string; start: number; end: number; ollamaOK?: boolean }[] = []
+      for (let i = 0; i < rescueCandidates.length; i++) {
+        const segs = rescueResults.get(`rescue_${i}`)
+        const text = segs && segs.length > 0 ? segs.map((s: any) => s.text).join(' ').trim() : ''
+        if (!text || text.length < 5) continue
+
+        // Verifier meneur-pattern : commence par pronom/article ?
+        let firstWord = text.split(/[\s,;:.]+/)[0].toLowerCase()
+        const apoMatch2 = firstWord.match(/^([a-zà-ü]+')/i)
+        if (apoMatch2) firstWord = apoMatch2[1]
+
+        // Verifier aussi que le texte ne commence pas par un prenom confirme
+        const isNameStart = confirmedFirstNames.has(firstWord)
+        const isMeneurPattern = MENEUR_STARTERS.has(firstWord)
+
+        if (isMeneurPattern && !isNameStart) {
+          rescueTexts.push({ idx: i, text, start: rescueCandidates[i].start, end: rescueCandidates[i].end })
+        } else {
+          logger.info(`[Linguistic] Rescue SKIP : ${rescueCandidates[i].start.toFixed(1)}s "${text.substring(0, 50)}" (${isNameStart ? 'nom' : 'pas meneur'})`)
+        }
+      }
+
+      // Ollama validation sur les rescue candidates qui ont passe le meneur-pattern
+      if (rescueTexts.length > 0) {
+        try {
+          const ollamaModel = config.ollamaModel || 'qwen2.5:14b'
+          const rescueOllamaTexts = rescueTexts.map((r, i) => `${i+1}. "${r.text}"`).join('\n')
+          const rescuePrompt = `Tu analyses des phrases transcrites depuis un enregistrement audio. Un meneur dit des phrases en francais standard decrivant des objets, ustensiles ou actions du quotidien.
+
+Pour chaque phrase, reponds "FR" si c'est du vrai francais coherent et comprehensible, ou "FAUX" si c'est du charabia, des mots inventes, ou des phrases sans sens clair.
+
+Exemples de FR : "Elle se sert de l'entonnoir de cuisine", "Il a un vieux couteau", "Elle a une corbeille en osier"
+Exemples de FAUX : "la fete ingralaille pour les petits dejeuners", "Au nom du Nord-Ne latine bonbon appaiai"
+
+${rescueOllamaTexts}
+
+Pour chaque numero, reponds UNIQUEMENT "FR" ou "FAUX". Format strict :
+1. FR
+2. FAUX`
+
+          logger.info(`[Linguistic] Rescue Ollama : validation de ${rescueTexts.length} candidats...`)
+          const rescueOllamaResp = await ollamaGenerate(ollamaModel, rescuePrompt)
+          logger.info(`[Linguistic] Rescue Ollama reponse : ${rescueOllamaResp.substring(0, 200)}`)
+
+          const rescueLines = rescueOllamaResp.split('\n')
+          for (const line of rescueLines) {
+            const match = line.match(/(\d+)\.\s*(FR|FAUX)/i)
+            if (match) {
+              const idx = parseInt(match[1]) - 1
+              const isFR = match[2].toUpperCase() === 'FR'
+              if (idx >= 0 && idx < rescueTexts.length) {
+                rescueTexts[idx].ollamaOK = isFR
+              }
+            }
+          }
+        } catch (err: any) {
+          logger.warn(`[Linguistic] Rescue Ollama echoue: ${err.message}. On garde tous les candidats.`)
+          for (const r of rescueTexts) r.ollamaOK = true
+        }
+      }
+
+      // Ajouter les sequences rescuees validees
+      let rescuedCount = 0
+      for (const r of rescueTexts) {
+        if (r.ollamaOK === false) {
+          logger.info(`[Linguistic] Rescue Ollama FAUX : ${r.start.toFixed(1)}s "${r.text.substring(0, 60)}"`)
+          continue
+        }
+        const newSeq: LinguisticSequence = {
+          id: randomUUID(),
+          index: 0,
+          french_text: r.text,
+          french_audio: { start: r.start, end: r.end },
+          variants: []
+        }
+        sequences.push(newSeq)
+        rescuedCount++
+        logger.info(`[Linguistic] Rescue OK : ${r.start.toFixed(1)}s "${r.text.substring(0, 60)}"`)
+      }
+
+      if (rescuedCount > 0) {
+        // Re-trier par temps, re-indexer, et re-distribuer les variantes
+        sequences.sort((a, b) => a.french_audio.start - b.french_audio.start)
+
+        // Re-construire les variantes a partir des classifiedBlocks
+        // (les sequences rescuees n'ont pas encore de variantes)
+        const allVariantBlocks = classifiedBlocks.filter((b: any) =>
+          !b.is_french && b.type !== 'name' && (b.end - b.start) >= 1.0
+        ).sort((a: any, b: any) => a.start - b.start)
+
+        // Vider les variantes et les re-assigner
+        for (const seq of sequences) seq.variants = []
+        for (const block of allVariantBlocks) {
+          // Trouver la derniere sequence dont le french_audio.start < block.start
+          let targetSeq: LinguisticSequence | null = null
+          for (let si = sequences.length - 1; si >= 0; si--) {
+            if (sequences[si].french_audio.start < block.start) {
+              targetSeq = sequences[si]
+              break
+            }
+          }
+          if (targetSeq) {
+            let speaker = 'LOCUTEUR'
+            if (block.pair_id >= 0 && nameByPairId.has(block.pair_id)) {
+              speaker = nameByPairId.get(block.pair_id)!
+            }
+            targetSeq.variants.push({
+              speaker,
+              ipa: '',
+              ipa_original: '',
+              audio: { start: block.start, end: block.end }
+            })
+          }
+        }
+
+        sequences = sequences.filter(s => s.variants.length >= 1)
+        sequences.forEach((s, i) => s.index = i)
+
+        logger.info(`[Linguistic] Apres rescue : ${sequences.length} sequences (+${rescuedCount}), ${sequences.reduce((s, q) => s + q.variants.length, 0)} variantes`)
+      }
+    }
+  }
 
   updateTaskProgress(task.id, 40, 'IPA')
 
@@ -286,11 +576,9 @@ Format strict, un par ligne :
     taskId: task.id, step: 'phonetizing', progress: 0, message: 'Transcription phonetique (IPA)...'
   })
 
-  // Filtrer : IPA seulement sur les variantes qui ne sont PAS des noms
+  // IPA sur toutes les variantes (les blocs "name" ne sont plus des variantes)
   const ipaSegments = sequences.flatMap((seq, si) =>
-    seq.variants
-      .map((v: any, vi: number) => ({ id: `${si}_${vi}`, start: v.audio.start, end: v.audio.end, isName: v._isName }))
-      .filter((s: any) => !s.isName)
+    seq.variants.map((v, vi) => ({ id: `${si}_${vi}`, start: v.audio.start, end: v.audio.end }))
   )
 
   if (ipaSegments.length > 0) {

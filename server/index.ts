@@ -55,7 +55,7 @@ app.use((_req, res, next) => {
 })
 
 // Rate limiting on auth routes
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: 'Trop de tentatives, réessayez dans 15 minutes' } })
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: 'Trop de tentatives, réessayez dans 15 minutes' }, validate: { trustProxy: false } })
 
 // ── Path safety helper ──
 function safePath(base: string, userPath: string): string | null {
