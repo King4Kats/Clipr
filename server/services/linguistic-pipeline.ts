@@ -168,7 +168,7 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     } catch {}
   }
 
-  // Clips name pour extraction des noms de speakers
+  // Clips name pour extraction des noms de speakers (blocs pairies)
   const nameBlocks = classifiedBlocks.filter((b: any) => b.type === 'name' && b.pair_id >= 0)
   for (let i = 0; i < nameBlocks.length; i++) {
     const block = nameBlocks[i]
@@ -178,7 +178,30 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
       batchClips.push({ id: `name_${i}`, audioPath: clipPath })
     } catch {}
   }
-  logger.info(`[Linguistic] Whisper batch : ${frBlocks.length} FR + ${nameBlocks.length} noms = ${batchClips.length} clips`)
+
+  // Calculer la duree moyenne des noms depuis les blocs pairies
+  const nameDurations = nameBlocks.map((b: any) => b.end - b.start).filter((d: number) => d > 0.3 && d < 2.0)
+  const avgNameDuration = nameDurations.length > 0
+    ? nameDurations.reduce((a: number, b: number) => a + b, 0) / nameDurations.length
+    : 1.0
+  logger.info(`[Linguistic] Duree moyenne nom : ${avgNameDuration.toFixed(2)}s (sur ${nameDurations.length} blocs)`)
+
+  // Clips "unknown-name" : pour les blocs vernaculaires non-pairies (type=unknown),
+  // extraire la partie nom (debut du bloc → avgNameDuration) pour identifier le speaker.
+  // Ces blocs contiennent nom+vernaculaire en un seul morceau.
+  const unknownVernBlocks = classifiedBlocks.filter((b: any) =>
+    !b.is_french && b.type === 'unknown' && b.pair_id === -1 && (b.end - b.start) >= avgNameDuration + 1.0
+  )
+  for (let i = 0; i < unknownVernBlocks.length; i++) {
+    const block = unknownVernBlocks[i]
+    const nameEnd = block.start + avgNameDuration
+    const clipPath = join(tempDir, `ling_unkname_${task.id}_${i}.wav`)
+    try {
+      execSync(`ffmpeg -y -i "${audioPath}" -ss ${block.start} -to ${nameEnd} -ar 16000 -ac 1 "${clipPath}" 2>/dev/null`)
+      batchClips.push({ id: `unkname_${i}`, audioPath: clipPath })
+    } catch {}
+  }
+  logger.info(`[Linguistic] Whisper batch : ${frBlocks.length} FR + ${nameBlocks.length} noms + ${unknownVernBlocks.length} unknown-noms = ${batchClips.length} clips`)
 
   await whisperService.loadWhisperModel(whisperModel)
   const batchResults = await whisperService.transcribeBatch(
@@ -239,17 +262,41 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
     firstNameCounts.set(firstName, (firstNameCounts.get(firstName) || 0) + 1)
   }
 
-  // Ne garder que les noms dont le prenom apparait >= 2 fois
-  const nameByPairId = new Map<number, string>()
+  // Prenoms confirmes : seulement depuis les blocs pairies (fiables)
   const confirmedFirstNames = new Set<string>()
+  for (const [firstName, count] of firstNameCounts) {
+    if (count >= 2) confirmedFirstNames.add(firstName)
+  }
+  const nameByPairId = new Map<number, string>()
   for (const [pairId, fullName] of rawNames) {
     const firstName = fullName.split(/\s+/)[0].toLowerCase()
-    if ((firstNameCounts.get(firstName) || 0) >= 2) {
+    if (confirmedFirstNames.has(firstName)) {
       nameByPairId.set(pairId, fullName)
-      confirmedFirstNames.add(firstName)
     }
   }
-  const uniqueSpeakers = [...new Set(nameByPairId.values())]
+
+  // Noms des blocs unknown : NE PAS compter pour la frequence (trop de bruit Whisper).
+  // Utiliser uniquement pour l'assignation speaker SI le prenom matche un confirme.
+  const nameByBlockStart = new Map<number, string>()
+  for (let i = 0; i < unknownVernBlocks.length; i++) {
+    const segs = batchResults.get(`unkname_${i}`)
+    let name = segs && segs.length > 0
+      ? segs.map((s: any) => s.text).join(' ').trim()
+      : ''
+    name = name.replace(/^[\s.,!?;:'"«»]+|[\s.,!?;:'"«»]+$/g, '').trim()
+    if (name.length >= 2) {
+      const words = name.split(/\s+/)
+      name = words.map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+      const firstName = words[0].toLowerCase().replace(/[,;:.]+$/, '')
+      // Seulement si le prenom est confirme par les blocs pairies
+      if (confirmedFirstNames.has(firstName)) {
+        nameByBlockStart.set(Math.round(unknownVernBlocks[i].start * 10), name)
+      }
+    }
+  }
+  logger.info(`[Linguistic] Unknown-names valides : ${nameByBlockStart.size} sur ${unknownVernBlocks.length}`)
+
+  const uniqueSpeakers = [...new Set([...nameByPairId.values(), ...nameByBlockStart.values()])]
   logger.info(`[Linguistic] Noms confirmes : ${uniqueSpeakers.length} speakers (${uniqueSpeakers.join(', ')})`)
   logger.info(`[Linguistic] Prenoms confirmes : ${[...confirmedFirstNames].join(', ')}`)
 
@@ -374,16 +421,33 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
 
       const dur = block.end - block.start
       if (dur >= 1.0) {
-        // Chercher le nom du speaker via le pair_id
         let speaker = 'LOCUTEUR'
+        let audioStart = block.start
+        let audioEnd = block.end
+
         if (block.pair_id >= 0 && nameByPairId.has(block.pair_id)) {
+          // Bloc paire : le speaker vient du bloc name associe
           speaker = nameByPairId.get(block.pair_id)!
+        } else if (block.type === 'unknown' && block.pair_id === -1 && dur >= avgNameDuration + 1.0) {
+          // Bloc non-paire : le nom est au debut de l'audio
+          // Offsetter le start pour sauter le nom → IPA et clip sur la partie speech seulement
+          audioStart = block.start + avgNameDuration
+          // Chercher le speaker via nameByBlockStart
+          const key = Math.round(block.start * 10)
+          if (nameByBlockStart.has(key)) {
+            const fullName = nameByBlockStart.get(key)!
+            const firstName = fullName.split(/\s+/)[0].toLowerCase()
+            if (confirmedFirstNames.has(firstName)) {
+              speaker = fullName
+            }
+          }
         }
+
         currentSeq.variants.push({
           speaker,
           ipa: '',
           ipa_original: '',
-          audio: { start: block.start, end: block.end }
+          audio: { start: audioStart, end: audioEnd }
         })
       }
     }
@@ -474,12 +538,15 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
         try {
           const ollamaModel = config.ollamaModel || 'qwen2.5:14b'
           const rescueOllamaTexts = rescueTexts.map((r, i) => `${i+1}. "${r.text}"`).join('\n')
-          const rescuePrompt = `Tu analyses des phrases transcrites depuis un enregistrement audio. Un meneur dit des phrases en francais standard decrivant des objets, ustensiles ou actions du quotidien.
+          const rescuePrompt = `Tu analyses des phrases transcrites depuis un enregistrement audio de collectage linguistique rural. Un meneur dit des phrases en francais decrivant des objets, ustensiles, actions du quotidien ou de la vie paysanne.
 
-Pour chaque phrase, reponds "FR" si c'est du vrai francais coherent et comprehensible, ou "FAUX" si c'est du charabia, des mots inventes, ou des phrases sans sens clair.
+IMPORTANT : le vocabulaire peut etre ancien, regional ou rare (ex: "clissee", "mazarine", "terrine", "ecumoire", "grilloir"). Accepte les phrases meme si certains mots sont inhabituels, tant que la structure est du francais.
 
-Exemples de FR : "Elle se sert de l'entonnoir de cuisine", "Il a un vieux couteau", "Elle a une corbeille en osier"
-Exemples de FAUX : "la fete ingralaille pour les petits dejeuners", "Au nom du Nord-Ne latine bonbon appaiai"
+Reponds "FR" si la phrase a une structure grammaticale francaise (sujet + verbe + complement), meme avec des mots rares.
+Reponds "FAUX" UNIQUEMENT si c'est du vrai charabia incomprehensible, des syllabes sans sens, ou des mots completement inventes enchaines.
+
+Exemples de FR : "Elle se sert de l'entonnoir de cuisine", "Il a une bouteille clissee", "Elle a des mazarines", "Une casserole bosselee"
+Exemples de FAUX : "la fete ingralaille pour les petits dejeuners", "Au nom du Nord-Ne latine bonbon appaiai", "Vous vous redonnez la farine 3-7 caglias"
 
 ${rescueOllamaTexts}
 
@@ -550,15 +617,18 @@ Pour chaque numero, reponds UNIQUEMENT "FR" ou "FAUX". Format strict :
           }
           if (targetSeq) {
             let speaker = 'LOCUTEUR'
+            let aStart = block.start
             if (block.pair_id >= 0 && nameByPairId.has(block.pair_id)) {
               speaker = nameByPairId.get(block.pair_id)!
+            } else if (block.type === 'unknown' && block.pair_id === -1 && (block.end - block.start) >= avgNameDuration + 1.0) {
+              aStart = block.start + avgNameDuration
+              const key = Math.round(block.start * 10)
+              if (nameByBlockStart.has(key)) {
+                const fn = nameByBlockStart.get(key)!.split(/\s+/)[0].toLowerCase()
+                if (confirmedFirstNames.has(fn)) speaker = nameByBlockStart.get(key)!
+              }
             }
-            targetSeq.variants.push({
-              speaker,
-              ipa: '',
-              ipa_original: '',
-              audio: { start: block.start, end: block.end }
-            })
+            targetSeq.variants.push({ speaker, ipa: '', ipa_original: '', audio: { start: aStart, end: block.end } })
           }
         }
 
@@ -734,8 +804,18 @@ Format strict, un par ligne : 1. FR ou 1. FAUX`
         }
         if (target) {
           let speaker = 'LOCUTEUR'
-          if (block.pair_id >= 0 && nameByPairId.has(block.pair_id)) speaker = nameByPairId.get(block.pair_id)!
-          target.variants.push({ speaker, ipa: '', ipa_original: '', audio: { start: block.start, end: block.end } })
+          let aStart = block.start
+          if (block.pair_id >= 0 && nameByPairId.has(block.pair_id)) {
+            speaker = nameByPairId.get(block.pair_id)!
+          } else if (block.type === 'unknown' && block.pair_id === -1 && (block.end - block.start) >= avgNameDuration + 1.0) {
+            aStart = block.start + avgNameDuration
+            const key = Math.round(block.start * 10)
+            if (nameByBlockStart.has(key)) {
+              const fn = nameByBlockStart.get(key)!.split(/\s+/)[0].toLowerCase()
+              if (confirmedFirstNames.has(fn)) speaker = nameByBlockStart.get(key)!
+            }
+          }
+          target.variants.push({ speaker, ipa: '', ipa_original: '', audio: { start: aStart, end: block.end } })
         }
       }
       sequences = sequences.filter(s => s.variants.length >= 1)
