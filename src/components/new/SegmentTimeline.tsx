@@ -4,12 +4,23 @@ import { ZoomIn, ZoomOut, Maximize2, GripHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /**
- * SegmentTimeline — Timeline interactive style NLE (Non-Linear Editor)
+ * =============================================================================
+ * Fichier : SegmentTimeline.tsx
+ * Rôle    : Timeline interactive style NLE (Non-Linear Editor)
  *
- * Affiche la waveform audio avec les segments en overlay coloré.
- * Permet de sélectionner, redimensionner (drag handles) et naviguer.
+ *           Affiche la forme d'onde audio (waveform) avec les segments
+ *           thématiques en overlay coloré par-dessus. Fonctionnalités :
+ *           - Zoom avant/arrière (molette + Ctrl, ou boutons)
+ *           - Scroll horizontal quand on est zoomé
+ *           - Sélection d'un segment par clic
+ *           - Redimensionnement par drag des bords gauche/droit
+ *           - Playhead (tête de lecture) synchronisé avec la vidéo
+ *           - Règle temporelle avec repères dynamiques
+ *           - Scrollbar personnalisée pour la navigation
+ * =============================================================================
  */
 
+/** Formate un nombre de secondes en texte lisible (ex: 125 → "2:05") */
 function formatTime(seconds: number): string {
   if (isNaN(seconds) || seconds < 0) return "0:00";
   const h = Math.floor(seconds / 3600);
@@ -19,7 +30,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-// Couleurs de segment avec alpha pour overlay
+// Couleurs des segments avec transparence (alpha 0.35) pour l'overlay sur la waveform
 const SEGMENT_COLORS_ALPHA = [
   "rgba(59, 130, 246, 0.35)",
   "rgba(16, 185, 129, 0.35)",
@@ -36,6 +47,7 @@ const SEGMENT_COLORS_SOLID = [
   "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16",
 ];
 
+/** État d'un drag en cours (redimensionnement d'un segment) */
 interface DragState {
   segmentId: string;
   edge: "start" | "end";

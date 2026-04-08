@@ -1,37 +1,60 @@
 /**
- * APP.TSX : Composant racine de l'application
+ * =============================================================================
+ * Fichier : App.tsx
+ * Rôle    : Composant racine de l'application React — le "routeur" principal.
  *
- * Gère la navigation entre les différentes vues de l'application :
- * - Écran d'accueil avec upload et projets récents (jusqu'à 6)
- * - Écran de progression pendant le traitement IA
- * - Éditeur NLE (Non-Linear Editor) avec les segments générés
- * - Vue pré-analyse avec prévisualisation vidéo et panneau IA
+ *           Ce composant gère la navigation entre les différentes vues :
+ *           - Écran de connexion/inscription (AuthScreen)
+ *           - Wizard de configuration au premier lancement (SetupWizard)
+ *           - Tableau de bord admin (AdminDashboard)
+ *           - Écran d'accueil avec projets récents (max 6) et création de projet
+ *           - Outil de transcription audio standalone (TranscriptionTool)
+ *           - Outil de transcription linguistique patois (LinguisticTool)
+ *           - Vue "pré-analyse" avec prévisualisation vidéo + panneau IA
+ *           - Écran de progression pendant le traitement IA (ProgressPanel)
+ *           - Éditeur NLE (Non-Linear Editor) avec les segments générés
+ *
+ *           Il gère aussi :
+ *           - Les raccourcis clavier (Ctrl+Z / Ctrl+Shift+Z pour undo/redo)
+ *           - L'écoute des événements WebSocket (progression, résultats IA)
+ *           - Le polling de l'historique des projets toutes les 10 secondes
+ *           - Le partage de projets entre utilisateurs (ShareDialog)
+ * =============================================================================
  */
 
+// ── Imports React et state management ──
 import { useEffect, useState } from "react";
-import { useStore } from "@/store/useStore";
-import { useAuthStore } from "@/store/useAuthStore";
-import api from "@/api";
+import { useStore } from "@/store/useStore";         // Store principal (projets, vidéos, segments)
+import { useAuthStore } from "@/store/useAuthStore"; // Store authentification (login, user)
+import api from "@/api";                              // Client API (HTTP + WebSocket)
 
-import Header from "@/components/new/Header";
-import UploadZone from "@/components/new/UploadZone";
-import AIAnalysisPanel from "@/components/new/AIAnalysisPanel";
-import ProgressPanel from "@/components/new/ProgressPanel";
-import VideoPreview from "@/components/new/VideoPreview";
-import EditorLayout from "@/components/new/EditorLayout";
-import TranscriptionTool from "@/components/new/TranscriptionTool";
-import LinguisticTool from "@/components/new/LinguisticTool";
-import SetupWizard from "@/components/SetupWizard";
-import AuthScreen from "@/components/AuthScreen";
-import AdminDashboard from "@/components/AdminDashboard";
+// ── Imports des composants de l'application ──
+import Header from "@/components/new/Header";                  // Barre de navigation en haut
+import UploadZone from "@/components/new/UploadZone";          // Zone de dépôt drag & drop
+import AIAnalysisPanel from "@/components/new/AIAnalysisPanel"; // Panneau de configuration IA
+import ProgressPanel from "@/components/new/ProgressPanel";    // Overlay de progression
+import VideoPreview from "@/components/new/VideoPreview";      // Lecteur vidéo
+import EditorLayout from "@/components/new/EditorLayout";      // Éditeur NLE avec grille
+import TranscriptionTool from "@/components/new/TranscriptionTool";  // Transcription audio
+import LinguisticTool from "@/components/new/LinguisticTool";  // Transcription linguistique
+import SetupWizard from "@/components/SetupWizard";            // Assistant de config initiale
+import AuthScreen from "@/components/AuthScreen";              // Écran de connexion
+import AdminDashboard from "@/components/AdminDashboard";      // Tableau de bord admin
 
-import ShareDialog from "@/components/ShareDialog";
+import ShareDialog from "@/components/ShareDialog";            // Modale de partage de projet
 
-import { motion, AnimatePresence } from "framer-motion";
-import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check, Share2, Users, Brain, Scissors, Mic, BookOpen } from "lucide-react";
+// ── Imports bibliothèques externes ──
+import { motion, AnimatePresence } from "framer-motion";       // Animations fluides
+import { Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check, Share2, Users, Brain, Scissors, Mic, BookOpen } from "lucide-react"; // Icônes
 import logo from "@/assets/Clipr.svg";
 
+/**
+ * Composant principal App.
+ * Détermine quelle vue afficher selon l'état de l'application :
+ * authentification, projets, outils, éditeur, etc.
+ */
 function App() {
+  // ── État d'authentification (depuis le store Zustand) ──
   const { isAuthenticated, isLoading: authLoading, checkAuth, user } = useAuthStore();
 
   const {
@@ -51,21 +74,22 @@ function App() {
     renameProject,
   } = useStore();
 
-  const [showSetup, setShowSetup] = useState(false);
-  const [setupChecked, setSetupChecked] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
-  const [sharingProjectId, setSharingProjectId] = useState<string | null>(null);
+  // ── États locaux de l'interface ──
+  const [showSetup, setShowSetup] = useState(false);            // Afficher le wizard de config ?
+  const [setupChecked, setSetupChecked] = useState(false);      // A-t-on vérifié le premier lancement ?
+  const [showAdmin, setShowAdmin] = useState(false);            // Afficher le dashboard admin ?
+  const [editingId, setEditingId] = useState<string | null>(null);   // Projet en cours de renommage
+  const [editingName, setEditingName] = useState("");                // Nouveau nom en cours de saisie
+  const [sharingProjectId, setSharingProjectId] = useState<string | null>(null);  // Modale de partage
   const [sharingProjectName, setSharingProjectName] = useState("");
-  const [sharedProjects, setSharedProjects] = useState<any[]>([]);
-  const [projectMode, setProjectMode] = useState<'choose' | 'ai' | 'manual' | null>(null);
-  const [showTranscriptionTool, setShowTranscriptionTool] = useState(false);
+  const [sharedProjects, setSharedProjects] = useState<any[]>([]);   // Projets partagés avec moi
+  const [projectMode, setProjectMode] = useState<'choose' | 'ai' | 'manual' | null>(null); // Mode du projet (IA ou manuel)
+  const [showTranscriptionTool, setShowTranscriptionTool] = useState(false);  // Outil transcription
   const [activeTranscriptionProject, setActiveTranscriptionProject] = useState<any>(null);
-  const [showVideoSegmentation, setShowVideoSegmentation] = useState(false);
-  const [showLinguisticTool, setShowLinguisticTool] = useState(false);
+  const [showVideoSegmentation, setShowVideoSegmentation] = useState(false);  // Outil segmentation vidéo
+  const [showLinguisticTool, setShowLinguisticTool] = useState(false);  // Outil linguistique
   const [activeLinguisticProject, setActiveLinguisticProject] = useState<any>(null);
-  const [showNewProjectChoice, setShowNewProjectChoice] = useState(false);
+  const [showNewProjectChoice, setShowNewProjectChoice] = useState(false); // Menu "nouveau projet"
 
   // Reset segmentation screen once files are uploaded — ensure mode choice is shown
   useEffect(() => {
