@@ -1,36 +1,55 @@
 /**
- * LINGUISTIC-PIPELINE.TS : Pipeline de transcription linguistique
+ * =============================================================================
+ * Fichier : linguistic-pipeline.ts
+ * Rôle    : Pipeline de transcription linguistique (collectage patois/vernaculaire)
  *
- * Approche hybride : pyannote (QUI parle) + silence detect (QUAND) :
- *   1. Extraction audio (si video)
- *   2. WhisperX/pyannote sur tout l'audio → timeline speakers
- *   3. Silence detect → blocs de parole precis
- *   4. Croiser : chaque bloc + timeline → meneur ou intervenant
- *   5. Grouper en sequences : meneur → variantes → meneur → ...
- *   6. Whisper batch sur blocs meneur → texte FR
- *   7. Allosaurus IPA sur blocs intervenants
- *   8. Clips audio + save DB
+ *           Ce pipeline est conçu pour traiter des enregistrements de collectage
+ *           linguistique rural, où un "meneur" pose des questions en français
+ *           standard, et des "intervenants" répondent en patois/vernaculaire.
+ *
+ *           Approche hybride en 9 étapes :
+ *           1. Extraction audio (si le fichier est une vidéo)
+ *           2. Détection des silences → découpage en blocs de parole
+ *           3. Classification linguistique (français vs vernaculaire) par bloc
+ *              + filtres successifs (score, nom-pairé, pattern meneur, consécutifs)
+ *           4. Validation Whisper + Ollama des blocs classés français
+ *           5. Construction des séquences : meneur FR → variantes vernaculaires
+ *           6. Rescue pass : récupérer les phrases du meneur ratées par le lang-id
+ *           7. Rescue par diarisation : scanner les grosses séquences
+ *           8. Transcription phonétique IPA (Allosaurus) sur les variantes
+ *           9. Extraction des clips audio + sauvegarde en base de données
+ *
+ *           Chaque étape envoie sa progression via WebSocket (broadcastFn)
+ *           pour que l'utilisateur puisse suivre en temps réel dans l'interface.
+ * =============================================================================
  */
 
+// ── Imports Node.js et services internes ──
 import { extname, join } from 'path'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs'
 import { execSync, spawn } from 'child_process'
-import * as ffmpegService from './ffmpeg.js'
-import * as whisperService from './whisper.js'
-import { vadDiarize } from './diarization.js'
-import { getDb } from './database.js'
-import { updateTaskProgress } from './task-queue.js'
+import * as ffmpegService from './ffmpeg.js'       // Extraction audio, manipulation vidéo
+import * as whisperService from './whisper.js'      // Transcription vocale → texte
+import { vadDiarize } from './diarization.js'       // Identification des locuteurs (diarisation)
+import { getDb } from './database.js'               // Accès à la base SQLite
+import { updateTaskProgress } from './task-queue.js' // Mise à jour de la progression dans la queue
 import { getProject, saveProject, updateProjectStatus } from './project-history.js'
 import { randomUUID } from 'crypto'
 import { logger } from '../logger.js'
 
 import type { QueueTask } from './task-queue.js'
 
+// Fonction de diffusion WebSocket (envoie des événements au frontend en temps réel)
 type BroadcastFn = (userId: string, projectId: string | null, type: string, data: any) => void
 
+// Extensions vidéo reconnues (les fichiers audio n'ont pas besoin d'extraction)
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.mts']
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
 
+/**
+ * Une variante vernaculaire dans une séquence linguistique.
+ * Chaque intervenant donne sa version d'un mot/expression en patois.
+ */
 interface LinguisticVariant {
   speaker: string
   ipa: string
@@ -39,6 +58,11 @@ interface LinguisticVariant {
   audio_extract?: string
 }
 
+/**
+ * Une séquence linguistique complète :
+ * - La phrase du meneur en français (french_text + french_audio)
+ * - Les variantes des intervenants en patois (variants[])
+ */
 interface LinguisticSequence {
   id: string
   index: number
@@ -47,6 +71,11 @@ interface LinguisticSequence {
   variants: LinguisticVariant[]
 }
 
+/**
+ * Fonction principale du pipeline linguistique.
+ * Orchestrate les 9 étapes de traitement décrites dans l'en-tête du fichier.
+ * Appelée par la file d'attente (task-queue) quand une tâche 'linguistic' démarre.
+ */
 export async function runLinguisticPipeline(task: QueueTask, broadcastFn: BroadcastFn): Promise<{ linguisticId: string }> {
   const { user_id: userId, config } = task
   const filePath: string = config.filePath
@@ -150,6 +179,9 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
   let frBlocks = classifiedBlocks.filter((b: any) => b.is_french)
 
   // ── Step 3.5 : VALIDATION FR — Whisper + Ollama anti-hallucination ──
+  // On transcrit les blocs classés "français" avec Whisper pour vérifier
+  // que le contenu est bien du français (et pas du vernaculaire mal classé).
+  // On transcrit aussi les blocs "name" pour extraire les prénoms des intervenants.
   broadcastFn(userId, null, 'linguistic:progress', {
     taskId: task.id, step: 'transcribing', progress: 0, message: 'Validation des blocs francais...'
   })
@@ -826,7 +858,10 @@ Format strict, un par ligne : 1. FR ou 1. FAUX`
 
   updateTaskProgress(task.id, 55, 'IPA')
 
-  // ── Step 5 : Allosaurus IPA sur les variantes (PAS les blocs 'name') ──
+  // ── Step 5 : Transcription phonétique IPA (Allosaurus) ──
+  // Allosaurus est un reconnaisseur de phonèmes universel qui convertit
+  // la parole en alphabet phonétique international (IPA).
+  // On l'applique uniquement sur les variantes vernaculaires (pas le meneur FR).
   broadcastFn(userId, null, 'linguistic:progress', {
     taskId: task.id, step: 'phonetizing', progress: 0, message: 'Transcription phonetique (IPA)...'
   })
@@ -854,7 +889,11 @@ Format strict, un par ligne : 1. FR ou 1. FAUX`
     }
   }
 
-  // ── Step 8 : Extraits audio (asynchrone) ──
+  // ── Step 8 : Extraction des clips audio individuels ──
+  // Pour chaque séquence, on extrait un fichier WAV séparé :
+  // - Un clip pour la phrase du meneur en français
+  // - Un clip pour chaque variante vernaculaire
+  // Ces clips permettent à l'utilisateur de réécouter chaque segment isolément.
   const linguisticId = randomUUID()
   const clipDir = join(DATA_DIR, 'linguistic', linguisticId)
   mkdirSync(clipDir, { recursive: true })
@@ -881,7 +920,9 @@ Format strict, un par ligne : 1. FR ou 1. FAUX`
 
   updateTaskProgress(task.id, 90, 'Sauvegarde')
 
-  // ── Step 9 : Save DB ──
+  // ── Step 9 : Sauvegarde en base de données ──
+  // On enregistre toutes les séquences, les speakers identifiés, et la durée
+  // dans la table linguistic_transcriptions. Si un projet est associé, on le met à jour.
   const speakers = [...new Set(sequences.flatMap(s => s.variants.map(v => v.speaker)))]
   const db = getDb()
   db.prepare(
@@ -908,8 +949,19 @@ Format strict, un par ligne : 1. FR ou 1. FAUX`
   return { linguisticId }
 }
 
-// ── Helpers spawn ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── HELPERS : Fonctions qui lancent les scripts Python en sous-processus ──
+// Chaque helper :
+// - Lance un script Python avec spawn()
+// - Écoute stderr pour la progression (PROGRESS:XX)
+// - Récupère le résultat via stdout (JSON) ou un fichier de sortie
+// - Gère gracieusement les erreurs (retourne null au lieu de crash)
+// ══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Lance le script lang-classify.py qui détecte si chaque bloc de parole
+ * est en français ou en vernaculaire, en utilisant le modèle VoxLingua107.
+ */
 function runLangClassify(
   audioPath: string,
   blocks: Array<{ start: number; end: number }>,
@@ -962,6 +1014,10 @@ function runLangClassify(
   })
 }
 
+/**
+ * Lance silence-segment.py : détecte les silences dans l'audio avec FFmpeg,
+ * puis découpe en blocs de parole et les regroupe en séquences.
+ */
 function runSilenceSegment(audioPath: string, onProgress: (p: number) => void): Promise<any | null> {
   return new Promise((resolve) => {
     const script = join(process.cwd(), 'scripts', 'silence-segment.py')
@@ -997,6 +1053,10 @@ function runWhisperX(audioPath: string, model: string, language: string, numSpea
   })
 }
 
+/**
+ * Lance phonetize.py : transcription phonétique IPA via Allosaurus.
+ * Convertit chaque segment audio en sa représentation en alphabet phonétique international.
+ */
 function runPhonetize(audioPath: string, segments: { id: string; start: number; end: number }[], onProgress: (p: number) => void): Promise<any[]> {
   return new Promise((resolve) => {
     const script = join(process.cwd(), 'scripts', 'phonetize.py')
@@ -1020,7 +1080,8 @@ function runPhonetize(audioPath: string, segments: { id: string; start: number; 
   })
 }
 
-// ── Ollama helper ──
+// ── Ollama : Helper pour appeler le LLM local ──
+// Utilisé pour valider que les phrases rescuées sont bien du français
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'ollama'
 const OLLAMA_PORT = parseInt(process.env.OLLAMA_PORT || '11434')
 
@@ -1048,7 +1109,12 @@ function ollamaGenerate(model: string, prompt: string): Promise<string> {
   })
 }
 
-// ── CRUD helpers ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── CRUD : Fonctions de lecture/écriture/suppression en base de données ──
+// Ces fonctions sont appelées par les routes API dans server/index.ts
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Récupère une transcription linguistique par son ID (admin peut voir toutes) */
 export function getLinguisticTranscription(id: string, userId: string, userRole?: string): any | null {
   const db = getDb()
   const row = userRole === 'admin'
@@ -1058,11 +1124,13 @@ export function getLinguisticTranscription(id: string, userId: string, userRole?
   return { ...row, sequences: JSON.parse(row.sequences), speakers: JSON.parse(row.speakers) }
 }
 
+/** Liste l'historique des transcriptions linguistiques d'un utilisateur */
 export function getLinguisticHistory(userId: string, limit: number = 20): any[] {
   const db = getDb()
   return db.prepare('SELECT id, filename, leader_speaker, duration, created_at FROM linguistic_transcriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?').all(userId, limit) as any[]
 }
 
+/** Supprime une transcription linguistique + ses fichiers audio clips */
 export function deleteLinguisticTranscription(id: string, userId: string): boolean {
   const db = getDb()
   const result = db.prepare('DELETE FROM linguistic_transcriptions WHERE id = ? AND user_id = ?').run(id, userId)
@@ -1070,6 +1138,7 @@ export function deleteLinguisticTranscription(id: string, userId: string): boole
   return result.changes > 0
 }
 
+/** Met à jour le texte français ou l'IPA d'une variante dans une séquence */
 export function updateLinguisticSequence(id: string, seqIdx: number, updates: any): any | null {
   const db = getDb()
   const row = db.prepare('SELECT sequences FROM linguistic_transcriptions WHERE id = ?').get(id) as any
@@ -1085,11 +1154,13 @@ export function updateLinguisticSequence(id: string, seqIdx: number, updates: an
   return sequences
 }
 
+/** Change le nom du meneur (leader) dans une transcription */
 export function updateLinguisticLeader(id: string, newLeader: string): any | null {
   getDb().prepare('UPDATE linguistic_transcriptions SET leader_speaker = ? WHERE id = ?').run(newLeader, id)
   return { success: true }
 }
 
+/** Renomme un locuteur partout dans les séquences, speakers et leader */
 export function renameLinguisticSpeaker(id: string, oldName: string, newName: string): any | null {
   const db = getDb()
   const row = db.prepare('SELECT sequences, speakers, leader_speaker FROM linguistic_transcriptions WHERE id = ?').get(id) as any
@@ -1105,6 +1176,7 @@ export function renameLinguisticSpeaker(id: string, oldName: string, newName: st
   return { sequences, speakers, leader_speaker: leader }
 }
 
+/** Exporte une transcription en JSON ou CSV (avec séparateur point-virgule) */
 export function exportLinguistic(id: string, format: string = 'json'): { content: string; mime: string; ext: string } {
   const db = getDb()
   const row = db.prepare('SELECT * FROM linguistic_transcriptions WHERE id = ?').get(id) as any
