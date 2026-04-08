@@ -1,14 +1,30 @@
+/**
+ * =============================================================================
+ * Fichier : useStore.ts
+ * Rôle    : Store Zustand principal — le "cerveau" de l'application frontend.
+ *
+ *           Ce store contient TOUT l'état global de l'app :
+ *           - Le projet actif (id, nom)
+ *           - Les fichiers vidéo importés (multi-vidéos avec offsets)
+ *           - La transcription Whisper (segments de texte horodatés)
+ *           - Les segments thématiques (découpage IA ou manuel)
+ *           - La progression du traitement (extraction, transcription, analyse)
+ *           - La configuration (modèle Whisper, modèle Ollama, langue, etc.)
+ *           - L'historique des projets (jusqu'à 6 max)
+ *           - Le système Undo/Redo (30 niveaux max)
+ *           - L'auto-save (sauvegarde automatique 5s après chaque modification)
+ *
+ *           Zustand fonctionne avec un pattern simple :
+ *           - `set({...})` pour modifier l'état
+ *           - `get()` pour lire l'état actuel
+ *           - Les composants React utilisent `useStore(s => s.xxx)` pour
+ *             s'abonner à une partie spécifique de l'état
+ * =============================================================================
+ */
+
 import { create } from 'zustand'
 import { VideoFile, VideoSegment, TranscriptSegment, ProcessingStep, AppConfig, VideoClip } from '../types'
 import api from '../api'
-
-/**
- * USESTORE.TS : Gestion de l'état global (Store Zustand)
- *
- * Centralise l'état réactif de l'application : gestion multi-projets,
- * fichiers vidéo, transcriptions Whisper, configuration des modèles
- * et suivi du workflow de traitement.
- */
 
 interface AppState {
   // Projet actif

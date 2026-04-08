@@ -1,90 +1,174 @@
 /**
- * API.TS : Client API HTTP + WebSocket
- * Supporte les channels WebSocket par projet pour le suivi en temps réel.
+ * =============================================================================
+ * Fichier : api.ts
+ * Rôle    : Client API côté navigateur (frontend).
+ *
+ *           Ce fichier fait le pont entre l'interface utilisateur React et le
+ *           serveur Express. Il fournit :
+ *
+ *           1. Une connexion WebSocket pour recevoir les événements en temps réel
+ *              (progression de l'analyse IA, transcription Whisper, etc.)
+ *           2. Des helpers HTTP (GET, POST, PATCH, DELETE) pour appeler l'API REST
+ *           3. Un système d'upload avec support des gros fichiers (chunked upload)
+ *           4. Un objet `api` centralisé qui regroupe TOUTES les méthodes
+ *              disponibles (upload, FFmpeg, Whisper, Ollama, projets, etc.)
+ *
+ *           L'objet `api` est aussi exposé sur `window.electron` pour compatibilité
+ *           avec l'ancienne architecture Electron de l'application.
+ * =============================================================================
  */
 
+// Pas de préfixe d'URL : le frontend et le backend sont servis sur le même domaine
 const API_BASE = ''  // meme origin
+
+// Clé utilisée dans localStorage pour stocker le token JWT de l'utilisateur
 const AUTH_STORAGE_KEY = 'clipr-auth-token'
 
+/**
+ * Construit les en-têtes d'authentification pour les requêtes HTTP.
+ * Si l'utilisateur est connecté, on ajoute le header "Authorization: Bearer <token>"
+ * qui sera vérifié par le middleware requireAuth côté serveur.
+ */
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem(AUTH_STORAGE_KEY)
   return token ? { 'Authorization': `Bearer ${token}` } : {}
 }
 
-// ── WebSocket ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── WEBSOCKET : Communication temps réel avec le serveur ──
+// Le WebSocket permet de recevoir des événements "push" du serveur sans
+// avoir à les demander (polling). C'est utilisé pour :
+// - Suivre la progression de l'analyse IA en direct
+// - Recevoir les segments de transcription au fur et à mesure
+// - Être notifié quand une tâche en file d'attente démarre ou se termine
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Type d'une fonction callback qui recevra les données d'un événement WebSocket
 type WsCallback = (data: any) => void
+
+// Registre des callbacks : pour chaque type d'événement, on stocke une liste de fonctions
+// Exemple : wsCallbacks['progress'] = [callback1, callback2, ...]
 const wsCallbacks: Record<string, WsCallback[]> = {}
+
+// Référence vers la connexion WebSocket active (null si déconnecté)
 let ws: WebSocket | null = null
+
+// Timer pour la reconnexion automatique (3 secondes après une déconnexion)
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+// ID du projet actuellement "écouté" via WebSocket (pour recevoir ses événements)
 let currentSubscribedProjectId: string | null = null
 
+/**
+ * Établit la connexion WebSocket avec le serveur.
+ * - Détecte automatiquement si on est en HTTP (ws:) ou HTTPS (wss:)
+ * - S'authentifie dès la connexion avec le token JWT
+ * - Se ré-abonne au projet en cours si on se reconnecte après une coupure
+ * - Se reconnecte automatiquement 3 secondes après une déconnexion
+ */
 function connectWs() {
+  // Choisir le bon protocole WebSocket selon HTTP ou HTTPS
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   ws = new WebSocket(`${protocol}//${window.location.host}/ws`)
 
+  // Quand la connexion est établie
   ws.onopen = () => {
-    // Authenticate WebSocket connection
+    // Envoyer le token JWT pour s'authentifier sur le WebSocket
     const token = localStorage.getItem(AUTH_STORAGE_KEY)
     if (token) wsSend({ type: 'auth', token })
-    // Re-subscribe to project channel after reconnect
+    // Si on était abonné à un projet avant la déconnexion, se réabonner
     if (currentSubscribedProjectId) {
       wsSend({ type: 'subscribe', projectId: currentSubscribedProjectId })
     }
   }
 
+  // Quand on reçoit un message du serveur
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
       const type = data.type
+      // Appeler tous les callbacks enregistrés pour ce type d'événement
       if (type && wsCallbacks[type]) {
         wsCallbacks[type].forEach(cb => cb(data))
       }
     } catch {}
   }
 
+  // Reconnexion automatique après 3 secondes si la connexion se ferme
   ws.onclose = () => {
     if (wsReconnectTimer) clearTimeout(wsReconnectTimer)
     wsReconnectTimer = setTimeout(connectWs, 3000)
   }
 
+  // En cas d'erreur, fermer proprement (ce qui déclenchera la reconnexion)
   ws.onerror = () => ws?.close()
 }
 
+/**
+ * Envoie un message au serveur via WebSocket.
+ * Ne fait rien si la connexion n'est pas ouverte (évite les erreurs).
+ */
 function wsSend(msg: any) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg))
   }
 }
 
+/**
+ * Enregistre un callback pour un type d'événement WebSocket.
+ * Retourne une fonction de "cleanup" pour se désabonner (utile dans les useEffect React).
+ *
+ * Exemple d'utilisation :
+ *   const unsub = onWsEvent('progress', (data) => console.log(data))
+ *   // Plus tard, pour se désabonner :
+ *   unsub()
+ */
 function onWsEvent(type: string, callback: WsCallback): () => void {
   if (!wsCallbacks[type]) wsCallbacks[type] = []
   wsCallbacks[type].push(callback)
+  // Retourne la fonction de désabonnement
   return () => { wsCallbacks[type] = wsCallbacks[type].filter(cb => cb !== callback) }
 }
 
-// Subscribe to project-specific WebSocket events
+/**
+ * S'abonne au "channel" WebSocket d'un projet spécifique.
+ * Le serveur n'enverra que les événements concernant CE projet (progression, résultats, etc.)
+ */
 function subscribeToProject(projectId: string) {
   currentSubscribedProjectId = projectId
-  // Ensure auth before subscribing
+  // S'assurer qu'on est authentifié avant de s'abonner
   const token = localStorage.getItem(AUTH_STORAGE_KEY)
   if (token) wsSend({ type: 'auth', token })
   wsSend({ type: 'subscribe', projectId })
 }
 
+/**
+ * Se désabonne du channel projet. On ne recevra plus les événements de ce projet.
+ */
 function unsubscribeFromProject() {
   currentSubscribedProjectId = null
   wsSend({ type: 'unsubscribe' })
 }
 
+// Lancer la connexion WebSocket dès le chargement du fichier
 connectWs()
 
-// ── HTTP helpers ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── HELPERS HTTP : Fonctions utilitaires pour les requêtes API REST ──
+// Ces fonctions simplifient les appels fetch() en gérant automatiquement :
+// - L'authentification (header Authorization)
+// - Le parsing de la réponse JSON
+// - La gestion des erreurs (throw si le status n'est pas OK)
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Requête GET — pour récupérer des données */
 async function get<T = any>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { headers: getAuthHeaders() })
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
   return res.json()
 }
 
+/** Requête POST — pour envoyer des données (créer, déclencher une action) */
 async function post<T = any>(path: string, body?: any): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
@@ -95,6 +179,7 @@ async function post<T = any>(path: string, body?: any): Promise<T> {
   return res.json()
 }
 
+/** Requête PATCH — pour modifier partiellement une ressource */
 async function patch<T = any>(path: string, body?: any): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'PATCH',
@@ -105,20 +190,37 @@ async function patch<T = any>(path: string, body?: any): Promise<T> {
   return res.json()
 }
 
+/** Requête DELETE — pour supprimer une ressource */
 async function del<T = any>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE', headers: getAuthHeaders() })
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
   return res.json()
 }
 
-// ── Upload helper ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── UPLOAD : Envoi de fichiers au serveur ──
+// Deux stratégies selon la taille du fichier :
+// - Petit fichier (< 90 Mo) : envoi en une seule requête
+// - Gros fichier (>= 90 Mo) : envoi par morceaux (chunks) puis assemblage
+// Le chunked upload est nécessaire pour passer les limites de Cloudflare Tunnel (100 Mo)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Taille max d'un chunk : 90 Mo (en dessous de la limite Cloudflare de 100 Mo)
 const CHUNK_SIZE = 90 * 1024 * 1024 // 90MB — under Cloudflare Tunnel's 100MB limit
 
+/**
+ * Upload un gros fichier en le découpant en morceaux (chunks).
+ * Chaque morceau est envoyé séparément, puis le serveur les rassemble.
+ * En cas d'échec, chaque chunk est réessayé jusqu'à 3 fois.
+ */
 async function uploadFileChunked(file: File, onProgress?: (pct: number) => void): Promise<any> {
+  // Identifiant unique pour cet upload (permet au serveur de regrouper les chunks)
   const uploadId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
 
+  // Envoyer chaque chunk un par un
   for (let i = 0; i < totalChunks; i++) {
+    // Découper le fichier : prendre les octets de i*CHUNK_SIZE à (i+1)*CHUNK_SIZE
     const blob = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
     const form = new FormData()
     form.append('chunk', blob)
@@ -127,6 +229,7 @@ async function uploadFileChunked(file: File, onProgress?: (pct: number) => void)
     form.append('totalChunks', String(totalChunks))
     form.append('fileName', file.name)
 
+    // Système de retry : 3 tentatives par chunk avec 1s de pause entre chaque
     let lastErr: Error | null = null
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -140,9 +243,11 @@ async function uploadFileChunked(file: File, onProgress?: (pct: number) => void)
       }
     }
     if (lastErr) throw lastErr
+    // Mettre à jour la progression (0 à 1)
     onProgress?.((i + 1) / totalChunks)
   }
 
+  // Demander au serveur d'assembler tous les chunks en un seul fichier
   const res = await fetch(`${API_BASE}/api/upload/chunk/complete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -152,6 +257,11 @@ async function uploadFileChunked(file: File, onProgress?: (pct: number) => void)
   return res.json()
 }
 
+/**
+ * Upload un ou plusieurs fichiers. Choisit automatiquement la stratégie :
+ * - Petit fichier : envoi classique en une requête (FormData)
+ * - Gros fichier : envoi par chunks via uploadFileChunked
+ */
 async function uploadFiles(files: File[], onProgress?: (pct: number) => void): Promise<any[]> {
   const totalSize = files.reduce((s, f) => s + f.size, 0)
   const results: any[] = []
@@ -159,7 +269,7 @@ async function uploadFiles(files: File[], onProgress?: (pct: number) => void): P
 
   for (const file of files) {
     if (file.size < CHUNK_SIZE) {
-      // Small file — use existing single-request upload
+      // Petit fichier : upload classique en une seule requête
       const formData = new FormData()
       formData.append('videos', file)
       const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: formData, headers: getAuthHeaders() })
@@ -169,7 +279,7 @@ async function uploadFiles(files: File[], onProgress?: (pct: number) => void): P
       uploaded += file.size
       onProgress?.(uploaded / totalSize)
     } else {
-      // Large file — chunked upload
+      // Gros fichier : upload par morceaux
       const result = await uploadFileChunked(file, (chunkPct) => {
         onProgress?.((uploaded + chunkPct * file.size) / totalSize)
       })
@@ -182,7 +292,15 @@ async function uploadFiles(files: File[], onProgress?: (pct: number) => void): P
   return results
 }
 
-// ── Download helper ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── DOWNLOAD : Téléchargement de fichiers ──
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Déclenche le téléchargement d'un fichier dans le navigateur.
+ * Crée un lien <a> invisible, clique dessus, puis le supprime.
+ * C'est la technique standard pour déclencher un téléchargement en JS.
+ */
 function downloadFile(url: string, filename: string) {
   const a = document.createElement('a')
   a.href = url
@@ -192,10 +310,18 @@ function downloadFile(url: string, filename: string) {
   document.body.removeChild(a)
 }
 
-// ── API ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── OBJET API : Regroupe TOUTES les méthodes de l'API ──
+// C'est cet objet qui est importé partout dans l'application avec `import api`
+// Chaque méthode correspond à un endpoint du serveur Express.
+// ══════════════════════════════════════════════════════════════════════════════
 const api = {
+  // ── Upload de fichiers vidéo/audio ──
   uploadFiles,
 
+  // ── Génération d'URLs pour les fichiers médias ──
+  // Le token est passé en paramètre d'URL car les balises <video> et <audio>
+  // ne supportent pas les headers d'authentification personnalisés.
   getVideoUrl: (fileId: string) => {
     const token = localStorage.getItem(AUTH_STORAGE_KEY)
     return `${API_BASE}/api/files/${fileId}${token ? `?token=${token}` : ''}`
@@ -205,30 +331,30 @@ const api = {
     return `${API_BASE}/api/data-files/${relativePath}${token ? `?token=${token}` : ''}`
   },
 
-  // FFmpeg
+  // ── FFmpeg : Manipulation vidéo/audio ──
   getVideoDuration: (videoPath: string) => post<{ duration: number }>('/api/ffmpeg/duration', { videoPath }).then(r => r.duration),
   extractAudio: (videoPath: string) => post<{ audioPath: string }>('/api/ffmpeg/extract-audio', { videoPath }).then(r => r.audioPath),
   cutVideo: (input: string, start: number, end: number, output: string) => post('/api/ffmpeg/cut', { input, start, end, output }),
   concatenateVideos: (inputPaths: string[], output: string) => post('/api/ffmpeg/concatenate', { inputPaths, output }),
 
-  // Export
+  // ── Export : Génération et téléchargement de fichiers ──
   exportSegment: (clips: any[], title: string, index: number) => post<{ filename: string; downloadUrl: string }>('/api/export/segment', { clips, title, index }),
   exportText: (content: string, filename: string) => post<{ downloadUrl: string }>('/api/export/text', { content, filename }),
   downloadExport: (url: string, filename: string) => downloadFile(url, filename),
 
-  // Whisper
+  // ── Whisper : Transcription audio → texte ──
   transcribe: (audioPath: string, language: string, model?: string, initialPrompt?: string) =>
     post<{ segments: any[] }>('/api/whisper/transcribe', { audioPath, language, model, initialPrompt }).then(r => r.segments),
   cancelTranscription: () => post('/api/whisper/cancel'),
 
-  // Ollama
+  // ── Ollama : IA locale (analyse thématique) ──
   checkOllama: () => get<{ running: boolean }>('/api/ollama/check').then(r => r.running),
   listOllamaModels: () => get<{ models: string[] }>('/api/ollama/models').then(r => r.models),
   pullOllamaModel: (model: string) => post<{ success: boolean; message: string }>('/api/ollama/pull', { model }),
   analyzeTranscript: (transcript: string, context: string, model: string) =>
     post('/api/ollama/analyze', { transcript, context, model }),
 
-  // Project
+  // ── Projets : CRUD et gestion de l'historique ──
   getProjectHistory: () => get<any[]>('/api/project/history'),
   createProject: (name: string, type: 'manual' | 'ai' = 'manual') =>
     post<any>('/api/project/create', { name, type }),
@@ -238,15 +364,18 @@ const api = {
   renameProject: (id: string, name: string) => patch(`/api/project/${id}/rename`, { name }),
   deleteProject: (id: string) => del(`/api/project/${id}`),
   updateProjectStatus: (id: string, status: string) => patch(`/api/project/${id}/status`, { status }),
-  // AI / Queue status
+
+  // ── File d'attente IA et statut ──
   getAiStatus: () => get<{ locked: boolean; lock: any; queue: any }>('/api/ai/status'),
   getQueueState: () => get<any>('/api/queue'),
   getTaskStatus: (taskId: string) => get<any>(`/api/queue/${taskId}`),
   cancelTask: (taskId: string) => del(`/api/queue/${taskId}`),
-  // Launch server-side background analysis (via queue)
+
+  // Lance l'analyse IA en arrière-plan (le serveur met la tâche en file d'attente)
   launchAnalysis: (projectId: string, config: any) =>
     post<{ success: boolean; taskId: string; position: number }>(`/api/project/${projectId}/analyze`, { config }),
-  // Sharing
+
+  // ── Partage de projets entre utilisateurs ──
   shareProject: (projectId: string, username: string, role: 'viewer' | 'editor' = 'viewer') =>
     post(`/api/project/${projectId}/share`, { username, role }),
   unshareProject: (projectId: string, userId: string) =>
@@ -255,6 +384,7 @@ const api = {
   getSharedProjects: () => get<any[]>('/api/project/shared'),
   searchUsers: (query: string) => get<any[]>(`/api/users/search?q=${encodeURIComponent(query)}`),
 
+  // ── Import/Export de projets complets ──
   exportProject: (data: any) => post<{ downloadUrl: string }>('/api/project/export', data),
   importProject: async (file: File) => {
     const formData = new FormData()
@@ -264,23 +394,24 @@ const api = {
     return res.json()
   },
 
-  // Setup
+  // ── Configuration et vérification des dépendances ──
   checkDependencies: () => get('/api/setup/dependencies'),
 
-  // Version & Update
+  // ── Version et mises à jour ──
   getAppVersion: () => get<{ version: string }>('/api/version').then(r => r.version),
   checkForUpdates: () => get('/api/update/check'),
   installUpdate: () => post('/api/update'),
 
-  // Logs
+  // ── Logs : export des journaux du serveur ──
   exportLogs: () => downloadFile('/api/logs/export', 'clipr-logs.log'),
 
-  // Standalone Transcription
+  // ── Transcription standalone (outil séparé des projets vidéo) ──
   uploadMedia: async (file: File): Promise<any> => {
     if (file.size >= CHUNK_SIZE) {
-      // Large file: use chunked upload, then server treats it as media
+      // Gros fichier : upload par morceaux
       return uploadFileChunked(file)
     }
+    // Petit fichier : upload classique
     const formData = new FormData()
     formData.append('file', file)
     const res = await fetch(`${API_BASE}/api/upload/media`, { method: 'POST', body: formData, headers: getAuthHeaders() })
@@ -289,21 +420,22 @@ const api = {
   },
   startTranscription: (filePath: string, filename: string, config: any) =>
     post<{ success: boolean; taskId: string; position: number }>('/api/transcription/start', { filePath, filename, config }),
-  // Batch transcription
+
+  // ── Transcription batch : plusieurs fichiers d'un coup ──
   uploadMediaBatch: async (files: File[]): Promise<any> => {
-    // Check if any file needs chunked upload
+    // Séparer les gros fichiers (chunked) des petits (batch classique)
     const largeFiles = files.filter(f => f.size >= CHUNK_SIZE)
     const smallFiles = files.filter(f => f.size < CHUNK_SIZE)
 
     const results: any[] = []
 
-    // Upload large files individually via chunked
+    // Les gros fichiers sont uploadés individuellement par chunks
     for (const file of largeFiles) {
       const result = await uploadFileChunked(file)
       results.push(result)
     }
 
-    // Upload small files via batch endpoint
+    // Les petits fichiers sont uploadés ensemble en un seul FormData
     if (smallFiles.length > 0) {
       const formData = new FormData()
       smallFiles.forEach(f => formData.append('files', f))
@@ -327,26 +459,27 @@ const api = {
     return `${API_BASE}/api/transcription/${id}/export?format=${format}${token ? `&token=${token}` : ''}`
   },
 
-  // WebSocket events
+  // ── Événements WebSocket : Analyse IA (projets vidéo) ──
+  // Chaque méthode retourne une fonction de désabonnement
   onProgress: (cb: (data: any) => void) => onWsEvent('progress', cb),
   onTranscriptSegment: (cb: (segment: any) => void) => onWsEvent('transcript:segment', cb),
   onModelProgress: (cb: (data: any) => void) => onWsEvent('model:progress', cb),
   onAnalysisComplete: (cb: (data: any) => void) => onWsEvent('analysis:complete', cb),
   onAnalysisError: (cb: (data: any) => void) => onWsEvent('analysis:error', cb),
 
-  // Queue WebSocket events
+  // ── Événements WebSocket : File d'attente ──
   onQueueUpdate: (cb: (data: any) => void) => onWsEvent('queue:update', cb),
   onQueueTaskStarted: (cb: (data: any) => void) => onWsEvent('queue:task-started', cb),
   onQueueTaskCompleted: (cb: (data: any) => void) => onWsEvent('queue:task-completed', cb),
   onQueueTaskFailed: (cb: (data: any) => void) => onWsEvent('queue:task-failed', cb),
 
-  // Transcription WebSocket events
+  // ── Événements WebSocket : Transcription standalone ──
   onTranscriptionProgress: (cb: (data: any) => void) => onWsEvent('transcription:progress', cb),
   onTranscriptionSegment: (cb: (data: any) => void) => onWsEvent('transcription:segment', cb),
   onTranscriptionComplete: (cb: (data: any) => void) => onWsEvent('transcription:complete', cb),
   onDiarizationComplete: (cb: (data: any) => void) => onWsEvent('transcription:diarization-complete', cb),
 
-  // Linguistic transcription
+  // ── Transcription linguistique (analyse patois/vernaculaire) ──
   startLinguistic: (filePath: string, filename: string, config: any) =>
     post<{ success: boolean; taskId: string; position: number; projectId: string }>('/api/linguistic/start', { filePath, filename, config }),
   getLinguistic: (id: string) => get<any>(`/api/linguistic/${id}`),
@@ -367,18 +500,19 @@ const api = {
     return `${API_BASE}/api/linguistic/${id}/audio/${filename}${token ? `?token=${token}` : ''}`
   },
 
-  // Linguistic WebSocket events
+  // ── Événements WebSocket : Linguistique ──
   onLinguisticProgress: (cb: (data: any) => void) => onWsEvent('linguistic:progress', cb),
   onLinguisticComplete: (cb: (data: any) => void) => onWsEvent('linguistic:complete', cb),
 
-  // WebSocket project subscription
+  // ── Abonnement aux channels WebSocket par projet ──
   subscribeToProject,
   unsubscribeFromProject,
 
-  // Documentation
+  // ── Documentation : ouvre la doc technique dans un nouvel onglet ──
   openDocumentation: () => { window.open('/docs/', '_blank') }
 }
 
+// Exposer l'API sur window.electron pour compatibilité avec l'ancienne architecture
 ;(window as any).electron = api
 
 export default api
