@@ -1,14 +1,34 @@
-import express from 'express'
-import { createServer } from 'http'
-import { WebSocketServer, WebSocket } from 'ws'
-import multer from 'multer'
-import cors from 'cors'
-import rateLimit from 'express-rate-limit'
-import { join, basename, extname, resolve } from 'path'
-import { existsSync, mkdirSync, createReadStream, createWriteStream, statSync, readFileSync, writeFileSync, readdirSync, renameSync, rmSync, unlinkSync } from 'fs'
-import { execSync, exec } from 'child_process'
-import { logger } from './logger.js'
+/**
+ * =============================================================================
+ * Fichier : server/index.ts
+ * Rôle    : Point d'entrée du serveur Express — le "chef d'orchestre" backend.
+ *
+ *           Ce fichier fait TOUT le câblage de l'application côté serveur :
+ *           - Configure Express (middlewares, CORS, rate limiting, upload)
+ *           - Crée le serveur HTTP et le WebSocket (temps réel)
+ *           - Définit TOUTES les routes API REST (auth, projets, upload,
+ *             FFmpeg, Whisper, Ollama, transcription, partage, admin, etc.)
+ *           - Initialise la file d'attente des tâches IA
+ *           - Sert le frontend build (fichiers statiques) et la documentation
+ *
+ *           C'est un gros fichier parce qu'il centralise toutes les routes.
+ *           La logique métier est déléguée aux services (./services/*.ts).
+ * =============================================================================
+ */
 
+// ── Imports des bibliothèques ──
+import express from 'express'                          // Framework web HTTP
+import { createServer } from 'http'                    // Serveur HTTP natif Node.js
+import { WebSocketServer, WebSocket } from 'ws'        // WebSocket pour le temps réel
+import multer from 'multer'                            // Gestion des uploads de fichiers
+import cors from 'cors'                                // Cross-Origin Resource Sharing
+import rateLimit from 'express-rate-limit'             // Protection contre le spam de requêtes
+import { join, basename, extname, resolve } from 'path' // Manipulation de chemins de fichiers
+import { existsSync, mkdirSync, createReadStream, createWriteStream, statSync, readFileSync, writeFileSync, readdirSync, renameSync, rmSync, unlinkSync } from 'fs'
+import { execSync, exec } from 'child_process'         // Exécution de commandes système
+import { logger } from './logger.js'                   // Système de log (console + fichier)
+
+// ── Imports des services métier (chaque service gère une responsabilité) ──
 import * as ffmpegService from './services/ffmpeg.js'
 import * as whisperService from './services/whisper.js'
 import * as ollamaService from './services/ollama.js'
@@ -23,28 +43,36 @@ import { runLinguisticPipeline, getLinguisticTranscription, getLinguisticHistory
 import { getDb } from './services/database.js'
 import { requireAuth, requireAdmin, optionalAuth } from './middleware/auth.js'
 
-// ── Config ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── CONFIGURATION : Dossiers de données et port du serveur ──
+// ══════════════════════════════════════════════════════════════════════════════
 const PORT = parseInt(process.env.PORT || '3000')
-const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
-const UPLOAD_DIR = join(DATA_DIR, 'uploads')
-const EXPORT_DIR = join(DATA_DIR, 'exports')
-const CHUNK_DIR = join(DATA_DIR, 'chunks')
+const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')  // Dossier racine des données
+const UPLOAD_DIR = join(DATA_DIR, 'uploads')   // Fichiers vidéo/audio uploadés
+const EXPORT_DIR = join(DATA_DIR, 'exports')   // Fichiers exportés (clips vidéo, texte)
+const CHUNK_DIR = join(DATA_DIR, 'chunks')     // Morceaux temporaires (chunked upload)
 
+// Créer les dossiers s'ils n'existent pas
 for (const dir of [DATA_DIR, UPLOAD_DIR, EXPORT_DIR, CHUNK_DIR]) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 }
 
-// ── Express ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── INITIALISATION EXPRESS : Serveur HTTP et middlewares ──
+// ══════════════════════════════════════════════════════════════════════════════
 const app = express()
-app.set('trust proxy', true)
+app.set('trust proxy', true)  // Nécessaire derrière un reverse proxy (Caddy, Nginx)
 const server = createServer(app)
 
-// CORS: restrict to same origin in production
+// CORS : autoriser les requêtes cross-origin (utile en développement)
 const ALLOWED_ORIGINS = process.env.CORS_ORIGINS?.split(',') || []
 app.use(cors(ALLOWED_ORIGINS.length > 0 ? { origin: ALLOWED_ORIGINS } : undefined))
+
+// Parser JSON avec une limite de 10 Mo (pour les transcriptions volumineuses)
 app.use(express.json({ limit: '10mb' }))
 
-// Force UTF-8 charset on all JSON responses
+// Forcer l'encodage UTF-8 sur toutes les réponses JSON
+// (évite les problèmes d'accents dans les noms de fichiers français)
 app.use((_req, res, next) => {
   const originalJson = res.json.bind(res)
   res.json = (body: any) => {
@@ -54,10 +82,13 @@ app.use((_req, res, next) => {
   next()
 })
 
-// Rate limiting on auth routes
+// Protection anti-spam : max 10 tentatives de login/register par 15 minutes
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: 'Trop de tentatives, réessayez dans 15 minutes' }, validate: { trustProxy: false } })
 
-// ── Path safety helper ──
+/**
+ * Vérifie qu'un chemin fourni par l'utilisateur ne sort pas du dossier autorisé.
+ * Protection contre les attaques de type "path traversal" (ex: ../../etc/passwd)
+ */
 function safePath(base: string, userPath: string): string | null {
   const resolved = resolve(base, userPath)
   if (!resolved.startsWith(resolve(base))) return null
@@ -72,15 +103,21 @@ if (existsSync(distPath)) app.use(express.static(distPath))
 const docsPath = join(__dirname, '..', 'docs')
 if (existsSync(docsPath)) app.use('/docs', express.static(docsPath))
 
-// ── WebSocket (project-scoped channels) ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── WEBSOCKET : Communication temps réel avec les clients ──
+// Chaque client peut s'abonner à un "channel" projet pour recevoir
+// uniquement les événements qui le concernent (progression, résultats, etc.)
+// ══════════════════════════════════════════════════════════════════════════════
 const wss = new WebSocketServer({ server, path: '/ws' })
 
+/** Représente un client WebSocket connecté avec son contexte */
 interface WsClient {
   ws: WebSocket
-  projectId: string | null
-  userId: string | null
+  projectId: string | null  // Le projet qu'il écoute (null = aucun)
+  userId: string | null      // L'utilisateur authentifié (null = pas encore auth)
 }
 
+// Ensemble de tous les clients WebSocket connectés
 const clients = new Set<WsClient>()
 
 wss.on('connection', (ws) => {
@@ -123,13 +160,13 @@ wss.on('connection', (ws) => {
   ws.on('close', () => clients.delete(client))
 })
 
-// Broadcast to ALL clients (legacy / global events)
+/** Diffuse un message à TOUS les clients connectés (événements globaux) */
 function broadcast(type: string, data: any) {
   const msg = JSON.stringify({ type, ...data })
   clients.forEach(c => { if (c.ws.readyState === WebSocket.OPEN) c.ws.send(msg) })
 }
 
-// Broadcast to clients subscribed to a specific project
+/** Diffuse un message uniquement aux clients abonnés à un projet spécifique */
 function broadcastToProject(projectId: string, type: string, data: any) {
   const msg = JSON.stringify({ type, projectId, ...data })
   clients.forEach(c => {
@@ -139,7 +176,7 @@ function broadcastToProject(projectId: string, type: string, data: any) {
   })
 }
 
-// Broadcast to a specific user (all their connected clients)
+/** Diffuse un message à un utilisateur spécifique (tous ses onglets/appareils) */
 function broadcastToUser(userId: string, type: string, data: any) {
   const msg = JSON.stringify({ type, ...data })
   clients.forEach(c => {
@@ -149,7 +186,11 @@ function broadcastToUser(userId: string, type: string, data: any) {
   })
 }
 
-// Unified broadcast for queue: sends to user AND to project if applicable
+/**
+ * Broadcast unifié pour la file d'attente IA :
+ * - Les événements liés à un projet (progress, analyse) → envoyés au channel projet
+ * - Les événements globaux (queue update) → envoyés à l'utilisateur
+ */
 function queueBroadcast(userId: string, projectId: string | null, type: string, data: any) {
   if (projectId && (type === 'progress' || type === 'transcript:segment' || type === 'analysis:complete' || type === 'analysis:error')) {
     broadcastToProject(projectId, type, data)
@@ -158,7 +199,11 @@ function queueBroadcast(userId: string, projectId: string | null, type: string, 
   }
 }
 
-// ── Upload (multer) with file type validation ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── UPLOAD : Configuration de Multer pour la gestion des fichiers ──
+// Multer est un middleware Express qui gère les uploads multipart/form-data.
+// On configure les types de fichiers acceptés et la taille max (5 Go).
+// ══════════════════════════════════════════════════════════════════════════════
 const ALLOWED_VIDEO_MIMES = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', 'video/mp2t']
 const ALLOWED_EXTENSIONS = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.mts']
 
@@ -201,7 +246,8 @@ const mediaUpload = multer({
   }
 })
 
-// ── Chunked upload (for large files through Cloudflare Tunnel) ──
+// ── Upload par morceaux (chunked) pour les gros fichiers ──
+// Nécessaire pour passer la limite de 100 Mo de Cloudflare Tunnel
 const chunkStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, CHUNK_DIR),
   filename: (_req, _file, cb) => cb(null, `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`)
@@ -241,7 +287,8 @@ function cleanStaleChunks() {
 cleanStaleChunks()
 setInterval(cleanStaleChunks, 30 * 60_000)
 
-// ── Remux non-browser-compatible formats (MTS) to MP4 ──
+// ── Remux : Convertir les formats non compatibles navigateur (MTS) en MP4 ──
+// Les caméras pro génèrent souvent du MTS, que les navigateurs ne lisent pas
 const NEEDS_REMUX = ['.mts']
 async function remuxToMp4(inputPath: string): Promise<{ path: string, filename: string }> {
   const ext = extname(inputPath).toLowerCase()
@@ -260,7 +307,9 @@ async function remuxToMp4(inputPath: string): Promise<{ path: string, filename: 
   return { path: mp4Path, filename: mp4Name }
 }
 
-// ── Initialize task queue ──
+// ── Initialisation de la file d'attente IA ──
+// On enregistre les 3 types de pipelines (analyse, transcription, linguistique)
+// et la fonction de broadcast pour envoyer la progression aux clients
 taskQueueService.initQueue(
   {
     analysis: runAnalysisPipeline,
@@ -270,12 +319,16 @@ taskQueueService.initQueue(
   queueBroadcast
 )
 
-// ── Routes API ──
+// ══════════════════════════════════════════════════════════════════════════════
+// ── ROUTES API REST ──
+// Toutes les routes de l'application sont définies ci-dessous.
+// Chaque route délègue la logique aux services (auth, project, ffmpeg, etc.)
+// ══════════════════════════════════════════════════════════════════════════════
 
-// Health
+// Vérification que le serveur tourne (utile pour les health checks Docker)
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: Date.now() }))
 
-// ── Auth (rate-limited) ──
+// ── Authentification (protégée par rate limiting) ──
 app.post('/api/auth/register', authLimiter, (req, res) => {
   try {
     const { username, email, password } = req.body
@@ -432,7 +485,8 @@ app.post('/api/upload/chunk/complete', requireAuth, express.json(), async (req, 
   }
 })
 
-// Stream video/audio files (token via query param for <video> tags)
+// Streaming vidéo/audio avec support du Range (lecture progressive)
+// Le token est passé en query param car les balises <video> ne supportent pas les headers custom
 app.get('/api/files/:filename', (req, res) => {
   // Auth via header OR query param (needed for <video src="...?token=xxx">)
   const token = req.headers.authorization?.slice(7) || (req.query.token as string)
@@ -785,7 +839,7 @@ app.delete('/api/queue/:taskId', requireAuth, (req, res) => {
   res.json({ success: true })
 })
 
-// ── Standalone Transcription ──
+// ── Transcription standalone (outil séparé de la segmentation vidéo) ──
 app.post('/api/upload/media', requireAuth, mediaUpload.single('file'), async (req, res) => {
   try {
     const file = req.file
@@ -963,9 +1017,9 @@ app.delete('/api/transcription/:id', requireAuth, (req, res) => {
   res.json({ success: true })
 })
 
-// ── Linguistic transcription routes ──
+// ── Routes de transcription linguistique (patois/vernaculaire) ──
 
-// Start linguistic transcription
+// Démarrer une analyse linguistique
 app.post('/api/linguistic/start', requireAuth, (req, res) => {
   try {
     const { filePath, filename, config, projectName } = req.body
@@ -1145,14 +1199,16 @@ app.post('/api/update', requireAuth, requireAdmin, (_req, res) => {
   }, 500)
 })
 
-// Fallback SPA
+// Fallback SPA : toutes les routes non-API renvoient index.html
+// C'est nécessaire pour que le routing côté client (React Router) fonctionne
 app.get('*', (_req, res) => {
   const indexPath = join(distPath, 'index.html')
   if (existsSync(indexPath)) res.sendFile(indexPath)
   else res.status(404).json({ error: 'Not found' })
 })
 
-// ── Start ──
+// ── Démarrage du serveur ──
+// Écoute sur 0.0.0.0 pour être accessible depuis l'extérieur du container Docker
 server.listen(PORT, '0.0.0.0', () => {
   logger.info(`Clipr server running on port ${PORT}`)
   logger.info(`Data directory: ${DATA_DIR}`)
