@@ -1,11 +1,26 @@
 /**
- * LINGUISTICTOOL.TSX : Outil de transcription linguistique (patois)
+ * =============================================================================
+ * Fichier : LinguisticTool.tsx
+ * Rôle    : Outil de transcription linguistique (collectage patois/vernaculaire)
  *
- * Permet d'uploader un fichier audio/video, de segmenter par sequences
- * (francais + variantes patois), de generer l'IPA via Allosaurus,
- * et d'editer/exporter les resultats.
+ *           Cet outil est conçu pour les ethnolinguistes et collecteurs.
+ *           Il permet de traiter des enregistrements de terrain où un meneur
+ *           pose des questions en français et des informateurs répondent
+ *           dans leur patois/langue régionale. Fonctionnalités :
+ *
+ *           - Upload d'un fichier audio ou vidéo
+ *           - Traitement automatique via le pipeline linguistique côté serveur
+ *           - Affichage des séquences : phrase FR du meneur + variantes patois
+ *           - Transcription phonétique IPA (Allosaurus) de chaque variante
+ *           - Écoute individuelle de chaque clip audio
+ *           - Édition du texte français et de l'IPA
+ *           - Renommage des locuteurs (intervenants)
+ *           - Export en JSON ou CSV
+ *           - Historique des transcriptions linguistiques passées
+ * =============================================================================
  */
 
+// ── Imports ──
 import { useState, useCallback, useRef, useEffect } from "react"
 import { Upload, BookOpen, Loader2, Play, Pause, Download, ArrowLeft, ChevronDown, Pencil, RotateCcw } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"

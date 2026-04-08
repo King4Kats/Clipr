@@ -1,12 +1,28 @@
 /**
- * TRANSCRIPTIONTOOL.TSX : Outil de transcription audio standalone
+ * =============================================================================
+ * Fichier : TranscriptionTool.tsx
+ * Rôle    : Outil de transcription audio/vidéo standalone.
  *
- * Permet d'uploader un fichier audio ou vidéo, de le transcrire avec Whisper
- * via la file d'attente IA, et d'afficher/exporter le résultat.
+ *           Cet outil est indépendant de la segmentation vidéo IA. Il permet :
+ *           - D'uploader un ou plusieurs fichiers audio/vidéo (mode batch)
+ *           - De configurer le modèle Whisper, la langue, et le prompt
+ *           - De suivre la progression en temps réel via WebSocket
+ *           - D'afficher les segments transcrits avec horodatage
+ *           - D'identifier les locuteurs (diarisation + noms par Ollama)
+ *           - De renommer les locuteurs manuellement
+ *           - D'exporter en TXT ou SRT (sous-titres)
+ *           - De copier la transcription dans le presse-papier
+ *           - De gérer un historique des transcriptions passées
+ *
+ *           Le traitement tourne côté serveur via la file d'attente IA.
+ *           Le composant écoute les événements WebSocket pour mettre à jour
+ *           l'interface en temps réel (progression, segments reçus, etc.)
+ * =============================================================================
  */
 
+// ── Imports React ──
 import { useState, useEffect, useRef, useCallback } from "react"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion"  // Animations fluides
 import {
   Mic, ArrowLeft, Upload, Loader2, Copy, Download, Trash2,
   CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files, Pencil, X, Check
@@ -18,19 +34,22 @@ import {
 import api from "@/api"
 import type { TranscriptSegment, TranscriptionHistoryItem } from "@/types"
 
+// Extensions de fichiers acceptées par l'outil
 const ACCEPTED_EXTENSIONS = '.mp4,.mov,.avi,.mkv,.webm,.mts,.wav,.mp3,.flac,.ogg,.m4a,.aac'
 const AUDIO_EXTENSIONS = ['wav', 'mp3', 'flac', 'ogg', 'm4a', 'aac']
 const VIDEO_EXTENSIONS = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'mts']
 const ALL_EXTENSIONS = [...AUDIO_EXTENSIONS, ...VIDEO_EXTENSIONS]
 
+/** Props du composant : callback pour revenir en arrière + projet initial optionnel */
 interface TranscriptionToolProps {
   onBack: () => void
   initialProject?: any
 }
 
+/** Étapes possibles du traitement (machine à états) */
 type ToolStatus = 'idle' | 'uploading' | 'queued' | 'extracting-audio' | 'transcribing' | 'diarizing' | 'identifying-speakers' | 'done' | 'error'
 
-// Batch file item
+/** Élément d'un batch de transcriptions (un fichier = un BatchItem) */
 interface BatchItem {
   id: string
   file: File
@@ -45,6 +64,7 @@ interface BatchItem {
   liveSegments: TranscriptSegment[]
 }
 
+/** Petit composant d'info-bulle (tooltip) au survol d'un icône "?" */
 const InfoTip = ({ text }: { text: string }) => {
   const [show, setShow] = useState(false)
   return (
@@ -59,8 +79,12 @@ const InfoTip = ({ text }: { text: string }) => {
   )
 }
 
+/**
+ * Composant principal de l'outil de transcription.
+ * Gère tout le workflow : upload → configuration → traitement → résultats → export.
+ */
 const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) => {
-  // Upload state
+  // ── État upload ──
   const [file, setFile] = useState<File | null>(null)
   const [uploadedFile, setUploadedFile] = useState<{ path: string; name: string; duration: number } | null>(null)
   const [isDragging, setIsDragging] = useState(false)
