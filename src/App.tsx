@@ -57,21 +57,24 @@ function App() {
   // ── État d'authentification (depuis le store Zustand) ──
   const { isAuthenticated, isLoading: authLoading, checkAuth, user } = useAuthStore();
 
+  // ── État principal de l'app (depuis le store Zustand "useStore") ──
+  // On "destructure" le store pour récupérer uniquement les valeurs dont on a besoin.
+  // Zustand est comme un gros objet global partagé entre tous les composants.
   const {
-    videoFiles,
-    processingStep,
-    segments,
-    addTranscriptSegment,
-    setProcessing,
-    setSegments,
-    setTranscript,
-    setAudioPaths,
-    history,
-    loadHistory,
-    loadFromHistory,
-    createProject,
-    deleteProject,
-    renameProject,
+    videoFiles,            // Liste des fichiers vidéo importés par l'utilisateur
+    processingStep,        // Étape actuelle du traitement IA ('idle', 'transcribing', 'analyzing', 'done', etc.)
+    segments,              // Les segments thématiques découpés par l'IA (ou manuellement)
+    addTranscriptSegment,  // Fonction pour ajouter un segment de transcription reçu en temps réel
+    setProcessing,         // Fonction pour changer l'étape de traitement + progression
+    setSegments,           // Fonction pour remplacer tous les segments d'un coup
+    setTranscript,         // Fonction pour remplacer toute la transcription
+    setAudioPaths,         // Fonction pour définir les chemins des fichiers audio extraits
+    history,               // Historique des projets récents (max 6)
+    loadHistory,           // Fonction pour recharger la liste des projets depuis le serveur
+    loadFromHistory,       // Fonction pour ouvrir un projet depuis l'historique
+    createProject,         // Fonction pour créer un nouveau projet vide
+    deleteProject,         // Fonction pour supprimer un projet (soft delete)
+    renameProject,         // Fonction pour renommer un projet
   } = useStore();
 
   // ── États locaux de l'interface ──
@@ -91,7 +94,14 @@ function App() {
   const [activeLinguisticProject, setActiveLinguisticProject] = useState<any>(null);
   const [showNewProjectChoice, setShowNewProjectChoice] = useState(false); // Menu "nouveau projet"
 
-  // Reset segmentation screen once files are uploaded — ensure mode choice is shown
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── useEffect = "effets de bord" qui se déclenchent automatiquement ──
+  // C'est comme dire "quand X change, fais Y".
+  // Le tableau à la fin (ex: [videoFiles.length]) = les "déclencheurs".
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // Quand des vidéos sont importées depuis l'écran de segmentation,
+  // on ferme cet écran et on passe au choix du mode (IA ou manuel)
   useEffect(() => {
     if (showVideoSegmentation && videoFiles.length > 0) {
       setShowVideoSegmentation(false);
@@ -100,7 +110,8 @@ function App() {
     }
   }, [videoFiles.length, showVideoSegmentation]);
 
-  // Check auth on mount
+  // Au tout premier chargement de l'app, on vérifie si le token JWT
+  // stocké dans le localStorage est encore valide
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
@@ -121,10 +132,17 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Quand l'utilisateur est connecté :
+  // 1. Vérifier si c'est le tout premier lancement (wizard de config)
+  // 2. Charger l'historique des projets + les projets partagés
+  // 3. Lancer un "polling" toutes les 10 secondes pour rafraîchir les statuts
+  //    (utile quand une analyse IA tourne en arrière-plan)
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) return; // Pas connecté = on ne fait rien
 
     const checkFirstRun = async () => {
+      // Si "decoupeur-video-setup-complete" n'existe pas dans le localStorage,
+      // c'est la première fois → afficher le wizard de configuration
       const setupComplete = localStorage.getItem("decoupeur-video-setup-complete");
       if (!setupComplete) setShowSetup(true);
       setSetupChecked(true);
@@ -133,13 +151,15 @@ function App() {
     };
     checkFirstRun();
 
-    // Poll history every 10s to update processing status on home page
+    // Rafraîchir la liste des projets toutes les 10 secondes
+    // (seulement si on est sur l'écran d'accueil, pas dans un projet ouvert)
     const interval = setInterval(async () => {
       if (!useStore.getState().activeProjectId) {
         loadHistory();
         try { setSharedProjects(await api.getSharedProjects()) } catch {}
       }
     }, 10000);
+    // Nettoyer le timer quand le composant est démonté (bonne pratique React)
     return () => clearInterval(interval);
   }, [loadHistory, isAuthenticated]);
 
@@ -148,40 +168,52 @@ function App() {
     setShowSetup(false);
   };
 
-  // Écoute les événements WebSocket du serveur (project-scoped)
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── ÉCOUTE WEBSOCKET : recevoir les événements en temps réel ──
+  // Le serveur envoie des messages WebSocket pendant le traitement IA :
+  // - 'progress' : pourcentage de progression + message d'étape
+  // - 'transcript:segment' : un bout de transcription (reçu au fur et à mesure)
+  // - 'analysis:complete' : l'analyse est terminée, voici les résultats
+  // - 'analysis:error' : l'analyse a échoué
+  //
+  // (window as any).electron = l'objet api.ts exposé sur window
+  // Chaque onXxx() retourne une fonction "unsub" pour se désabonner
+  // ══════════════════════════════════════════════════════════════════════════
   useEffect(() => {
     if (!(window as any).electron) return;
 
-    // Progress updates (extraction, transcription, analysis)
+    // Quand le serveur envoie un update de progression (extraction audio, transcription, analyse)
     const unsubProgress = (window as any).electron.onProgress((data: any) => {
-      if (!useStore.getState().activeProjectId) return;
+      if (!useStore.getState().activeProjectId) return; // Ignorer si pas de projet actif
       const step = data.step || processingStep;
       setProcessing(step, data.progress, data.message);
     });
 
-    // Transcript segments streamed in real-time
+    // Quand un segment de transcription arrive en temps réel
+    // (Whisper transcrit au fur et à mesure, on affiche chaque segment dès qu'il arrive)
     const unsubSegment = (window as any).electron.onTranscriptSegment((segment: any) => {
       if (!useStore.getState().activeProjectId) return;
       addTranscriptSegment(segment as any);
     });
 
-    // Analysis completed server-side — load results
+    // Quand l'analyse IA est terminée côté serveur → charger les résultats
     const unsubComplete = (window as any).electron.onAnalysisComplete((data: any) => {
       if (!useStore.getState().activeProjectId) return;
-      if (data.segments) setSegments(data.segments);
-      if (data.transcript) setTranscript(data.transcript);
-      if (data.audioPaths) setAudioPaths(data.audioPaths);
+      if (data.segments) setSegments(data.segments);     // Les segments thématiques découpés
+      if (data.transcript) setTranscript(data.transcript); // La transcription complète
+      if (data.audioPaths) setAudioPaths(data.audioPaths); // Les fichiers audio extraits
       setProcessing('done', 100, 'Analyse terminée !');
-      loadHistory();
+      loadHistory(); // Rafraîchir l'historique (le projet est maintenant "terminé")
     });
 
-    // Analysis failed server-side
+    // Quand l'analyse IA a échoué côté serveur
     const unsubError = (window as any).electron.onAnalysisError((data: any) => {
       if (!useStore.getState().activeProjectId) return;
       setProcessing('error', 0, data.message || 'Erreur d\'analyse');
       loadHistory();
     });
 
+    // Nettoyage : se désabonner de tous les événements quand le composant se démonte
     return () => {
       unsubProgress();
       unsubSegment();
@@ -190,12 +222,18 @@ function App() {
     };
   }, [processingStep, setProcessing, addTranscriptSegment, setSegments, setTranscript, setAudioPaths, loadHistory]);
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── HANDLERS : Fonctions déclenchées par les actions de l'utilisateur ──
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Démarre le mode "renommage" d'un projet (affiche un input au lieu du titre) */
   const handleStartRename = (e: React.MouseEvent, id: string, currentName: string) => {
     e.stopPropagation();
     setEditingId(id);
     setEditingName(currentName);
   };
 
+  /** Confirme le renommage (envoie au serveur) */
   const handleConfirmRename = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (editingId && editingName.trim()) {
@@ -205,12 +243,14 @@ function App() {
     setEditingName("");
   };
 
+  /** Annule le renommage et ferme l'input */
   const handleCancelRename = (e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingId(null);
     setEditingName("");
   };
 
+  /** Supprime un projet (soft delete côté serveur) */
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     await deleteProject(id);
@@ -220,18 +260,37 @@ function App() {
     setShowNewProjectChoice(true);
   };
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── renderContent() : Le "routeur" de vues ──
+  // Cette fonction détermine quel écran afficher en fonction de l'état.
+  // C'est une cascade de conditions "if" : la première qui matche gagne.
+  //
+  // L'ordre est important ! Par exemple, si l'outil transcription est ouvert,
+  // on l'affiche même s'il y a des vidéos dans le store.
+  //
+  // Flux de navigation :
+  //   1. Outil transcription ouvert ? → TranscriptionTool
+  //   2. Outil linguistique ouvert ? → LinguisticTool
+  //   3. Écran segmentation vidéo (upload) ? → UploadZone
+  //   4. Pas de vidéo et pas de projet ? → Écran d'accueil (projets + outils)
+  //   5. Traitement en cours ? → ProgressPanel (overlay de progression)
+  //   6. Des segments existent ? → EditorLayout (l'éditeur NLE)
+  //   7. Vidéos uploadées mais pas encore de mode choisi ? → Choix IA/Manuel
+  //   8. Mode IA choisi ? → VideoPreview + AIAnalysisPanel
+  //   9. Mode Manuel ? → EditorLayout directement
+  // ══════════════════════════════════════════════════════════════════════════
   const renderContent = () => {
-    // ── Outil de transcription standalone ──
+    // ── 1. Outil de transcription audio standalone ──
     if (showTranscriptionTool) {
       return <TranscriptionTool onBack={() => { setShowTranscriptionTool(false); setActiveTranscriptionProject(null); loadHistory(); }} initialProject={activeTranscriptionProject} />;
     }
 
-    // ── Outil de transcription linguistique ──
+    // ── 2. Outil de transcription linguistique (patois/vernaculaire) ──
     if (showLinguisticTool) {
       return <LinguisticTool onBack={() => { setShowLinguisticTool(false); setActiveLinguisticProject(null); loadHistory(); }} initialProject={activeLinguisticProject} />;
     }
 
-    // ── Écran segmentation d'interview vidéo (upload) ──
+    // ── 3. Écran de segmentation vidéo (zone d'upload) ──
     if (showVideoSegmentation && videoFiles.length === 0 && !useStore.getState().activeProjectId) {
       return (
         <div className="max-w-4xl mx-auto w-full pt-8">
@@ -255,7 +314,12 @@ function App() {
     }
 
 
-    // ── Écran d'accueil : aucune vidéo importée et pas de projet actif ──
+    // ── 4. Écran d'accueil : aucune vidéo importée et pas de projet actif ──
+    // C'est la vue par défaut. On affiche :
+    // - Le logo Clipr
+    // - La grille des projets récents (max 6)
+    // - Les projets partagés avec moi
+    // - Les raccourcis vers les outils (transcription, segmentation, linguistique)
     if (videoFiles.length === 0 && !useStore.getState().activeProjectId) {
       return (
         <div className="max-w-5xl mx-auto w-full pt-12">
@@ -570,7 +634,8 @@ function App() {
       );
     }
 
-    // ── Écran de progression ──
+    // ── 5. Écran de progression (l'IA travaille en arrière-plan) ──
+    // Affiché quand le traitement est en cours (ni idle, ni ready, ni done, ni export)
     if (
       processingStep !== "idle" &&
       processingStep !== "ready" &&
@@ -580,12 +645,15 @@ function App() {
       return <ProgressPanel />;
     }
 
-    // ── Éditeur NLE ──
+    // ── 6. Éditeur NLE (Non-Linear Editor) — l'analyse IA est terminée ──
+    // Quand on a des segments (découpés par l'IA ou créés manuellement),
+    // on affiche l'éditeur complet avec timeline, segments, vidéo, etc.
     if (segments.length > 0) {
       return <EditorLayout />;
     }
 
-    // ── Choix du mode : IA ou Manuel ──
+    // ── 7. Choix du mode : IA automatique ou découpe manuelle ──
+    // Affiché juste après l'upload de vidéos, avant de commencer le travail
     if (projectMode === null || projectMode === 'choose') {
       return (
         <div className="max-w-3xl mx-auto w-full pt-12">
@@ -635,7 +703,10 @@ function App() {
       );
     }
 
-    // ── Mode IA : vue pré-analyse ──
+    // ── 8. Mode IA : vue pré-analyse ──
+    // L'utilisateur voit sa vidéo + le panneau de configuration de l'IA
+    // (choix du modèle Whisper, modèle Ollama, langue, contexte, etc.)
+    // Il peut ajuster les paramètres puis lancer l'analyse
     if (projectMode === 'ai') {
       return (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 mt-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -678,11 +749,18 @@ function App() {
       );
     }
 
-    // ── Mode Manuel : éditeur direct (avec segments vides) ──
+    // ── 9. Mode Manuel : éditeur direct (sans segments pré-générés) ──
+    // L'utilisateur crée ses segments à la main sur la timeline
     return <EditorLayout />;
   };
 
-  // Auth loading
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── RENDU PRINCIPAL DU COMPOSANT ──
+  // Les conditions ci-dessous forment un "garde" : on vérifie les
+  // prérequis avant d'afficher l'interface principale.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // Pendant qu'on vérifie le token JWT → afficher un spinner
   if (authLoading) {
     return (
       <div className="h-screen flex items-center justify-center bg-background">
@@ -691,7 +769,7 @@ function App() {
     );
   }
 
-  // Not authenticated — show login/register
+  // Pas connecté → afficher l'écran de login/inscription
   if (!isAuthenticated) {
     return <AuthScreen />;
   }
@@ -704,12 +782,15 @@ function App() {
     );
   }
 
+  // ── L'interface principale (connecté + vérifié) ──
   return (
     <div className="min-h-screen bg-background font-sans selection:bg-primary/20">
+      {/* Modale du wizard de configuration (au premier lancement) */}
       <AnimatePresence>
         {showSetup && <SetupWizard onComplete={handleSetupComplete} />}
       </AnimatePresence>
 
+      {/* Barre de navigation en haut avec logo, bouton home, admin, etc. */}
       <Header onOpenSetup={() => setShowSetup(true)} onOpenAdmin={() => setShowAdmin(true)} onHome={() => {
         setShowTranscriptionTool(false);
         setActiveTranscriptionProject(null);
@@ -720,6 +801,7 @@ function App() {
         loadHistory();
       }} />
 
+      {/* Contenu principal : soit le dashboard admin, soit la vue normale */}
       {showAdmin && user?.role === 'admin' ? (
         <AdminDashboard onBack={() => setShowAdmin(false)} onLoadProject={(data) => {
           setShowAdmin(false);
@@ -734,12 +816,15 @@ function App() {
           }
         }} />
       ) : (
+        // Zone de contenu principal. Si on est dans l'éditeur NLE (segments > 0),
+        // on ne limite pas la largeur (plein écran). Sinon, on centre avec max-w-7xl.
         <main className={segments.length > 0 ? "" : "max-w-7xl mx-auto px-6 py-8"}>
+          {/* C'est ici que renderContent() décide quelle vue afficher */}
           {renderContent()}
         </main>
       )}
 
-      {/* Share dialog */}
+      {/* Modale de partage de projet (s'affiche par-dessus tout le reste) */}
       <AnimatePresence>
         {sharingProjectId && (
           <ShareDialog
