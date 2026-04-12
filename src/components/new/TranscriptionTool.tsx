@@ -21,11 +21,12 @@
  */
 
 // ── Imports React ──
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"  // Animations fluides
 import {
   Mic, ArrowLeft, Upload, Loader2, Copy, Download, Trash2,
-  CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files, Pencil, X, Check, Brain
+  CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files, Pencil, X, Check, Brain,
+  RotateCcw, Cloud
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -651,6 +652,22 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
     )
   }
 
+  // ── Mode resultats plein ecran : layout NLE avec 3 panneaux ──
+  if (status === 'done' && segments.length > 0 && showSemanticAnalysis) {
+    return (
+      <TranscriptionResult
+        segments={segments}
+        transcriptionId={transcriptionId}
+        uploadedFileName={uploadedFile?.name}
+        copied={copied}
+        onCopy={handleCopy}
+        onReset={handleReset}
+        onSegmentsUpdate={setSegments}
+        ollamaModel="qwen2.5:14b"
+      />
+    )
+  }
+
   return (
     <div className="max-w-4xl mx-auto w-full pt-8">
       {/* Header */}
@@ -885,19 +902,66 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
             </motion.div>
           )}
 
-          {/* Result — layout redimensionnable quand l'analyse semantique est ouverte */}
+          {/* Result — transcript simple avec bouton pour passer en mode analyse plein ecran */}
           {status === 'done' && segments.length > 0 && (
-            <TranscriptionResult
-              segments={segments}
-              transcriptionId={transcriptionId}
-              uploadedFileName={uploadedFile?.name}
-              copied={copied}
-              onCopy={handleCopy}
-              onReset={handleReset}
-              showSemanticAnalysis={showSemanticAnalysis}
-              onToggleSemantic={() => setShowSemanticAnalysis(v => !v)}
-              onSegmentsUpdate={setSegments}
-            />
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-border rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between p-4 border-b border-border">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-500" />
+                  <span className="text-sm font-semibold text-foreground">
+                    {segments.length} segments
+                    {uploadedFile?.name && <span className="text-muted-foreground font-normal"> — {uploadedFile.name}</span>}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={handleCopy} className="text-xs gap-1.5">
+                    {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copied ? 'Copie' : 'Copier'}
+                  </Button>
+                  {transcriptionId && (
+                    <>
+                      <a href={api.getTranscriptionExportUrl(transcriptionId, 'txt')} download>
+                        <Button variant="ghost" size="sm" className="text-xs gap-1.5"><Download className="w-3.5 h-3.5" /> .txt</Button>
+                      </a>
+                      <a href={api.getTranscriptionExportUrl(transcriptionId, 'srt')} download>
+                        <Button variant="ghost" size="sm" className="text-xs gap-1.5"><Download className="w-3.5 h-3.5" /> .srt</Button>
+                      </a>
+                    </>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => setShowSemanticAnalysis(true)} className="text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
+                    <Brain className="w-3.5 h-3.5" /> Analyse semantique
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleReset} className="text-xs">Nouvelle transcription</Button>
+                </div>
+              </div>
+              <div className="max-h-[500px] overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
+                {segments.map((seg, i) => {
+                  const prevSpeaker = i > 0 ? segments[i - 1].speaker : null
+                  const showSpeaker = seg.speaker && seg.speaker !== prevSpeaker
+                  return (
+                    <div key={i}>
+                      {showSpeaker && (
+                        <div className="mt-3 mb-1 first:mt-0">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-primary cursor-pointer hover:underline"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const newName = prompt(`Renommer "${seg.speaker}" en :`, seg.speaker || '')
+                              if (newName && newName !== seg.speaker && transcriptionId) {
+                                api.renameSpeaker(transcriptionId, seg.speaker!, newName).then((r: any) => { if (r.segments) setSegments(r.segments) }).catch(() => {})
+                              }
+                            }}
+                          >{seg.speaker}</span>
+                        </div>
+                      )}
+                      <div className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
+                        <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">{fmtTime(seg.start)}</span>
+                        <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </motion.div>
           )}
         </div>
 
@@ -1002,25 +1066,26 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
 }
 
 // ============================================================
-// SOUS-COMPOSANT : Resultat de transcription avec layout redimensionnable
-// Quand l'analyse semantique est ouverte, les deux panneaux (transcript + analyse)
-// sont cote a cote et redimensionnables via react-grid-layout, comme l'editeur NLE.
+// SOUS-COMPOSANT : Resultat de transcription plein ecran
+// 3 panneaux redimensionnables (react-grid-layout) comme l'editeur NLE :
+// - Transcription (texte avec speakers et timestamps)
+// - Nuage de mots (SVG interactif)
+// - Frequences & Analyse IA (tableau + themes/sentiment/insights)
 // ============================================================
+
+import { computeWordFrequencies, getWordCloudData, getSpeakers } from '@/lib/word-frequency'
+import type { WordFrequency as WordFreqType } from '@/types'
 
 const RESULT_STORAGE_KEY = 'clipr-transcription-result-layout'
 const RESULT_COLS = 12
-const RESULT_ROW_HEIGHT = 60
+const RESULT_ROW_HEIGHT = 80
 const RESULT_GAP = 6
 
-/** Disposition par defaut : transcript a gauche, analyse a droite */
+/** Disposition par defaut : 3 panneaux — transcript a gauche, nuage en haut a droite, frequences en bas a droite */
 const DEFAULT_RESULT_LAYOUT: Layout[] = [
-  { i: 'transcript', x: 0, y: 0, w: 6, h: 9, minW: 3, minH: 4 },
-  { i: 'analysis', x: 6, y: 0, w: 6, h: 9, minW: 3, minH: 4 },
-]
-
-/** Disposition quand seul le transcript est affiche (pleine largeur) */
-const SOLO_LAYOUT: Layout[] = [
-  { i: 'transcript', x: 0, y: 0, w: 12, h: 9, minW: 4, minH: 4 },
+  { i: 'transcript', x: 0, y: 0, w: 5, h: 7, minW: 3, minH: 3 },
+  { i: 'wordcloud', x: 5, y: 0, w: 7, h: 4, minW: 3, minH: 2 },
+  { i: 'analysis', x: 5, y: 4, w: 7, h: 3, minW: 3, minH: 2 },
 ]
 
 function TranscriptionResult({
@@ -1030,9 +1095,8 @@ function TranscriptionResult({
   copied,
   onCopy,
   onReset,
-  showSemanticAnalysis,
-  onToggleSemantic,
   onSegmentsUpdate,
+  ollamaModel,
 }: {
   segments: TranscriptSegment[]
   transcriptionId: string | null
@@ -1040,9 +1104,8 @@ function TranscriptionResult({
   copied: boolean
   onCopy: () => void
   onReset: () => void
-  showSemanticAnalysis: boolean
-  onToggleSemantic: () => void
   onSegmentsUpdate: (segs: TranscriptSegment[]) => void
+  ollamaModel: string
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -1051,11 +1114,33 @@ function TranscriptionResult({
       const saved = localStorage.getItem(RESULT_STORAGE_KEY)
       if (saved) {
         const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed)) return parsed
+        if (Array.isArray(parsed) && parsed.length === 3) return parsed
       }
     } catch {}
     return DEFAULT_RESULT_LAYOUT
   })
+
+  // Donnees calculees pour le nuage et le tableau (instantane, cote client)
+  const frequencies = useMemo(() => computeWordFrequencies(segments), [segments])
+  const speakers = useMemo(() => getSpeakers(segments), [segments])
+  const cloudData = useMemo(() => getWordCloudData(frequencies), [frequencies])
+
+  // Analyse IA (chargee a la demande)
+  const [semanticResult, setSemanticResult] = useState<any>(null)
+  const [semanticLoading, setSemanticLoading] = useState(false)
+  const [semanticError, setSemanticError] = useState<string | null>(null)
+  const semanticLoaded = useRef(false)
+
+  // Charger l'analyse semantique au montage
+  useEffect(() => {
+    if (semanticLoaded.current) return
+    semanticLoaded.current = true
+    setSemanticLoading(true)
+    api.semanticAnalyze(segments, ollamaModel)
+      .then((data) => setSemanticResult(data.semanticAnalysis))
+      .catch((err) => setSemanticError(err.message))
+      .finally(() => setSemanticLoading(false))
+  }, [segments, ollamaModel])
 
   // Mesurer la largeur du conteneur
   useEffect(() => {
@@ -1068,155 +1153,252 @@ function TranscriptionResult({
     return () => observer.disconnect()
   }, [])
 
-  // Sauvegarder la disposition quand elle change
   const handleLayoutChange = useCallback((newLayout: Layout[]) => {
     setResultLayout(newLayout)
     localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(newLayout))
   }, [])
 
-  // Formatage du temps
+  const resetLayout = useCallback(() => {
+    setResultLayout([...DEFAULT_RESULT_LAYOUT])
+    localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(DEFAULT_RESULT_LAYOUT))
+  }, [])
+
   const fmtTime = (s: number) => {
     const m = Math.floor(s / 60)
     const sec = Math.floor(s % 60)
     return `${m}:${String(sec).padStart(2, '0')}`
   }
 
-  // Layout actif : avec ou sans panneau analyse
-  const activeLayout = showSemanticAnalysis
-    ? resultLayout.filter(l => l.i === 'transcript' || l.i === 'analysis').length >= 2
-      ? resultLayout
-      : DEFAULT_RESULT_LAYOUT
-    : SOLO_LAYOUT
-
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-      {/* Toolbar en haut */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden mb-1">
-        <div className="flex items-center justify-between p-3 px-4">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-green-500" />
-            <span className="text-sm font-semibold text-foreground">
-              {segments.length} segments
-              {uploadedFileName && <span className="text-muted-foreground font-normal"> — {uploadedFileName}</span>}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={onCopy} className="text-xs gap-1.5">
-              {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-              {copied ? 'Copie' : 'Copier'}
-            </Button>
-            {transcriptionId && (
-              <>
-                <a href={api.getTranscriptionExportUrl(transcriptionId, 'txt')} download>
-                  <Button variant="ghost" size="sm" className="text-xs gap-1.5">
-                    <Download className="w-3.5 h-3.5" /> .txt
-                  </Button>
-                </a>
-                <a href={api.getTranscriptionExportUrl(transcriptionId, 'srt')} download>
-                  <Button variant="ghost" size="sm" className="text-xs gap-1.5">
-                    <Download className="w-3.5 h-3.5" /> .srt
-                  </Button>
-                </a>
-              </>
-            )}
-            <Button
-              variant={showSemanticAnalysis ? 'default' : 'outline'}
-              size="sm"
-              onClick={onToggleSemantic}
-              className={`text-xs gap-1.5 ${showSemanticAnalysis ? '' : 'border-primary/30 text-primary hover:bg-primary/10'}`}
-            >
-              <Brain className="w-3.5 h-3.5" />
-              Analyse semantique
-            </Button>
-            <Button variant="outline" size="sm" onClick={onReset} className="text-xs">
-              Nouvelle transcription
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Panneaux redimensionnables */}
-      <div ref={containerRef} className="relative">
-        {width > 0 && (
-          <GridLayout
-            layout={activeLayout}
-            cols={RESULT_COLS}
-            rowHeight={RESULT_ROW_HEIGHT}
-            width={width}
-            margin={[RESULT_GAP, RESULT_GAP]}
-            containerPadding={[0, 0]}
-            onLayoutChange={showSemanticAnalysis ? handleLayoutChange : undefined}
-            draggableHandle=".panel-drag-handle"
-            isResizable={showSemanticAnalysis}
-            isDraggable={showSemanticAnalysis}
-            useCSSTransforms
-            resizeHandles={['e', 'w', 's', 'se']}
-          >
-            {/* Panneau transcript */}
-            <div key="transcript" className="h-full">
-              <div className="h-full bg-card border border-border rounded-xl overflow-hidden flex flex-col">
-                <div className="panel-drag-handle flex items-center gap-2 px-4 py-2 border-b border-border cursor-move bg-secondary/20">
+    <div ref={containerRef} className="relative min-h-[calc(100vh-3.5rem)]">
+      {width > 0 && (
+        <GridLayout
+          layout={resultLayout}
+          cols={RESULT_COLS}
+          rowHeight={RESULT_ROW_HEIGHT}
+          width={width}
+          margin={[RESULT_GAP, RESULT_GAP]}
+          containerPadding={[RESULT_GAP, RESULT_GAP]}
+          onLayoutChange={handleLayoutChange}
+          draggableHandle=".panel-drag-handle"
+          isResizable
+          isDraggable
+          useCSSTransforms
+          resizeHandles={['se', 'sw', 'ne', 'nw', 'e', 'w', 'n', 's']}
+        >
+          {/* ── Panneau 1 : Transcription ── */}
+          <div key="transcript" className="h-full">
+            <div className="h-full bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+              <div className="panel-drag-handle flex items-center justify-between px-4 py-2 border-b border-border cursor-move bg-secondary/20">
+                <div className="flex items-center gap-2">
                   <FileText className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Transcription</span>
+                  <span className="text-[9px] text-muted-foreground/60">{segments.length} segments</span>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
-                  {segments.map((seg, i) => {
-                    const prevSpeaker = i > 0 ? segments[i - 1].speaker : null
-                    const showSpeaker = seg.speaker && seg.speaker !== prevSpeaker
-                    return (
-                      <div key={i}>
-                        {showSpeaker && (
-                          <div className="mt-3 mb-1 first:mt-0">
-                            <span
-                              className="text-[10px] font-bold uppercase tracking-wider text-primary cursor-pointer hover:underline"
-                              title="Cliquer pour renommer ce locuteur"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                const newName = prompt(`Renommer "${seg.speaker}" en :`, seg.speaker || '')
-                                if (newName && newName !== seg.speaker && transcriptionId) {
-                                  api.renameSpeaker(transcriptionId, seg.speaker!, newName).then((result: any) => {
-                                    if (result.segments) onSegmentsUpdate(result.segments)
-                                  }).catch(() => {})
-                                }
-                              }}
-                            >{seg.speaker}</span>
-                          </div>
-                        )}
-                        <div className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
-                          <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
-                            {fmtTime(seg.start)}
-                          </span>
-                          <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" onClick={onCopy} className="h-6 text-[10px] gap-1 px-2">
+                    {copied ? <CheckCircle2 className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                    {copied ? 'Copie' : 'Copier'}
+                  </Button>
+                  {transcriptionId && (
+                    <>
+                      <a href={api.getTranscriptionExportUrl(transcriptionId, 'txt')} download>
+                        <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1 px-2"><Download className="w-3 h-3" /> .txt</Button>
+                      </a>
+                      <a href={api.getTranscriptionExportUrl(transcriptionId, 'srt')} download>
+                        <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1 px-2"><Download className="w-3 h-3" /> .srt</Button>
+                      </a>
+                    </>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={onReset} className="h-6 text-[10px] px-2">Nouveau</Button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
+                {segments.map((seg, i) => {
+                  const prevSpeaker = i > 0 ? segments[i - 1].speaker : null
+                  const showSpeaker = seg.speaker && seg.speaker !== prevSpeaker
+                  return (
+                    <div key={i}>
+                      {showSpeaker && (
+                        <div className="mt-3 mb-1 first:mt-0">
+                          <span
+                            className="text-[10px] font-bold uppercase tracking-wider text-primary cursor-pointer hover:underline"
+                            title="Cliquer pour renommer ce locuteur"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const newName = prompt(`Renommer "${seg.speaker}" en :`, seg.speaker || '')
+                              if (newName && newName !== seg.speaker && transcriptionId) {
+                                api.renameSpeaker(transcriptionId, seg.speaker!, newName).then((result: any) => {
+                                  if (result.segments) onSegmentsUpdate(result.segments)
+                                }).catch(() => {})
+                              }
+                            }}
+                          >{seg.speaker}</span>
                         </div>
+                      )}
+                      <div className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
+                        <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
+                          {fmtTime(seg.start)}
+                        </span>
+                        <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
                       </div>
-                    )
-                  })}
-                </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
+          </div>
 
-            {/* Panneau analyse semantique (visible seulement quand active) */}
-            {showSemanticAnalysis && (
-              <div key="analysis" className="h-full">
-                <div className="h-full bg-card border border-border rounded-xl overflow-hidden flex flex-col">
-                  <div className="panel-drag-handle flex items-center gap-2 px-4 py-2 border-b border-border cursor-move bg-secondary/20">
-                    <Brain className="w-3.5 h-3.5 text-primary" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Analyse semantique</span>
-                  </div>
-                  <div className="flex-1 overflow-y-auto">
-                    <SemanticAnalysis
-                      segments={segments}
-                      ollamaModel="qwen2.5:14b"
-                      onClose={onToggleSemantic}
-                    />
-                  </div>
-                </div>
+          {/* ── Panneau 2 : Nuage de mots ── */}
+          <div key="wordcloud" className="h-full">
+            <div className="h-full bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+              <div className="panel-drag-handle flex items-center gap-2 px-4 py-2 border-b border-border cursor-move bg-secondary/20">
+                <Cloud className="w-3.5 h-3.5 text-primary" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Nuage de mots</span>
               </div>
-            )}
-          </GridLayout>
-        )}
+              <div className="flex-1 overflow-hidden p-2">
+                <WordCloudPanel data={cloudData} frequencies={frequencies} speakers={speakers} />
+              </div>
+            </div>
+          </div>
+
+          {/* ── Panneau 3 : Frequences & Analyse IA ── */}
+          <div key="analysis" className="h-full">
+            <div className="h-full bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+              <div className="panel-drag-handle flex items-center gap-2 px-4 py-2 border-b border-border cursor-move bg-secondary/20">
+                <Brain className="w-3.5 h-3.5 text-primary" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Analyse</span>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                <SemanticAnalysis
+                  segments={segments}
+                  ollamaModel={ollamaModel}
+                  onClose={() => {}}
+                />
+              </div>
+            </div>
+          </div>
+        </GridLayout>
+      )}
+
+      {/* Bouton reset layout */}
+      <div className="sticky bottom-0 flex justify-end p-2 pointer-events-none">
+        <Button
+          variant="ghost" size="sm" onClick={resetLayout}
+          className="h-6 px-2 gap-1 text-[9px] text-muted-foreground/40 hover:text-muted-foreground uppercase tracking-wider font-bold pointer-events-auto"
+          title="Reinitialiser la disposition"
+        >
+          <RotateCcw className="w-3 h-3" /> Reset
+        </Button>
       </div>
-    </motion.div>
+    </div>
+  )
+}
+
+// ── Sous-composant : Nuage de mots SVG (d3-cloud) ──
+// @ts-ignore
+import cloudLayout from 'd3-cloud'
+
+const SPEAKER_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
+
+function WordCloudPanel({ data, frequencies, speakers }: {
+  data: { text: string; value: number }[]
+  frequencies: WordFreqType[]
+  speakers: string[]
+}) {
+  const [words, setWords] = useState<any[]>([])
+  const [hoveredWord, setHoveredWord] = useState<string | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [size, setSize] = useState({ w: 500, h: 300 })
+
+  // Couleur par mot selon le speaker dominant
+  const wordColorMap = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const freq of frequencies) {
+      let maxSpeaker = '', maxCount = 0
+      for (const [speaker, count] of Object.entries(freq.speakers)) {
+        if (count > maxCount) { maxCount = count; maxSpeaker = speaker }
+      }
+      const idx = speakers.indexOf(maxSpeaker)
+      map.set(freq.word, SPEAKER_COLORS[idx >= 0 ? idx % SPEAKER_COLORS.length : 0])
+    }
+    return map
+  }, [frequencies, speakers])
+
+  // Mesurer le conteneur
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const update = () => setSize({ w: el.offsetWidth, h: el.offsetHeight })
+    update()
+    const obs = new ResizeObserver(update)
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+
+  // Calculer le layout d3-cloud
+  useEffect(() => {
+    if (data.length === 0 || size.w < 100) return
+    const maxVal = Math.max(...data.map(d => d.value))
+    const minVal = Math.min(...data.map(d => d.value))
+    const scale = (val: number) => {
+      if (maxVal === minVal) return 18
+      return 10 + ((val - minVal) / (maxVal - minVal)) * Math.min(42, size.w / 14)
+    }
+
+    cloudLayout()
+      .size([size.w, size.h])
+      .words(data.map(d => ({ text: d.text, size: scale(d.value) })))
+      .padding(3)
+      .rotate(() => (Math.random() > 0.7 ? 90 : 0))
+      .fontSize((d: any) => d.size)
+      .on('end', (laid: any[]) => setWords(laid.map(w => ({
+        text: w.text, size: w.size, x: w.x, y: w.y, rotate: w.rotate,
+        color: wordColorMap.get(w.text!) || SPEAKER_COLORS[0]
+      }))))
+      .start()
+  }, [data, size, wordColorMap])
+
+  const hoveredFreq = hoveredWord ? frequencies.find(f => f.word === hoveredWord) : null
+
+  return (
+    <div ref={containerRef} className="relative w-full h-full">
+      {speakers.length > 0 && (
+        <div className="absolute top-1 left-2 flex items-center gap-2 z-10">
+          {speakers.map((s, i) => (
+            <div key={s} className="flex items-center gap-1 text-[8px] text-muted-foreground">
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: SPEAKER_COLORS[i % SPEAKER_COLORS.length] }} />
+              {s}
+            </div>
+          ))}
+        </div>
+      )}
+      <svg viewBox={`${-size.w/2} ${-size.h/2} ${size.w} ${size.h}`} className="w-full h-full">
+        {words.map((w, i) => (
+          <text
+            key={`${w.text}-${i}`}
+            textAnchor="middle"
+            transform={`translate(${w.x},${w.y}) rotate(${w.rotate})`}
+            fontSize={w.size}
+            fill={w.color}
+            opacity={hoveredWord && hoveredWord !== w.text ? 0.2 : 1}
+            className="cursor-pointer transition-opacity duration-150 select-none"
+            style={{ fontWeight: w.size > 25 ? 700 : 500 }}
+            onMouseEnter={() => setHoveredWord(w.text)}
+            onMouseLeave={() => setHoveredWord(null)}
+          >{w.text}</text>
+        ))}
+      </svg>
+      {hoveredFreq && (
+        <div className="absolute top-1 right-1 bg-card border border-border rounded-lg p-2 shadow-lg text-[10px] z-20 max-w-[160px]">
+          <div className="font-bold text-foreground">{hoveredFreq.word}</div>
+          <div className="text-muted-foreground">{hoveredFreq.total}x total</div>
+          {Object.entries(hoveredFreq.speakers).map(([s, c]) => (
+            <div key={s} className="flex justify-between"><span className="text-muted-foreground">{s}</span><span className="font-mono font-bold">{c}</span></div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
