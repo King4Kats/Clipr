@@ -1104,11 +1104,17 @@ const RESULT_COLS = 12
 const RESULT_ROW_HEIGHT = 80
 const RESULT_GAP = 6
 
-/** Disposition par defaut : 3 panneaux — transcript a gauche, nuage en haut a droite, frequences en bas a droite */
+/** Disposition par defaut : 4 panneaux redimensionnables
+ * - transcript : texte avec speakers (gauche)
+ * - wordcloud : nuage de mots interactif (haut droite)
+ * - frequencies : tableau de frequences par locuteur (milieu droite)
+ * - analysis : analyse IA themes/sentiment/insights (bas droite)
+ */
 const DEFAULT_RESULT_LAYOUT: Layout[] = [
   { i: 'transcript', x: 0, y: 0, w: 5, h: 7, minW: 3, minH: 3 },
-  { i: 'wordcloud', x: 5, y: 0, w: 7, h: 4, minW: 3, minH: 2 },
-  { i: 'analysis', x: 5, y: 4, w: 7, h: 3, minW: 3, minH: 2 },
+  { i: 'wordcloud', x: 5, y: 0, w: 7, h: 3, minW: 3, minH: 2 },
+  { i: 'frequencies', x: 5, y: 3, w: 7, h: 2, minW: 3, minH: 2 },
+  { i: 'analysis', x: 5, y: 5, w: 7, h: 2, minW: 3, minH: 2 },
 ]
 
 function TranscriptionResult({
@@ -1137,7 +1143,7 @@ function TranscriptionResult({
       const saved = localStorage.getItem(RESULT_STORAGE_KEY)
       if (saved) {
         const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed) && parsed.length === 3) return parsed
+        if (Array.isArray(parsed) && parsed.length === 4) return parsed
       }
     } catch {}
     return DEFAULT_RESULT_LAYOUT
@@ -1147,9 +1153,6 @@ function TranscriptionResult({
   const frequencies = useMemo(() => computeWordFrequencies(segments), [segments])
   const speakers = useMemo(() => getSpeakers(segments), [segments])
   const cloudData = useMemo(() => getWordCloudData(frequencies), [frequencies])
-
-  // Onglet du panneau analyse (frequences ou IA)
-  const [analysisTab, setAnalysisTab] = useState<'freq' | 'ia'>('freq')
 
   // Analyse IA (chargee a la demande)
   const [semanticResult, setSemanticResult] = useState<any>(null)
@@ -1288,30 +1291,30 @@ function TranscriptionResult({
             </div>
           </div>
 
-          {/* ── Panneau 3 : Frequences & Analyse IA (themes, sentiment, insights) ── */}
+          {/* ── Panneau 3 : Tableau de frequences par locuteur ── */}
+          <div key="frequencies" className="h-full">
+            <div className="h-full bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+              <div className="panel-drag-handle flex items-center gap-2 px-4 py-2 border-b border-border cursor-move bg-secondary/20">
+                <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Frequences</span>
+                <span className="text-[9px] text-muted-foreground/60">{frequencies.length} mots</span>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3">
+                <FrequencyTablePanel frequencies={frequencies} speakers={speakers} />
+              </div>
+            </div>
+          </div>
+
+          {/* ── Panneau 4 : Analyse IA (themes, sentiment, insights) ── */}
           <div key="analysis" className="h-full">
             <div className="h-full bg-card border border-border rounded-xl overflow-hidden flex flex-col">
               <div className="panel-drag-handle flex items-center gap-2 px-4 py-2 border-b border-border cursor-move bg-secondary/20">
                 <Brain className="w-3.5 h-3.5 text-primary" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Analyse</span>
-                {/* Onglets pour switcher entre frequences et analyse IA */}
-                <div className="flex items-center gap-1 ml-auto">
-                  <button
-                    onClick={() => setAnalysisTab('freq')}
-                    className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition-colors ${analysisTab === 'freq' ? 'bg-primary/10 text-primary' : 'text-muted-foreground/50 hover:text-muted-foreground'}`}
-                  >Frequences</button>
-                  <button
-                    onClick={() => setAnalysisTab('ia')}
-                    className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition-colors ${analysisTab === 'ia' ? 'bg-primary/10 text-primary' : 'text-muted-foreground/50 hover:text-muted-foreground'}`}
-                  >Analyse IA {semanticLoading && <Loader2 className="w-2.5 h-2.5 animate-spin inline ml-1" />}</button>
-                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Analyse IA</span>
+                {semanticLoading && <Loader2 className="w-3 h-3 animate-spin text-primary" />}
               </div>
               <div className="flex-1 overflow-y-auto p-3">
-                {analysisTab === 'freq' ? (
-                  <FrequencyTablePanel frequencies={frequencies} speakers={speakers} />
-                ) : (
-                  <AnalysisIAPanel result={semanticResult} loading={semanticLoading} error={semanticError} />
-                )}
+                <AnalysisIAPanel result={semanticResult} loading={semanticLoading} error={semanticError} />
               </div>
             </div>
           </div>
