@@ -26,7 +26,7 @@ import { motion, AnimatePresence } from "framer-motion"  // Animations fluides
 import {
   Mic, ArrowLeft, Upload, Loader2, Copy, Download, Trash2,
   CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files, Pencil, X, Check, Brain,
-  RotateCcw, Cloud
+  RotateCcw, Cloud, Search
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -575,23 +575,23 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   }
 
   // ── Vue projet : transcript d'un fichier ──
-  if (initialProject && selectedItem) {
-    // Mode analyse plein ecran pour les projets aussi
-    if (showSemanticAnalysis && selectedItemSegments.length > 0) {
-      return (
-        <TranscriptionResult
-          segments={selectedItemSegments}
-          transcriptionId={selectedItem.transcriptionId}
-          uploadedFileName={selectedItem.filename}
-          copied={copied}
-          onCopy={handleCopy}
-          onReset={() => { setShowSemanticAnalysis(false) }}
-          onSegmentsUpdate={setSelectedItemSegments}
-          ollamaModel="qwen2.5:14b"
-        />
-      )
-    }
+  // ── Projet depuis l'accueil : affichage NLE plein ecran des que les segments sont charges ──
+  if (initialProject && selectedItem && selectedItemSegments.length > 0 && !selectedItemLoading) {
+    return (
+      <TranscriptionResult
+        segments={selectedItemSegments}
+        transcriptionId={selectedItem.transcriptionId}
+        uploadedFileName={selectedItem.filename}
+        copied={copied}
+        onCopy={handleCopy}
+        onReset={() => { setSelectedItem(null); setSelectedItemSegments([]) }}
+        onSegmentsUpdate={setSelectedItemSegments}
+        ollamaModel="qwen2.5:14b"
+      />
+    )
+  }
 
+  if (initialProject && selectedItem) {
     return (
       <div className="max-w-4xl mx-auto w-full pt-8">
         <div className="flex items-center gap-4 mb-8">
@@ -675,7 +675,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   }
 
   // ── Mode resultats plein ecran : layout NLE avec 3 panneaux ──
-  if (status === 'done' && segments.length > 0 && showSemanticAnalysis) {
+  // S'active automatiquement des que la transcription est terminee
+  if (status === 'done' && segments.length > 0) {
     return (
       <TranscriptionResult
         segments={segments}
@@ -1147,6 +1148,9 @@ function TranscriptionResult({
   const speakers = useMemo(() => getSpeakers(segments), [segments])
   const cloudData = useMemo(() => getWordCloudData(frequencies), [frequencies])
 
+  // Onglet du panneau analyse (frequences ou IA)
+  const [analysisTab, setAnalysisTab] = useState<'freq' | 'ia'>('freq')
+
   // Analyse IA (chargee a la demande)
   const [semanticResult, setSemanticResult] = useState<any>(null)
   const [semanticLoading, setSemanticLoading] = useState(false)
@@ -1284,19 +1288,30 @@ function TranscriptionResult({
             </div>
           </div>
 
-          {/* ── Panneau 3 : Frequences & Analyse IA ── */}
+          {/* ── Panneau 3 : Frequences & Analyse IA (themes, sentiment, insights) ── */}
           <div key="analysis" className="h-full">
             <div className="h-full bg-card border border-border rounded-xl overflow-hidden flex flex-col">
               <div className="panel-drag-handle flex items-center gap-2 px-4 py-2 border-b border-border cursor-move bg-secondary/20">
                 <Brain className="w-3.5 h-3.5 text-primary" />
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Analyse</span>
+                {/* Onglets pour switcher entre frequences et analyse IA */}
+                <div className="flex items-center gap-1 ml-auto">
+                  <button
+                    onClick={() => setAnalysisTab('freq')}
+                    className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition-colors ${analysisTab === 'freq' ? 'bg-primary/10 text-primary' : 'text-muted-foreground/50 hover:text-muted-foreground'}`}
+                  >Frequences</button>
+                  <button
+                    onClick={() => setAnalysisTab('ia')}
+                    className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition-colors ${analysisTab === 'ia' ? 'bg-primary/10 text-primary' : 'text-muted-foreground/50 hover:text-muted-foreground'}`}
+                  >Analyse IA {semanticLoading && <Loader2 className="w-2.5 h-2.5 animate-spin inline ml-1" />}</button>
+                </div>
               </div>
-              <div className="flex-1 overflow-y-auto">
-                <SemanticAnalysis
-                  segments={segments}
-                  ollamaModel={ollamaModel}
-                  onClose={() => {}}
-                />
+              <div className="flex-1 overflow-y-auto p-3">
+                {analysisTab === 'freq' ? (
+                  <FrequencyTablePanel frequencies={frequencies} speakers={speakers} />
+                ) : (
+                  <AnalysisIAPanel result={semanticResult} loading={semanticLoading} error={semanticError} />
+                )}
               </div>
             </div>
           </div>
@@ -1420,6 +1435,120 @@ function WordCloudPanel({ data, frequencies, speakers }: {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Sous-composant : Tableau de frequences ──
+function FrequencyTablePanel({ frequencies, speakers }: { frequencies: WordFreqType[]; speakers: string[] }) {
+  const [search, setSearch] = useState('')
+  const [sortCol, setSortCol] = useState<string>('total')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  const filtered = useMemo(() => {
+    let list = frequencies
+    if (search) list = list.filter(f => f.word.includes(search.toLowerCase()))
+    return [...list].sort((a, b) => {
+      const va = sortCol === 'word' ? a.word : sortCol === 'total' ? a.total : (a.speakers[sortCol] || 0)
+      const vb = sortCol === 'word' ? b.word : sortCol === 'total' ? b.total : (b.speakers[sortCol] || 0)
+      if (va < vb) return sortDir === 'asc' ? -1 : 1
+      if (va > vb) return sortDir === 'asc' ? 1 : -1
+      return 0
+    })
+  }, [frequencies, search, sortCol, sortDir])
+
+  const handleSort = (col: string) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('desc') }
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="relative mb-2">
+        <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+        <input type="text" placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)}
+          className="w-full pl-7 pr-2 py-1.5 text-[10px] bg-secondary/50 border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary text-foreground" />
+      </div>
+      <div className="flex-1 overflow-auto rounded-lg border border-border">
+        <table className="w-full text-[10px]">
+          <thead className="bg-secondary/50 sticky top-0">
+            <tr>
+              <th className="text-left px-2 py-1.5 font-semibold text-muted-foreground cursor-pointer" onClick={() => handleSort('word')}>Mot</th>
+              <th className="text-right px-2 py-1.5 font-semibold text-muted-foreground cursor-pointer" onClick={() => handleSort('total')}>Total</th>
+              {speakers.map(s => (
+                <th key={s} className="text-right px-2 py-1.5 font-semibold text-muted-foreground cursor-pointer truncate max-w-[80px]" onClick={() => handleSort(s)}>{s}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((f, i) => (
+              <tr key={f.word} className={`border-t border-border/50 hover:bg-secondary/30 ${i % 2 ? 'bg-secondary/10' : ''}`}>
+                <td className="px-2 py-1 font-medium text-foreground">{f.word}</td>
+                <td className="px-2 py-1 text-right font-mono font-bold text-primary">{f.total}</td>
+                {speakers.map(s => (
+                  <td key={s} className="px-2 py-1 text-right font-mono text-muted-foreground">{f.speakers[s] || 0}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-[9px] text-muted-foreground mt-1">{filtered.length} mots</div>
+    </div>
+  )
+}
+
+// ── Sous-composant : Analyse IA (themes, sentiment, insights) ──
+function AnalysisIAPanel({ result, loading, error }: { result: any; loading: boolean; error: string | null }) {
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center py-12 gap-2">
+      <Loader2 className="w-6 h-6 text-primary animate-spin" />
+      <p className="text-[10px] text-muted-foreground">Analyse semantique en cours...</p>
+    </div>
+  )
+  if (error) return (
+    <div className="flex flex-col items-center justify-center py-12 gap-2">
+      <AlertCircle className="w-6 h-6 text-destructive" />
+      <p className="text-[10px] text-destructive">{error}</p>
+    </div>
+  )
+  if (!result) return (
+    <div className="flex items-center justify-center py-12 text-[10px] text-muted-foreground">Chargement...</div>
+  )
+
+  const sentimentColor: Record<string, string> = {
+    positif: 'bg-green-500/10 text-green-400', negatif: 'bg-red-500/10 text-red-400',
+    mixte: 'bg-amber-500/10 text-amber-400', neutre: 'bg-zinc-500/10 text-zinc-400',
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Themes</h3>
+        <div className="flex flex-wrap gap-1.5">
+          {result.themes?.map((t: string, i: number) => (
+            <span key={i} className="px-2 py-0.5 bg-primary/10 text-primary border border-primary/20 rounded-full text-[9px] font-medium">{t}</span>
+          ))}
+        </div>
+      </div>
+      <div>
+        <h3 className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Sentiment</h3>
+        <div className="flex items-start gap-2">
+          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold capitalize ${sentimentColor[result.sentiment?.label] || sentimentColor.neutre}`}>{result.sentiment?.label}</span>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">{result.sentiment?.explanation}</p>
+        </div>
+      </div>
+      <div>
+        <h3 className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Points cles</h3>
+        <ul className="space-y-1.5">
+          {result.insights?.map((ins: string, i: number) => (
+            <li key={i} className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+              <span className="text-primary font-bold shrink-0">{i + 1}.</span>
+              <span className="leading-relaxed">{ins}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   )
 }
