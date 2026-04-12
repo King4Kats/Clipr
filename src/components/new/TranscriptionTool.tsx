@@ -574,9 +574,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
     )
   }
 
-  // ── Vue projet : transcript d'un fichier ──
-  // ── Projet depuis l'accueil : affichage NLE plein ecran des que les segments sont charges ──
-  if (initialProject && selectedItem && selectedItemSegments.length > 0 && !selectedItemLoading) {
+  // ── Vue projet : mode NLE si analyse semantique activee ──
+  if (initialProject && selectedItem && selectedItemSegments.length > 0 && showSemanticAnalysis) {
     return (
       <TranscriptionResult
         segments={selectedItemSegments}
@@ -584,9 +583,11 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         uploadedFileName={selectedItem.filename}
         copied={copied}
         onCopy={handleCopy}
-        onReset={() => { setSelectedItem(null); setSelectedItemSegments([]) }}
+        onReset={() => setShowSemanticAnalysis(false)}
         onSegmentsUpdate={setSelectedItemSegments}
         ollamaModel="qwen2.5:14b"
+        projectId={initialProject?.id}
+        savedSemanticResult={initialProject?.data?.semanticAnalysis}
       />
     )
   }
@@ -674,9 +675,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
     )
   }
 
-  // ── Mode resultats plein ecran : layout NLE avec 3 panneaux ──
-  // S'active automatiquement des que la transcription est terminee
-  if (status === 'done' && segments.length > 0) {
+  // ── Mode NLE plein ecran : active par le bouton "Analyse semantique" ──
+  if (status === 'done' && segments.length > 0 && showSemanticAnalysis) {
     return (
       <TranscriptionResult
         segments={segments}
@@ -684,7 +684,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         uploadedFileName={uploadedFile?.name}
         copied={copied}
         onCopy={handleCopy}
-        onReset={handleReset}
+        onReset={() => setShowSemanticAnalysis(false)}
         onSegmentsUpdate={setSegments}
         ollamaModel="qwen2.5:14b"
       />
@@ -1126,6 +1126,8 @@ function TranscriptionResult({
   onReset,
   onSegmentsUpdate,
   ollamaModel,
+  projectId,
+  savedSemanticResult,
 }: {
   segments: TranscriptSegment[]
   transcriptionId: string | null
@@ -1135,6 +1137,10 @@ function TranscriptionResult({
   onReset: () => void
   onSegmentsUpdate: (segs: TranscriptSegment[]) => void
   ollamaModel: string
+  /** ID du projet pour sauvegarder les resultats */
+  projectId?: string
+  /** Resultats deja sauvegardes dans le projet (evite de relancer Ollama) */
+  savedSemanticResult?: any
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -1154,22 +1160,28 @@ function TranscriptionResult({
   const speakers = useMemo(() => getSpeakers(segments), [segments])
   const cloudData = useMemo(() => getWordCloudData(frequencies), [frequencies])
 
-  // Analyse IA (chargee a la demande)
-  const [semanticResult, setSemanticResult] = useState<any>(null)
+  // Analyse IA — utilise les resultats sauvegardes si disponibles, sinon lance Ollama
+  const [semanticResult, setSemanticResult] = useState<any>(savedSemanticResult || null)
   const [semanticLoading, setSemanticLoading] = useState(false)
   const [semanticError, setSemanticError] = useState<string | null>(null)
-  const semanticLoaded = useRef(false)
+  const semanticLoaded = useRef(!!savedSemanticResult)
 
-  // Charger l'analyse semantique au montage
+  // Lancer l'analyse Ollama uniquement si pas deja sauvegardee
   useEffect(() => {
     if (semanticLoaded.current) return
     semanticLoaded.current = true
     setSemanticLoading(true)
     api.semanticAnalyze(segments, ollamaModel)
-      .then((data) => setSemanticResult(data.semanticAnalysis))
+      .then((data) => {
+        setSemanticResult(data.semanticAnalysis)
+        // Sauvegarder les resultats dans le projet pour ne pas relancer Ollama
+        if (projectId) {
+          api.saveProject({ id: projectId, semanticAnalysis: data.semanticAnalysis }).catch(() => {})
+        }
+      })
       .catch((err) => setSemanticError(err.message))
       .finally(() => setSemanticLoading(false))
-  }, [segments, ollamaModel])
+  }, [segments, ollamaModel, projectId])
 
   // Mesurer la largeur du conteneur
   useEffect(() => {
