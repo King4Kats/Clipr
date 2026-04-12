@@ -576,6 +576,22 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
 
   // ── Vue projet : transcript d'un fichier ──
   if (initialProject && selectedItem) {
+    // Mode analyse plein ecran pour les projets aussi
+    if (showSemanticAnalysis && selectedItemSegments.length > 0) {
+      return (
+        <TranscriptionResult
+          segments={selectedItemSegments}
+          transcriptionId={selectedItem.transcriptionId}
+          uploadedFileName={selectedItem.filename}
+          copied={copied}
+          onCopy={handleCopy}
+          onReset={() => { setShowSemanticAnalysis(false) }}
+          onSegmentsUpdate={setSelectedItemSegments}
+          ollamaModel="qwen2.5:14b"
+        />
+      )
+    }
+
     return (
       <div className="max-w-4xl mx-auto w-full pt-8">
         <div className="flex items-center gap-4 mb-8">
@@ -603,6 +619,12 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
                   <Download className="w-3.5 h-3.5" /> .srt
                 </button>
               </a>
+              <button
+                onClick={() => setShowSemanticAnalysis(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 text-xs font-medium transition-colors"
+              >
+                <Brain className="w-3.5 h-3.5" /> Analyse semantique
+              </button>
             </div>
           )}
         </div>
