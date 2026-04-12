@@ -258,79 +258,105 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
       : ''
   }
 
-  // Construire nameByPairId : pair_id → nom nettoye
-  // Phase 1 : extraire tous les noms bruts
-  const rawNames = new Map<number, string>()
-  for (let i = 0; i < nameBlocks.length; i++) {
-    const segs = batchResults.get(`name_${i}`)
-    let name = segs && segs.length > 0
-      ? segs.map((s: any) => s.text).join(' ').trim()
-      : ''
-    name = name.replace(/^[\s.,!?;:'"«»]+|[\s.,!?;:'"«»]+$/g, '').trim()
-    if (name.length >= 2) {
-      const words = name.split(/\s+/)
-      // Capitaliser
-      name = words.map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
-      rawNames.set(nameBlocks[i].pair_id, name)
-    }
-  }
+  // ── Identification des speakers ──
+  // Chaque intervenant dit son nom avant CHAQUE phrase (~30 fois dans un audio de 35min).
+  // On compte les prenoms sur TOUS les blocs (pairies + unknown) avec un seuil eleve (>= 8)
+  // pour distinguer les vrais noms des hallucinations Whisper.
 
-  // Phase 2 : compter la frequence de chaque prenom (1er mot)
-  // Les vrais speakers parlent plusieurs fois → leur prenom apparait >= 2 fois
-  // Les hallucinations sont aleatoires → apparaissent 1 seule fois
-  // IMPORTANT : exclure les mots courants FR — Whisper hallucine "Elle...", "Il..." sur les blocs courts
   const NOT_A_FIRST_NAME = new Set([
     'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'il', 'elle', 'ils', 'elles',
     'on', 'je', 'tu', 'nous', 'vous', 'au', 'aux', 'ce', 'cette', 'ces', 'son', 'sa',
     'ses', 'et', 'ou', 'mais', 'donc', 'car', 'en', 'sur', 'dans', 'pour', 'par',
     'avec', 'sans', 'que', 'qui', 'ne', 'pas', 'se', 'est', 'a', 'sont', 'fait',
     'mis', 'dit', 'va', 'bien', 'bon', 'tout', 'tous', 'toute', 'alors', 'euh',
-    "qu'est-ce", "d'un", "l'a", "c'est"
+    "qu'est-ce", "d'un", "l'a", "c'est", 'sous-titrage', 'merci', 'non', 'oui',
+    'rien', 'beaucoup', 'là', 'juste', "d'accord", 'à', 'ah', 'oh', 'hein',
+    'très', 'trop', 'aussi', 'encore', 'déjà', 'voilà', 'comment', 'quand',
+    'ça', 'si', 'ni', 'or', 'puis', 'comme', 'après', 'avant', 'entre'
   ])
-  const firstNameCounts = new Map<string, number>()
-  for (const fullName of rawNames.values()) {
-    const firstName = fullName.split(/\s+/)[0].toLowerCase()
+
+  // Helper : nettoyer un nom Whisper → couper au premier "," et garder max 3 mots
+  function cleanWhisperName(raw: string): string {
+    let name = raw.replace(/^[\s.,!?;:'"«»]+|[\s.,!?;:'"«»]+$/g, '').trim()
+    // Couper au premier "," (Whisper ajoute souvent du texte apres le nom)
+    const commaIdx = name.indexOf(',')
+    if (commaIdx > 0) name = name.substring(0, commaIdx).trim()
+    const words = name.split(/\s+/).slice(0, 3) // Max 3 mots
+    if (words.length === 0) return ''
+    return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+  }
+
+  // Extraire et compter les prenoms de TOUS les blocs (pairies + unknown)
+  const allNameEntries: { source: 'paired' | 'unknown'; key: number; fullName: string; firstName: string }[] = []
+
+  // Blocs pairies (type=name)
+  for (let i = 0; i < nameBlocks.length; i++) {
+    const segs = batchResults.get(`name_${i}`)
+    const raw = segs && segs.length > 0 ? segs.map((s: any) => s.text).join(' ').trim() : ''
+    const name = cleanWhisperName(raw)
+    if (name.length < 2) continue
+    const firstName = name.split(/\s+/)[0].toLowerCase()
     if (NOT_A_FIRST_NAME.has(firstName)) continue
-    firstNameCounts.set(firstName, (firstNameCounts.get(firstName) || 0) + 1)
+    allNameEntries.push({ source: 'paired', key: nameBlocks[i].pair_id, fullName: name, firstName })
   }
 
-  // Prenoms confirmes : seulement depuis les blocs pairies (fiables)
-  const confirmedFirstNames = new Set<string>()
-  for (const [firstName, count] of firstNameCounts) {
-    if (count >= 2) confirmedFirstNames.add(firstName)
-  }
-  const nameByPairId = new Map<number, string>()
-  for (const [pairId, fullName] of rawNames) {
-    const firstName = fullName.split(/\s+/)[0].toLowerCase()
-    if (confirmedFirstNames.has(firstName)) {
-      nameByPairId.set(pairId, fullName)
-    }
-  }
-
-  // Noms des blocs unknown : NE PAS compter pour la frequence (trop de bruit Whisper).
-  // Utiliser uniquement pour l'assignation speaker SI le prenom matche un confirme.
-  const nameByBlockStart = new Map<number, string>()
+  // Blocs unknown (debut du bloc vernaculaire)
   for (let i = 0; i < unknownVernBlocks.length; i++) {
     const segs = batchResults.get(`unkname_${i}`)
-    let name = segs && segs.length > 0
-      ? segs.map((s: any) => s.text).join(' ').trim()
-      : ''
-    name = name.replace(/^[\s.,!?;:'"«»]+|[\s.,!?;:'"«»]+$/g, '').trim()
-    if (name.length >= 2) {
-      const words = name.split(/\s+/)
-      name = words.map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
-      const firstName = words[0].toLowerCase().replace(/[,;:.]+$/, '')
-      // Seulement si le prenom est confirme par les blocs pairies
-      if (confirmedFirstNames.has(firstName)) {
-        nameByBlockStart.set(Math.round(unknownVernBlocks[i].start * 10), name)
+    const raw = segs && segs.length > 0 ? segs.map((s: any) => s.text).join(' ').trim() : ''
+    const name = cleanWhisperName(raw)
+    if (name.length < 2) continue
+    const firstName = name.split(/\s+/)[0].toLowerCase()
+    if (NOT_A_FIRST_NAME.has(firstName)) continue
+    allNameEntries.push({ source: 'unknown', key: Math.round(unknownVernBlocks[i].start * 10), fullName: name, firstName })
+  }
+
+  // Compter les prenoms (seuil >= 8 pour filtrer les hallucinations)
+  const firstNameCounts = new Map<string, number>()
+  for (const entry of allNameEntries) {
+    firstNameCounts.set(entry.firstName, (firstNameCounts.get(entry.firstName) || 0) + 1)
+  }
+
+  const NAME_THRESHOLD = 8
+  const confirmedFirstNames = new Set<string>()
+  for (const [firstName, count] of firstNameCounts) {
+    if (count >= NAME_THRESHOLD) confirmedFirstNames.add(firstName)
+  }
+
+  // Pour chaque prenom confirme, trouver le nom complet le plus frequent
+  const fullNameCounts = new Map<string, number>()
+  for (const entry of allNameEntries) {
+    if (!confirmedFirstNames.has(entry.firstName)) continue
+    fullNameCounts.set(entry.fullName, (fullNameCounts.get(entry.fullName) || 0) + 1)
+  }
+  // Pour chaque prenom, garder le nom complet le plus frequent
+  const bestFullName = new Map<string, string>()
+  for (const firstName of confirmedFirstNames) {
+    let best = '', bestCount = 0
+    for (const [fn, count] of fullNameCounts) {
+      if (fn.split(/\s+/)[0].toLowerCase() === firstName && count > bestCount) {
+        best = fn; bestCount = count
       }
     }
+    if (best) bestFullName.set(firstName, best)
   }
-  logger.info(`[Linguistic] Unknown-names valides : ${nameByBlockStart.size} sur ${unknownVernBlocks.length}`)
 
-  const uniqueSpeakers = [...new Set([...nameByPairId.values(), ...nameByBlockStart.values()])]
-  logger.info(`[Linguistic] Noms confirmes : ${uniqueSpeakers.length} speakers (${uniqueSpeakers.join(', ')})`)
-  logger.info(`[Linguistic] Prenoms confirmes : ${[...confirmedFirstNames].join(', ')}`)
+  // Construire nameByPairId (blocs pairies) et nameByBlockStart (blocs unknown)
+  const nameByPairId = new Map<number, string>()
+  const nameByBlockStart = new Map<number, string>()
+  for (const entry of allNameEntries) {
+    if (!confirmedFirstNames.has(entry.firstName)) continue
+    const canonName = bestFullName.get(entry.firstName) || entry.fullName
+    if (entry.source === 'paired') {
+      nameByPairId.set(entry.key, canonName)
+    } else {
+      nameByBlockStart.set(entry.key, canonName)
+    }
+  }
+
+  logger.info(`[Linguistic] Prenoms confirmes (>=${NAME_THRESHOLD}x) : ${[...confirmedFirstNames].map(fn => `${fn}(${firstNameCounts.get(fn)})`).join(', ')}`)
+  logger.info(`[Linguistic] Speakers : ${[...bestFullName.values()].join(', ')}`)
+  logger.info(`[Linguistic] Name assignments : ${nameByPairId.size} pairies + ${nameByBlockStart.size} unknown`)
 
   // ── Step 3.6 : Filtre post-Whisper par nom en debut de texte ──
   // Le meneur ne commence JAMAIS par un prenom. Si le texte Whisper d'un bloc FR
