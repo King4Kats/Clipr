@@ -1442,13 +1442,18 @@ function WordCloudPanel({ data, frequencies, speakers }: {
         ))}
       </svg>
       {hoveredFreq && (
-        <div className="absolute top-1 right-1 bg-card border border-border rounded-lg p-2 shadow-lg text-[10px] z-20 max-w-[160px]">
-          <div className="font-bold text-foreground">{hoveredFreq.word}</div>
-          <div className="text-muted-foreground">{hoveredFreq.total}x</div>
-          {/* Affiche le detail par speaker seulement si plusieurs speakers utilisent ce mot */}
-          {Object.keys(hoveredFreq.speakers).length > 1 && Object.entries(hoveredFreq.speakers).map(([s, c]) => (
-            <div key={s} className="flex justify-between gap-3"><span className="text-muted-foreground">{s}</span><span className="font-mono font-bold">{c}</span></div>
-          ))}
+        <div className="absolute top-1 right-1 bg-card border border-border rounded-lg p-2 shadow-lg text-[10px] z-20 max-w-[200px]">
+          <div className="font-bold text-foreground mb-1">« {hoveredFreq.word} »</div>
+          <div className="text-muted-foreground">Prononce {hoveredFreq.total} fois au total</div>
+          {/* Detail par locuteur si plusieurs personnes utilisent ce mot */}
+          {Object.keys(hoveredFreq.speakers).length > 1 && (
+            <div className="mt-1.5 pt-1.5 border-t border-border/50 space-y-0.5">
+              <div className="text-[9px] text-muted-foreground/60 uppercase font-bold mb-0.5">Par locuteur</div>
+              {Object.entries(hoveredFreq.speakers).map(([s, c]) => (
+                <div key={s} className="flex justify-between gap-3"><span className="text-muted-foreground">{s}</span><span className="font-mono font-bold">{c} fois</span></div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
