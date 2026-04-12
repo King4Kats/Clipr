@@ -35,15 +35,27 @@ const FRENCH_STOP_WORDS = new Set([
   // Conjonctions
   'et', 'ou', 'mais', 'donc', 'car', 'ni', 'puis', 'comme',
   'quand', 'lorsque', 'puisque', 'parce', 'sinon', 'soit',
-  // Adverbes tres courants
-  'ne', 'pas', 'plus', 'moins', 'tres', 'bien', 'mal', 'aussi',
-  'encore', 'toujours', 'jamais', 'deja', 'ici', 'vraiment',
+  // Prepositions avec accents
+  'après', 'à', 'dès', 'até',
+  // Adverbes tres courants (avec et sans accents)
+  'ne', 'pas', 'plus', 'moins', 'tres', 'très', 'bien', 'mal', 'aussi',
+  'encore', 'toujours', 'jamais', 'deja', 'déjà', 'ici', 'vraiment',
   'peut', 'tout', 'tous', 'toute', 'toutes', 'rien', 'peu',
-  'beaucoup', 'trop', 'assez', 'meme', 'autre', 'autres',
+  'beaucoup', 'trop', 'assez', 'meme', 'même', 'autre', 'autres',
   'oui', 'non', 'bon', 'bah', 'ben', 'hein', 'euh', 'alors',
-  'voila', 'enfin', 'ensuite', 'ainsi', 'surtout', 'plutot',
+  'voila', 'voilà', 'enfin', 'ensuite', 'ainsi', 'surtout', 'plutot', 'plutôt',
+  // Mots generiques trop vagues pour etre pertinents
+  'petit', 'petite', 'petits', 'petites', 'grand', 'grande', 'grands', 'grandes',
+  'ans', 'année', 'années', 'jour', 'jours', 'fois', 'temps', 'moment',
+  'chose', 'choses', 'gens', 'homme', 'femme', 'côté', 'cote',
+  'coup', 'part', 'reste', 'parti', 'partir', 'arrivé', 'arrivés', 'arriver',
+  'mis', 'pris', 'allé', 'allée', 'allés', 'allées', 'venu', 'venue',
+  'trouvé', 'trouvée', 'appelé', 'appelait',
+  'là', 'ça', 'comme', 'quand', 'comment', 'pourquoi',
   // Verbes auxiliaires et tres courants (formes conjuguees)
+  // IMPORTANT : inclure les formes avec ET sans accents car Whisper transcrit avec accents
   'est', 'sont', 'etait', 'etaient', 'ete', 'sera', 'serait',
+  'était', 'étaient', 'été', 'être', 'êtes',
   'suis', 'sommes', 'etes', 'fut', 'fus',
   'ai', 'as', 'avons', 'avez', 'ont', 'avait', 'avaient',
   'aura', 'aurait', 'avoir', 'etre',
@@ -60,14 +72,20 @@ const FRENCH_STOP_WORDS = new Set([
   'met', 'mets', 'mettre', 'mettait',
   'prend', 'prends', 'prendre', 'prenait',
   'donne', 'donner', 'donnait',
+  'étais', 'étions', 'étiez',
   // Determinants et mots outils
   'quel', 'quelle', 'quels', 'quelles',
   'chaque', 'quelque', 'quelques', 'certain', 'certains',
   'certaine', 'certaines', 'plusieurs', 'aucun', 'aucune',
   // Nombres ecrits en lettres
   'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf', 'dix',
-  // Mots parasites de transcription
+  // Mots parasites de transcription et hesitations
   'donc', 'quoi', 'enfin', 'etc', 'voila', 'bon',
+  'oui', 'non', 'ouais', 'nan', 'hmm', 'mmm', 'hum',
+  'allez', 'tiens', 'bon', 'bref', 'genre',
+  // Pronoms et adverbes accentues courants
+  'où', 'déjà', 'là-bas', 'peut-être',
+  'aussi', 'encore', 'dessus', 'dessous', 'dedans', 'dehors',
 ])
 
 /**
