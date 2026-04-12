@@ -33,6 +33,9 @@ import {
 } from "@/components/ui/select"
 import api from "@/api"
 import SemanticAnalysis from "@/components/new/SemanticAnalysis"
+import GridLayout, { Layout } from "react-grid-layout"
+import "react-grid-layout/css/styles.css"
+import "react-resizable/css/styles.css"
 import type { TranscriptSegment, TranscriptionHistoryItem } from "@/types"
 
 // Extensions de fichiers acceptées par l'outil
@@ -740,9 +743,9 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         )}
       </AnimatePresence>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Upload + Result */}
-        <div className="lg:col-span-2 space-y-6">
+      <div className={`grid gap-6 ${status === 'done' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-3'}`}>
+        {/* Left: Upload + Result (pleine largeur quand resultats affiches) */}
+        <div className={`${status === 'done' ? '' : 'lg:col-span-2'} space-y-6`}>
           {/* Upload zone */}
           {!uploadedFile && !batchMode && status !== 'done' && (
             <motion.div
@@ -956,95 +959,19 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
             </motion.div>
           )}
 
-          {/* Result */}
+          {/* Result — layout redimensionnable quand l'analyse semantique est ouverte */}
           {status === 'done' && segments.length > 0 && (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-border rounded-xl overflow-hidden">
-              {/* Toolbar */}
-              <div className="flex items-center justify-between p-4 border-b border-border">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-green-500" />
-                  <span className="text-sm font-semibold text-foreground">
-                    {segments.length} segments
-                    {uploadedFile?.name && <span className="text-muted-foreground font-normal"> — {uploadedFile.name}</span>}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" onClick={handleCopy} className="text-xs gap-1.5">
-                    {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                    {copied ? 'Copié' : 'Copier'}
-                  </Button>
-                  {transcriptionId && (
-                    <>
-                      <a href={api.getTranscriptionExportUrl(transcriptionId, 'txt')} download>
-                        <Button variant="ghost" size="sm" className="text-xs gap-1.5">
-                          <Download className="w-3.5 h-3.5" /> .txt
-                        </Button>
-                      </a>
-                      <a href={api.getTranscriptionExportUrl(transcriptionId, 'srt')} download>
-                        <Button variant="ghost" size="sm" className="text-xs gap-1.5">
-                          <Download className="w-3.5 h-3.5" /> .srt
-                        </Button>
-                      </a>
-                    </>
-                  )}
-                  <Button variant="outline" size="sm" onClick={() => setShowSemanticAnalysis(v => !v)} className="text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
-                    <Brain className="w-3.5 h-3.5" />
-                    Analyse semantique
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={handleReset} className="text-xs">
-                    Nouvelle transcription
-                  </Button>
-                </div>
-              </div>
-
-              {/* Panneau d'analyse semantique (nuage de mots, frequences, themes) */}
-              <AnimatePresence>
-                {showSemanticAnalysis && (
-                  <div className="px-4 pb-2">
-                    <SemanticAnalysis
-                      segments={segments}
-                      ollamaModel={whisperModel === 'large-v3-turbo' ? 'qwen2.5:14b' : 'qwen2.5:14b'}
-                      onClose={() => setShowSemanticAnalysis(false)}
-                    />
-                  </div>
-                )}
-              </AnimatePresence>
-
-              {/* Transcript text */}
-              <div className="max-h-[500px] overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
-                {segments.map((seg, i) => {
-                  const prevSpeaker = i > 0 ? segments[i - 1].speaker : null
-                  const showSpeaker = seg.speaker && seg.speaker !== prevSpeaker
-                  return (
-                    <div key={i}>
-                      {showSpeaker && (
-                        <div className="mt-3 mb-1 first:mt-0">
-                          <span
-                            className="text-[10px] font-bold uppercase tracking-wider text-primary cursor-pointer hover:underline"
-                            title="Cliquer pour renommer ce locuteur"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              const newName = prompt(`Renommer "${seg.speaker}" en :`, seg.speaker || '')
-                              if (newName && newName !== seg.speaker && transcriptionId) {
-                                api.renameSpeaker(transcriptionId, seg.speaker!, newName).then((result) => {
-                                  if (result.segments) setSegments(result.segments)
-                                }).catch(() => {})
-                              }
-                            }}
-                          >{seg.speaker}</span>
-                        </div>
-                      )}
-                      <div className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
-                        <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
-                          {fmtTime(seg.start)}
-                        </span>
-                        <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </motion.div>
+            <TranscriptionResult
+              segments={segments}
+              transcriptionId={transcriptionId}
+              uploadedFileName={uploadedFile?.name}
+              copied={copied}
+              onCopy={handleCopy}
+              onReset={handleReset}
+              showSemanticAnalysis={showSemanticAnalysis}
+              onToggleSemantic={() => setShowSemanticAnalysis(v => !v)}
+              onSegmentsUpdate={setSegments}
+            />
           )}
         </div>
 
@@ -1145,6 +1072,225 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         )}
       </div>
     </div>
+  )
+}
+
+// ============================================================
+// SOUS-COMPOSANT : Resultat de transcription avec layout redimensionnable
+// Quand l'analyse semantique est ouverte, les deux panneaux (transcript + analyse)
+// sont cote a cote et redimensionnables via react-grid-layout, comme l'editeur NLE.
+// ============================================================
+
+const RESULT_STORAGE_KEY = 'clipr-transcription-result-layout'
+const RESULT_COLS = 12
+const RESULT_ROW_HEIGHT = 60
+const RESULT_GAP = 6
+
+/** Disposition par defaut : transcript a gauche, analyse a droite */
+const DEFAULT_RESULT_LAYOUT: Layout[] = [
+  { i: 'transcript', x: 0, y: 0, w: 6, h: 9, minW: 3, minH: 4 },
+  { i: 'analysis', x: 6, y: 0, w: 6, h: 9, minW: 3, minH: 4 },
+]
+
+/** Disposition quand seul le transcript est affiche (pleine largeur) */
+const SOLO_LAYOUT: Layout[] = [
+  { i: 'transcript', x: 0, y: 0, w: 12, h: 9, minW: 4, minH: 4 },
+]
+
+function TranscriptionResult({
+  segments,
+  transcriptionId,
+  uploadedFileName,
+  copied,
+  onCopy,
+  onReset,
+  showSemanticAnalysis,
+  onToggleSemantic,
+  onSegmentsUpdate,
+}: {
+  segments: TranscriptSegment[]
+  transcriptionId: string | null
+  uploadedFileName?: string
+  copied: boolean
+  onCopy: () => void
+  onReset: () => void
+  showSemanticAnalysis: boolean
+  onToggleSemantic: () => void
+  onSegmentsUpdate: (segs: TranscriptSegment[]) => void
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(0)
+  const [resultLayout, setResultLayout] = useState<Layout[]>(() => {
+    try {
+      const saved = localStorage.getItem(RESULT_STORAGE_KEY)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed)) return parsed
+      }
+    } catch {}
+    return DEFAULT_RESULT_LAYOUT
+  })
+
+  // Mesurer la largeur du conteneur
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const update = () => setWidth(el.offsetWidth)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  // Sauvegarder la disposition quand elle change
+  const handleLayoutChange = useCallback((newLayout: Layout[]) => {
+    setResultLayout(newLayout)
+    localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(newLayout))
+  }, [])
+
+  // Formatage du temps
+  const fmtTime = (s: number) => {
+    const m = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${m}:${String(sec).padStart(2, '0')}`
+  }
+
+  // Layout actif : avec ou sans panneau analyse
+  const activeLayout = showSemanticAnalysis
+    ? resultLayout.filter(l => l.i === 'transcript' || l.i === 'analysis').length >= 2
+      ? resultLayout
+      : DEFAULT_RESULT_LAYOUT
+    : SOLO_LAYOUT
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+      {/* Toolbar en haut */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden mb-1">
+        <div className="flex items-center justify-between p-3 px-4">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-green-500" />
+            <span className="text-sm font-semibold text-foreground">
+              {segments.length} segments
+              {uploadedFileName && <span className="text-muted-foreground font-normal"> — {uploadedFileName}</span>}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={onCopy} className="text-xs gap-1.5">
+              {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? 'Copie' : 'Copier'}
+            </Button>
+            {transcriptionId && (
+              <>
+                <a href={api.getTranscriptionExportUrl(transcriptionId, 'txt')} download>
+                  <Button variant="ghost" size="sm" className="text-xs gap-1.5">
+                    <Download className="w-3.5 h-3.5" /> .txt
+                  </Button>
+                </a>
+                <a href={api.getTranscriptionExportUrl(transcriptionId, 'srt')} download>
+                  <Button variant="ghost" size="sm" className="text-xs gap-1.5">
+                    <Download className="w-3.5 h-3.5" /> .srt
+                  </Button>
+                </a>
+              </>
+            )}
+            <Button
+              variant={showSemanticAnalysis ? 'default' : 'outline'}
+              size="sm"
+              onClick={onToggleSemantic}
+              className={`text-xs gap-1.5 ${showSemanticAnalysis ? '' : 'border-primary/30 text-primary hover:bg-primary/10'}`}
+            >
+              <Brain className="w-3.5 h-3.5" />
+              Analyse semantique
+            </Button>
+            <Button variant="outline" size="sm" onClick={onReset} className="text-xs">
+              Nouvelle transcription
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Panneaux redimensionnables */}
+      <div ref={containerRef} className="relative">
+        {width > 0 && (
+          <GridLayout
+            layout={activeLayout}
+            cols={RESULT_COLS}
+            rowHeight={RESULT_ROW_HEIGHT}
+            width={width}
+            margin={[RESULT_GAP, RESULT_GAP]}
+            containerPadding={[0, 0]}
+            onLayoutChange={showSemanticAnalysis ? handleLayoutChange : undefined}
+            draggableHandle=".panel-drag-handle"
+            isResizable={showSemanticAnalysis}
+            isDraggable={showSemanticAnalysis}
+            useCSSTransforms
+            resizeHandles={['e', 'w', 's', 'se']}
+          >
+            {/* Panneau transcript */}
+            <div key="transcript" className="h-full">
+              <div className="h-full bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+                <div className="panel-drag-handle flex items-center gap-2 px-4 py-2 border-b border-border cursor-move bg-secondary/20">
+                  <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Transcription</span>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
+                  {segments.map((seg, i) => {
+                    const prevSpeaker = i > 0 ? segments[i - 1].speaker : null
+                    const showSpeaker = seg.speaker && seg.speaker !== prevSpeaker
+                    return (
+                      <div key={i}>
+                        {showSpeaker && (
+                          <div className="mt-3 mb-1 first:mt-0">
+                            <span
+                              className="text-[10px] font-bold uppercase tracking-wider text-primary cursor-pointer hover:underline"
+                              title="Cliquer pour renommer ce locuteur"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                const newName = prompt(`Renommer "${seg.speaker}" en :`, seg.speaker || '')
+                                if (newName && newName !== seg.speaker && transcriptionId) {
+                                  api.renameSpeaker(transcriptionId, seg.speaker!, newName).then((result: any) => {
+                                    if (result.segments) onSegmentsUpdate(result.segments)
+                                  }).catch(() => {})
+                                }
+                              }}
+                            >{seg.speaker}</span>
+                          </div>
+                        )}
+                        <div className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
+                          <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
+                            {fmtTime(seg.start)}
+                          </span>
+                          <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Panneau analyse semantique (visible seulement quand active) */}
+            {showSemanticAnalysis && (
+              <div key="analysis" className="h-full">
+                <div className="h-full bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+                  <div className="panel-drag-handle flex items-center gap-2 px-4 py-2 border-b border-border cursor-move bg-secondary/20">
+                    <Brain className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Analyse semantique</span>
+                  </div>
+                  <div className="flex-1 overflow-y-auto">
+                    <SemanticAnalysis
+                      segments={segments}
+                      ollamaModel="qwen2.5:14b"
+                      onClose={onToggleSemantic}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </GridLayout>
+        )}
+      </div>
+    </motion.div>
   )
 }
 
