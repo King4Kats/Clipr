@@ -280,9 +280,10 @@ function WordCloudView({
       {hoveredFreq && (
         <div className="absolute top-2 right-2 bg-card border border-border rounded-lg p-3 shadow-lg text-xs max-w-[200px]">
           <div className="font-bold text-foreground text-sm mb-1">"{hoveredFreq.word}"</div>
-          <div className="text-muted-foreground mb-2">Total : {hoveredFreq.total} occurrences</div>
-          {Object.entries(hoveredFreq.speakers).map(([speaker, count]) => (
-            <div key={speaker} className="flex justify-between text-[10px]">
+          <div className="text-muted-foreground mb-2">{hoveredFreq.total}x</div>
+          {/* Detail par speaker seulement si plusieurs speakers utilisent ce mot */}
+          {Object.keys(hoveredFreq.speakers).length > 1 && Object.entries(hoveredFreq.speakers).map(([speaker, count]) => (
+            <div key={speaker} className="flex justify-between text-[10px] gap-3">
               <span className="text-muted-foreground">{speaker}</span>
               <span className="font-mono font-bold text-foreground">{count}</span>
             </div>

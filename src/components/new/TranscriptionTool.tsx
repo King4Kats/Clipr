@@ -1444,9 +1444,10 @@ function WordCloudPanel({ data, frequencies, speakers }: {
       {hoveredFreq && (
         <div className="absolute top-1 right-1 bg-card border border-border rounded-lg p-2 shadow-lg text-[10px] z-20 max-w-[160px]">
           <div className="font-bold text-foreground">{hoveredFreq.word}</div>
-          <div className="text-muted-foreground">{hoveredFreq.total}x total</div>
-          {Object.entries(hoveredFreq.speakers).map(([s, c]) => (
-            <div key={s} className="flex justify-between"><span className="text-muted-foreground">{s}</span><span className="font-mono font-bold">{c}</span></div>
+          <div className="text-muted-foreground">{hoveredFreq.total}x</div>
+          {/* Affiche le detail par speaker seulement si plusieurs speakers utilisent ce mot */}
+          {Object.keys(hoveredFreq.speakers).length > 1 && Object.entries(hoveredFreq.speakers).map(([s, c]) => (
+            <div key={s} className="flex justify-between gap-3"><span className="text-muted-foreground">{s}</span><span className="font-mono font-bold">{c}</span></div>
           ))}
         </div>
       )}
