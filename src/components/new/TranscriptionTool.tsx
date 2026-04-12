@@ -25,13 +25,14 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"  // Animations fluides
 import {
   Mic, ArrowLeft, Upload, Loader2, Copy, Download, Trash2,
-  CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files, Pencil, X, Check
+  CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files, Pencil, X, Check, Brain
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Select, SelectTrigger, SelectContent, SelectItem, SelectValue,
 } from "@/components/ui/select"
 import api from "@/api"
+import SemanticAnalysis from "@/components/new/SemanticAnalysis"
 import type { TranscriptSegment, TranscriptionHistoryItem } from "@/types"
 
 // Extensions de fichiers acceptées par l'outil
@@ -118,6 +119,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   const [segments, setSegments] = useState<TranscriptSegment[]>([])
   const [liveSegments, setLiveSegments] = useState<TranscriptSegment[]>([])
   const [copied, setCopied] = useState(false)
+  // Affichage du panneau d'analyse semantique (nuage de mots, frequences, themes)
+  const [showSemanticAnalysis, setShowSemanticAnalysis] = useState(false)
 
   // History
   const [history, setHistory] = useState<TranscriptionHistoryItem[]>([])
@@ -984,11 +987,28 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
                       </a>
                     </>
                   )}
+                  <Button variant="outline" size="sm" onClick={() => setShowSemanticAnalysis(v => !v)} className="text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
+                    <Brain className="w-3.5 h-3.5" />
+                    Analyse semantique
+                  </Button>
                   <Button variant="outline" size="sm" onClick={handleReset} className="text-xs">
                     Nouvelle transcription
                   </Button>
                 </div>
               </div>
+
+              {/* Panneau d'analyse semantique (nuage de mots, frequences, themes) */}
+              <AnimatePresence>
+                {showSemanticAnalysis && (
+                  <div className="px-4 pb-2">
+                    <SemanticAnalysis
+                      segments={segments}
+                      ollamaModel={whisperModel === 'large-v3-turbo' ? 'qwen2.5:14b' : 'qwen2.5:14b'}
+                      onClose={() => setShowSemanticAnalysis(false)}
+                    />
+                  </div>
+                )}
+              </AnimatePresence>
 
               {/* Transcript text */}
               <div className="max-h-[500px] overflow-y-auto p-4 space-y-1.5 custom-scrollbar">

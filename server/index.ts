@@ -678,6 +678,32 @@ app.post('/api/ollama/analyze', requireAuth, async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
+// ── Analyse semantique (themes, sentiment, insights) ──
+// Envoie la transcription au LLM pour extraire les themes principaux,
+// le sentiment general et les points cles du contenu.
+app.post('/api/semantic/analyze', requireAuth, async (req, res) => {
+  try {
+    const { segments, model } = req.body
+    if (!segments || !Array.isArray(segments) || segments.length === 0) {
+      return res.status(400).json({ error: 'segments requis (tableau non vide)' })
+    }
+    // Construction du texte complet avec speakers pour l'analyse
+    const fullText = segments
+      .map((s: any) => {
+        const speaker = s.speaker ? `[${s.speaker}] ` : ''
+        return `${speaker}${s.text}`
+      })
+      .join('\n')
+
+    const ollamaModel = model || 'qwen2.5:14b'
+    const result = await ollamaService.semanticAnalysis(fullText, ollamaModel)
+    res.json({ semanticAnalysis: result })
+  } catch (err: any) {
+    logger.error('[Semantic] Analysis failed:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // Project list (active projects, max 6) — auth-protected
 app.get('/api/project/history', requireAuth, (req, res) => {
   res.json(projectService.getProjectHistory(req.user!.userId))

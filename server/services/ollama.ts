@@ -501,3 +501,106 @@ export async function analyzeTranscript(transcript: string, context: string, mod
   logger.info(`[Ollama] ${clean.length} segments finaux`)
   return { segments: clean }
 }
+
+// ============================================================
+// ANALYSE SEMANTIQUE : themes, sentiment, insights
+// ============================================================
+
+/**
+ * Interface du resultat de l'analyse semantique.
+ * - themes : liste des themes principaux identifies dans le texte
+ * - sentiment : sentiment general (positif, negatif, neutre, mixte) avec explication
+ * - insights : points cles et observations importantes
+ */
+interface SemanticResult {
+  themes: string[]
+  sentiment: { label: string; explanation: string }
+  insights: string[]
+}
+
+/**
+ * Analyse semantique d'une transcription via Ollama.
+ * Envoie le texte au LLM pour extraire les themes, le sentiment general,
+ * et les points cles du contenu.
+ *
+ * Pour les transcriptions longues, on echantillonne debut/milieu/fin
+ * pour rester dans les limites du contexte du modele.
+ *
+ * @param transcript - Texte complet de la transcription (avec speakers si dispo)
+ * @param model - Nom du modele Ollama a utiliser
+ * @returns Resultat avec themes, sentiment et insights
+ */
+export async function semanticAnalysis(transcript: string, model: string): Promise<SemanticResult> {
+  // Si la transcription est trop longue, on echantillonne 3 parties
+  let textToAnalyze = transcript
+  if (transcript.length > 25000) {
+    const third = Math.floor(transcript.length / 3)
+    const beginning = transcript.substring(0, 8000)
+    const middle = transcript.substring(third, third + 8000)
+    const ending = transcript.substring(transcript.length - 8000)
+    textToAnalyze = `[DEBUT DE LA TRANSCRIPTION]\n${beginning}\n\n[MILIEU DE LA TRANSCRIPTION]\n${middle}\n\n[FIN DE LA TRANSCRIPTION]\n${ending}`
+  }
+
+  const systemPrompt = `Tu es un analyste de contenu expert. On te donne une transcription audio/video.
+Tu dois analyser le contenu et retourner un JSON avec exactement cette structure :
+{
+  "themes": ["theme1", "theme2", ...],
+  "sentiment": { "label": "positif|negatif|neutre|mixte", "explanation": "explication courte" },
+  "insights": ["point cle 1", "point cle 2", ...]
+}
+
+Regles :
+- themes : entre 5 et 10 themes principaux identifies dans le contenu, formules de maniere concise
+- sentiment : le ton general de la conversation (positif, negatif, neutre ou mixte) avec une explication en 1-2 phrases
+- insights : entre 5 et 10 observations ou points cles importants du contenu
+- Reponds UNIQUEMENT avec le JSON, rien d'autre
+- Tous les textes doivent etre en francais`
+
+  const userPrompt = `Voici la transcription a analyser :\n\n${textToAnalyze}`
+
+  // Tentatives (3 max) pour obtenir un JSON valide
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await ollamaRequest('POST', '/api/chat', {
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        stream: false,
+        options: { temperature: 0.2, num_ctx: 32768 }
+      })
+
+      const parsed = JSON.parse(response)
+      const content = parsed?.message?.content || ''
+
+      // Extraction du JSON depuis la reponse (le LLM peut ajouter du texte autour)
+      const jsonMatch = content.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) {
+        logger.warn(`[Ollama] Semantic: pas de JSON dans la reponse (tentative ${attempt + 1})`)
+        continue
+      }
+
+      const result = JSON.parse(jsonMatch[0])
+
+      // Validation de la structure
+      if (!Array.isArray(result.themes) || !result.sentiment || !Array.isArray(result.insights)) {
+        logger.warn(`[Ollama] Semantic: structure JSON invalide (tentative ${attempt + 1})`)
+        continue
+      }
+
+      return {
+        themes: result.themes.slice(0, 10),
+        sentiment: {
+          label: result.sentiment.label || 'neutre',
+          explanation: result.sentiment.explanation || ''
+        },
+        insights: result.insights.slice(0, 10)
+      }
+    } catch (err: any) {
+      logger.warn(`[Ollama] Semantic: erreur tentative ${attempt + 1}:`, err.message)
+    }
+  }
+
+  throw new Error('Impossible d\'obtenir une analyse semantique apres 3 tentatives')
+}

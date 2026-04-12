@@ -354,6 +354,10 @@ const api = {
   analyzeTranscript: (transcript: string, context: string, model: string) =>
     post('/api/ollama/analyze', { transcript, context, model }),
 
+  // ── Analyse semantique : themes, sentiment, insights via Ollama ──
+  semanticAnalyze: (segments: any[], model: string) =>
+    post<{ semanticAnalysis: { themes: string[]; sentiment: { label: string; explanation: string }; insights: string[] } }>('/api/semantic/analyze', { segments, model }),
+
   // ── Projets : CRUD et gestion de l'historique ──
   getProjectHistory: () => get<any[]>('/api/project/history'),
   createProject: (name: string, type: 'manual' | 'ai' = 'manual') =>

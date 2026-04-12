@@ -67,11 +67,27 @@ export type ProcessingStep =
   | 'queued'
   | 'extracting-audio'
   | 'transcribing'
+  | 'diarizing'
+  | 'identifying-speakers'
   | 'analyzing'
   | 'ready'
   | 'exporting'
   | 'done'
   | 'error'
+
+/** Frequence d'un mot avec repartition par locuteur */
+export interface WordFrequency {
+  word: string
+  total: number
+  speakers: Record<string, number>
+}
+
+/** Resultat complet de l'analyse semantique par Ollama */
+export interface SemanticAnalysisResult {
+  themes: string[]
+  sentiment: { label: string; explanation: string }
+  insights: string[]
+}
 
 /** État de progression d'une étape de traitement */
 export interface ProcessingProgress {

@@ -17,13 +17,14 @@ import { useState, useRef, useEffect } from "react";
 // Framer Motion : animations fluides + composant Reorder pour le drag & drop
 import { motion, Reorder } from "framer-motion";
 // Icones Lucide utilisees dans l'interface (ciseaux, lecture, corbeille, etc.)
-import { Scissors, Play, Trash2, Plus, Pause, FileText, Film, ChevronDown, GripVertical, GripHorizontal, Loader2, CheckCircle } from "lucide-react";
+import { Scissors, Play, Trash2, Plus, Pause, FileText, Film, ChevronDown, GripVertical, GripHorizontal, Loader2, CheckCircle, Brain } from "lucide-react";
 // Store Zustand global : contient l'etat partage de toute l'application (segments, fichiers video, etc.)
 import { useStore } from "@/store/useStore";
 // Composant bouton reutilisable de l'interface
 import { Button } from "@/components/ui/button";
 // Module API : toutes les fonctions pour communiquer avec le serveur backend
 import api from "@/api";
+import SemanticAnalysis from "@/components/new/SemanticAnalysis";
 
 /**
  * Formate un nombre de secondes en chaine lisible "M:SS" ou "H:MM:SS".
@@ -65,6 +66,8 @@ const Timeline = () => {
   const [isTranscribing, setIsTranscribing] = useState(false);
   // Etat local pour afficher/masquer le menu deroulant d'export
   const [showExportMenu, setShowExportMenu] = useState(false);
+  // Affichage du modal d'analyse semantique
+  const [showSemanticAnalysis, setShowSemanticAnalysis] = useState(false);
   // Reference DOM vers le menu d'export (pour detecter les clics en dehors)
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
@@ -318,6 +321,14 @@ const Timeline = () => {
                     {isTranscribing ? <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" /> : <FileText className="w-3.5 h-3.5 text-muted-foreground" />}
                     TXT propre {transcript.length === 0 && <span className="text-[8px] text-muted-foreground">(transcription auto)</span>}
                   </button>
+                  <div className="border-t border-border my-1" />
+                  <button
+                    onClick={() => { setShowExportMenu(false); setShowSemanticAnalysis(true) }}
+                    disabled={transcript.length === 0}
+                    className="w-full text-left px-3 py-2 text-xs font-medium hover:bg-primary/10 transition-colors flex items-center gap-2 text-primary disabled:opacity-50"
+                  >
+                    <Brain className="w-3.5 h-3.5" /> Analyse semantique
+                  </button>
                 </div>
               )}
             </div>
@@ -403,6 +414,30 @@ const Timeline = () => {
               {isTranscribing ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
               TXT propre
             </Button>
+          </div>
+          {/* Bouton analyse semantique : nuage de mots, frequences, themes */}
+          {transcript.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowSemanticAnalysis(true)}
+              className="w-full gap-1.5 text-[10px] border-primary/30 text-primary hover:bg-primary/10 mt-1"
+            >
+              <Brain className="w-3 h-3" /> Analyse semantique
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Modal d'analyse semantique (nuage de mots, frequences, themes IA) */}
+      {showSemanticAnalysis && transcript.length > 0 && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowSemanticAnalysis(false)}>
+          <div className="w-full max-w-4xl max-h-[85vh] overflow-auto m-4" onClick={e => e.stopPropagation()}>
+            <SemanticAnalysis
+              segments={transcript}
+              ollamaModel={config.ollamaModel || 'qwen2.5:14b'}
+              onClose={() => setShowSemanticAnalysis(false)}
+            />
           </div>
         </div>
       )}

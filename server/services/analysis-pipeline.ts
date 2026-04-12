@@ -23,6 +23,9 @@ import * as whisperService from './whisper.js'
 // Service Ollama : permet d'analyser le texte avec un modèle de langage (IA)
 import * as ollamaService from './ollama.js'
 
+// Service de diarisation : identification des locuteurs (qui parle quand)
+import * as diarizationService from './diarization.js'
+
 // Service de gestion de projets : lecture, écriture, mise à jour du statut des projets
 import * as projectService from './project-history.js'
 
@@ -115,8 +118,8 @@ export async function runAnalysisPipeline(task: QueueTask, broadcastFn: Broadcas
           message: `Extraction audio ${i + 1}/${videoFiles.length}...`
         })
         // On met aussi à jour la tâche dans la file d'attente
-        // L'extraction audio représente 15% du travail total (0 à 15%)
-        updateTaskProgress(task.id, progress * 0.15, `Extraction audio ${i + 1}/${videoFiles.length}`)
+        // L'extraction audio représente 10% du travail total (0 à 10%)
+        updateTaskProgress(task.id, progress * 0.10, `Extraction audio ${i + 1}/${videoFiles.length}`)
       })
       audioPaths.push(audioPath)
     }
@@ -167,8 +170,8 @@ export async function runAnalysisPipeline(task: QueueTask, broadcastFn: Broadcas
             progress,
             message: `Transcription video ${i + 1}/${audioPaths.length}...`
           })
-          // La transcription représente 50% du travail total (15% à 65%)
-          updateTaskProgress(task.id, 15 + progress * 0.5, `Transcription ${i + 1}/${audioPaths.length}`)
+          // La transcription représente 40% du travail total (10% à 50%)
+          updateTaskProgress(task.id, 10 + progress * 0.4, `Transcription ${i + 1}/${audioPaths.length}`)
         },
         whisperPrompt // Prompt optionnel pour améliorer la reconnaissance
       )
@@ -184,6 +187,78 @@ export async function runAnalysisPipeline(task: QueueTask, broadcastFn: Broadcas
 
     // Sauvegarde intermédiaire avec la transcription complète
     projectService.saveProject(projectId, { ...data, audioPaths, transcript: allTranscriptSegments, config })
+
+    // ============================================================
+    // ÉTAPE 2.5 : Diarisation (identification des locuteurs)
+    // On utilise SpeechBrain pour détecter qui parle à quel moment,
+    // puis Ollama pour deviner les prénoms des interlocuteurs.
+    // Cette étape est optionnelle : si elle échoue, le pipeline continue.
+    // ============================================================
+    if (allTranscriptSegments.length >= 2) {
+      try {
+        broadcastFn(userId, projectId, 'progress', {
+          step: 'diarizing',
+          progress: 0,
+          message: 'Identification des locuteurs...'
+        })
+
+        // On diarise chaque audio séparément (support multi-vidéo)
+        for (let i = 0; i < audioPaths.length; i++) {
+          // On récupère les segments qui correspondent à cette vidéo
+          const offset = videoFiles[i]?.offset || 0
+          const nextOffset = i < videoFiles.length - 1 ? (videoFiles[i + 1]?.offset || Infinity) : Infinity
+          const videoSegments = allTranscriptSegments.filter(
+            (s: any) => s.start >= offset && s.start < nextOffset
+          )
+
+          if (videoSegments.length < 2) continue
+
+          // Diarisation avec SpeechBrain (détection des locuteurs)
+          const diarized = await diarizationService.diarize(
+            audioPaths[i],
+            // On passe les segments avec timestamps locaux (sans offset)
+            videoSegments.map((s: any) => ({ ...s, start: s.start - offset, end: s.end - offset })),
+            (percent) => {
+              const progress = ((i + percent / 100) / audioPaths.length) * 100
+              broadcastFn(userId, projectId, 'progress', {
+                step: 'diarizing',
+                progress,
+                message: `Identification des locuteurs (video ${i + 1}/${audioPaths.length})...`
+              })
+              updateTaskProgress(task.id, 50 + progress * 0.1, `Diarisation ${i + 1}/${audioPaths.length}`)
+            }
+          )
+
+          // On copie les labels de locuteur dans les segments originaux
+          for (let j = 0; j < videoSegments.length && j < diarized.length; j++) {
+            if (diarized[j].speaker) {
+              // Retrouver le segment dans le tableau global et ajouter le speaker
+              const globalSeg = allTranscriptSegments.find((s: any) => s.id === videoSegments[j].id)
+              if (globalSeg) globalSeg.speaker = diarized[j].speaker
+            }
+          }
+        }
+
+        // Identification des prénoms via Ollama (analyse des premières minutes)
+        broadcastFn(userId, projectId, 'progress', {
+          step: 'identifying-speakers',
+          progress: 0,
+          message: 'Detection des noms des interlocuteurs...'
+        })
+
+        const nameMapping = await diarizationService.identifySpeakerNames(allTranscriptSegments, ollamaModel)
+        diarizationService.applySpeakerNames(allTranscriptSegments, nameMapping)
+
+        logger.info(`[Analysis] Diarization complete: ${Object.values(nameMapping).join(', ')}`)
+
+        // Sauvegarde intermédiaire avec les labels de locuteurs
+        projectService.saveProject(projectId, { ...data, audioPaths, transcript: allTranscriptSegments, config })
+
+      } catch (err: any) {
+        // La diarisation est optionnelle : si elle échoue, on continue le pipeline
+        logger.warn('[Analysis] Diarization failed, continuing without speaker labels:', err.message)
+      }
+    }
 
     // ============================================================
     // ÉTAPE 3 : Analyse thématique avec le LLM (Ollama)
@@ -208,6 +283,7 @@ export async function runAnalysisPipeline(task: QueueTask, broadcastFn: Broadcas
         message: msg || 'Analyse thématique...'
       })
       // L'analyse représente 35% du travail total (65% à 100%)
+      // (extraction=10%, transcription=40%, diarisation=15%, analyse=35%)
       updateTaskProgress(task.id, 65 + progress * 0.35, msg || 'Analyse thématique')
     })
 
