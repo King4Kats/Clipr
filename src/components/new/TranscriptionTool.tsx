@@ -1048,7 +1048,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
           )}
         </div>
 
-        {/* Right: Config panel */}
+        {/* Right: Config panel — masque quand les resultats sont affiches */}
+        {status !== 'done' && (
         <div className="space-y-6">
           <motion.div
             initial={{ opacity: 0, x: 20 }}
@@ -1141,6 +1142,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
             )}
           </motion.div>
         </div>
+        )}
       </div>
     </div>
   )
