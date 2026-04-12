@@ -29,7 +29,7 @@ import { randomUUID } from 'crypto'
  * Nombre maximum de projets actifs par utilisateur.
  * Cette limite évite d'accumuler trop de projets et de surcharger l'interface.
  */
-const MAX_PROJECTS_PER_USER = 6
+const MAX_PROJECTS_PER_USER = 12
 
 /**
  * Corrige les problèmes d'encodage "mojibake".

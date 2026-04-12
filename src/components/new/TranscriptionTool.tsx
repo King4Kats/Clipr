@@ -125,10 +125,6 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   // Affichage du panneau d'analyse semantique (nuage de mots, frequences, themes)
   const [showSemanticAnalysis, setShowSemanticAnalysis] = useState(false)
 
-  // History
-  const [history, setHistory] = useState<TranscriptionHistoryItem[]>([])
-  const [showHistory, setShowHistory] = useState(false)
-
   // Project mode state (when opened from home page project card)
   const [projectItems, setProjectItems] = useState<any[]>(initialProject?.data?.transcriptionItems || [])
   const [selectedItem, setSelectedItem] = useState<any | null>(null)
@@ -137,11 +133,6 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   const [projectName, setProjectName] = useState(initialProject?.name || '')
   const [editingProjectName, setEditingProjectName] = useState(false)
   const [projectNameEdit, setProjectNameEdit] = useState('')
-
-  // Load history on mount
-  useEffect(() => {
-    api.getTranscriptionHistory().then(setHistory).catch(() => {})
-  }, [])
 
   // WebSocket listeners
   useEffect(() => {
@@ -474,23 +465,6 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   }
 
   // Load a past transcription
-  const handleLoadHistory = async (item: TranscriptionHistoryItem) => {
-    try {
-      const result = await api.getTranscription(item.id)
-      setSegments(result.segments)
-      setTranscriptionId(item.id)
-      setUploadedFile({ path: '', name: item.filename, duration: item.duration || 0 })
-      setStatus('done')
-      setShowHistory(false)
-    } catch { /* ignore */ }
-  }
-
-  const handleDeleteHistory = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation()
-    await api.deleteTranscription(id)
-    setHistory(prev => prev.filter(h => h.id !== id))
-  }
-
   const isProcessing = batchProcessing || ['uploading', 'queued', 'extracting-audio', 'transcribing', 'diarizing', 'identifying-speakers'].includes(status)
 
   // Format time
@@ -693,55 +667,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
             <p className="text-xs text-muted-foreground">Transcrire un ou plusieurs fichiers audio/vidéo avec Whisper</p>
           </div>
         </div>
-        {history.length > 0 && (
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className="ml-auto flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Clock className="w-3.5 h-3.5" />
-            Historique ({history.length})
-          </button>
-        )}
       </div>
-
-      {/* History panel */}
-      <AnimatePresence>
-        {showHistory && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mb-6 overflow-hidden"
-          >
-            <div className="bg-card border border-border rounded-xl p-4 space-y-2">
-              <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-3">Transcriptions récentes</h3>
-              {history.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => handleLoadHistory(item)}
-                  className="group flex items-center gap-3 p-2.5 rounded-lg hover:bg-secondary/50 cursor-pointer transition-colors"
-                >
-                  <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-foreground truncate">{item.filename}</p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {new Date(item.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      {item.duration ? ` · ${fmtTime(item.duration)}` : ''}
-                      {' · '}{item.whisper_model} · {item.language.toUpperCase()}
-                    </p>
-                  </div>
-                  <button
-                    onClick={(e) => handleDeleteHistory(e, item.id)}
-                    className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-all"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <div className={`grid gap-6 ${status === 'done' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-3'}`}>
         {/* Left: Upload + Result (pleine largeur quand resultats affiches) */}

@@ -126,9 +126,9 @@ export default function HomePage() {
             </h2>
             <div className="flex items-center gap-3">
               <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest">
-                {history.length}/6
+                {history.length}/12
               </span>
-              {history.length < 6 && (
+              {history.length < 12 && (
                 <button
                   onClick={() => setShowNewProjectChoice(true)}
                   className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
@@ -142,7 +142,7 @@ export default function HomePage() {
 
           {/* Grille de cartes projet (max 6) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {history.slice(0, 6).map((project: any, i: number) => (
+            {history.slice(0, 12).map((project: any, i: number) => (
               <motion.div
                 key={project.id || i}
                 initial={{ opacity: 0, x: -10 }}
@@ -256,7 +256,7 @@ export default function HomePage() {
             ))}
 
             {/* Carte "Nouveau Projet" si place disponible */}
-            {history.length < 6 && (
+            {history.length < 12 && (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
