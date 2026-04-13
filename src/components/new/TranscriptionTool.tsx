@@ -1168,6 +1168,8 @@ function TranscriptionResult({
 
   // Refs pour scroller vers les segments du transcript
   const transcriptScrollRef = useRef<HTMLDivElement>(null)
+  // Ref vers le SVG du nuage de mots pour l'export PDF
+  const wordCloudSvgRef = useRef<SVGElement | null>(null)
 
   // Donnees calculees pour le nuage et le tableau (instantane, cote client)
   // Filtre les mots exclus par l'utilisateur
@@ -1291,6 +1293,7 @@ function TranscriptionResult({
         frequencies,
         speakers,
         semanticResult,
+        wordCloudSvg: wordCloudSvgRef.current,
       })
     } catch (err) {
       console.error('Erreur export PDF:', err)
@@ -1420,7 +1423,7 @@ function TranscriptionResult({
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Nuage de mots</span>
               </div>
               <div className="flex-1 overflow-hidden p-2">
-                <WordCloudPanel data={cloudData} frequencies={frequencies} speakers={speakers} onWordClick={navigateToWord} />
+                <WordCloudPanel data={cloudData} frequencies={frequencies} speakers={speakers} onWordClick={navigateToWord} svgRef={wordCloudSvgRef} />
               </div>
             </div>
           </div>
@@ -1481,11 +1484,12 @@ import cloudLayout from 'd3-cloud'
 
 const SPEAKER_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
-function WordCloudPanel({ data, frequencies, speakers, onWordClick }: {
+function WordCloudPanel({ data, frequencies, speakers, onWordClick, svgRef }: {
   data: { text: string; value: number }[]
   frequencies: WordFreqType[]
   speakers: string[]
   onWordClick?: (word: string) => void
+  svgRef?: React.MutableRefObject<SVGElement | null>
 }) {
   const [words, setWords] = useState<any[]>([])
   const [hoveredWord, setHoveredWord] = useState<string | null>(null)
@@ -1554,7 +1558,7 @@ function WordCloudPanel({ data, frequencies, speakers, onWordClick }: {
           ))}
         </div>
       )}
-      <svg viewBox={`${-size.w/2} ${-size.h/2} ${size.w} ${size.h}`} className="w-full h-full">
+      <svg ref={(el) => { if (svgRef) svgRef.current = el }} viewBox={`${-size.w/2} ${-size.h/2} ${size.w} ${size.h}`} className="w-full h-full">
         {words.map((w, i) => (
           <text
             key={`${w.text}-${i}`}

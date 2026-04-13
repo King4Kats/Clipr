@@ -1,287 +1,379 @@
 /**
  * EXPORT-PDF.TS : Generation d'un rapport PDF professionnel
  *
- * Genere un PDF avec un template soigne contenant :
- * - Page de garde avec titre du projet et metadonnees
+ * Template epure, fond blanc, pensé pour l'impression.
+ * Contient :
+ * - Page de garde minimaliste
+ * - Nuage de mots (capture SVG → image)
  * - Analyse IA (themes, sentiment, points cles)
- * - Tableau des frequences de mots par locuteur
- * - Transcription complete avec speakers et timestamps
- *
- * Utilise jsPDF pour la generation et le rendu direct (pas de html2canvas).
- * Tout le rendu est fait par programmation pour un controle total du layout.
+ * - Tableau des frequences top 50
+ * - Transcription en paragraphes regroupes par locuteur
  */
 
 import { jsPDF } from 'jspdf'
 import type { TranscriptSegment, WordFrequency } from '@/types'
 
-// ── Couleurs du template ──
-const COLORS = {
-  primary: [0, 200, 200] as [number, number, number],    // Cyan Clipr
-  dark: [20, 30, 40] as [number, number, number],         // Fond sombre
-  text: [220, 230, 240] as [number, number, number],      // Texte clair
-  muted: [130, 140, 150] as [number, number, number],     // Texte secondaire
-  card: [30, 42, 55] as [number, number, number],         // Fond carte
+// ── Couleurs du template (epure, imprimable) ──
+const C = {
+  black: [30, 30, 30] as [number, number, number],
+  text: [50, 50, 50] as [number, number, number],
+  muted: [140, 140, 140] as [number, number, number],
+  primary: [0, 160, 160] as [number, number, number],
+  accent: [0, 120, 120] as [number, number, number],
+  light: [245, 245, 245] as [number, number, number],
   white: [255, 255, 255] as [number, number, number],
-  green: [16, 185, 129] as [number, number, number],
-  amber: [245, 158, 11] as [number, number, number],
-  red: [239, 68, 68] as [number, number, number],
+  green: [22, 163, 74] as [number, number, number],
+  amber: [217, 119, 6] as [number, number, number],
+  red: [220, 38, 38] as [number, number, number],
+  line: [220, 220, 220] as [number, number, number],
 }
 
 interface ExportOptions {
-  /** Titre du projet */
   title: string
-  /** Nom du fichier source */
   filename?: string
-  /** Segments de transcription */
   segments: TranscriptSegment[]
-  /** Frequences de mots */
   frequencies: WordFrequency[]
-  /** Noms des locuteurs */
   speakers: string[]
-  /** Resultat de l'analyse IA (optionnel) */
   semanticResult?: {
     themes: string[]
     sentiment: { label: string; explanation: string }
     insights: string[]
   } | null
-  /** Date de creation */
   date?: string
+  /** Element SVG du nuage de mots a capturer (optionnel) */
+  wordCloudSvg?: SVGElement | null
 }
 
 /**
- * Genere et telecharge un rapport PDF complet.
- * Le PDF est genere en memoire puis telecharge automatiquement.
+ * Capture un element SVG et le convertit en data URL PNG.
+ * Utilise un canvas temporaire pour le rendu.
+ */
+async function svgToImage(svgEl: SVGElement, width: number, height: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const clone = svgEl.cloneNode(true) as SVGElement
+    // Forcer un fond blanc sur le SVG clone
+    clone.setAttribute('style', 'background: white')
+    // Changer les couleurs des textes en noir/gris fonce pour l'impression
+    clone.querySelectorAll('text').forEach(t => {
+      const currentFill = t.getAttribute('fill') || ''
+      // Garder les couleurs des speakers mais les assombrir pour l'impression
+      if (currentFill.startsWith('#')) {
+        // Assombrir legerement
+        t.setAttribute('fill', currentFill)
+      } else {
+        t.setAttribute('fill', '#333333')
+      }
+    })
+
+    const svgData = new XMLSerializer().serializeToString(clone)
+    const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = width * 2 // retina
+      canvas.height = height * 2
+      const ctx = canvas.getContext('2d')!
+      ctx.fillStyle = 'white'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(url)
+      resolve(canvas.toDataURL('image/png'))
+    }
+    img.onerror = reject
+    img.src = url
+  })
+}
+
+/**
+ * Genere et telecharge le rapport PDF.
  */
 export async function exportAnalysisPDF(options: ExportOptions): Promise<void> {
-  const { title, filename, segments, frequencies, speakers, semanticResult, date } = options
+  const { title, filename, segments, frequencies, speakers, semanticResult, wordCloudSvg } = options
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-  const pageW = doc.internal.pageSize.getWidth()
-  const pageH = doc.internal.pageSize.getHeight()
-  const margin = 15
-  const contentW = pageW - margin * 2
+  const W = doc.internal.pageSize.getWidth()   // 210
+  const H = doc.internal.pageSize.getHeight()  // 297
+  const M = 20 // marge
+  const CW = W - M * 2 // largeur contenu
   let y = 0
 
-  // ── Utilitaires ──
-  const setColor = (c: [number, number, number]) => doc.setTextColor(c[0], c[1], c[2])
-  const setFillColor = (c: [number, number, number]) => doc.setFillColor(c[0], c[1], c[2])
+  const color = (c: [number, number, number]) => doc.setTextColor(c[0], c[1], c[2])
+  const fill = (c: [number, number, number]) => doc.setFillColor(c[0], c[1], c[2])
+  const line = () => { doc.setDrawColor(220, 220, 220); doc.line(M, y, W - M, y); y += 3 }
 
-  const addPage = () => {
-    doc.addPage()
-    y = margin
-    // Fond sombre sur chaque page
-    setFillColor(COLORS.dark)
-    doc.rect(0, 0, pageW, pageH, 'F')
-  }
+  const newPage = () => { doc.addPage(); y = M + 5 }
+  const needSpace = (n: number) => { if (y + n > H - 20) newPage() }
 
-  const checkPageBreak = (needed: number) => {
-    if (y + needed > pageH - margin) addPage()
-  }
+  // ════════════════════════════════════════════
+  // PAGE DE GARDE
+  // ════════════════════════════════════════════
+  // Barre accent en haut
+  fill(C.primary)
+  doc.rect(0, 0, W, 2, 'F')
 
-  // ── Page de garde ──
-  setFillColor(COLORS.dark)
-  doc.rect(0, 0, pageW, pageH, 'F')
+  // Marque
+  y = 50
+  doc.setFontSize(12)
+  color(C.primary)
+  doc.text('CLIPR', W / 2, y, { align: 'center' })
 
-  // Barre decorative en haut
-  setFillColor(COLORS.primary)
-  doc.rect(0, 0, pageW, 3, 'F')
+  // Trait fin
+  y += 5
+  doc.setDrawColor(C.primary[0], C.primary[1], C.primary[2])
+  doc.setLineWidth(0.3)
+  doc.line(W / 2 - 15, y, W / 2 + 15, y)
 
-  // Logo/Titre
-  y = 60
-  doc.setFontSize(32)
-  setColor(COLORS.primary)
-  doc.text('CLIPR', pageW / 2, y, { align: 'center' })
-
+  // Titre
   y += 15
-  doc.setFontSize(10)
-  setColor(COLORS.muted)
-  doc.text('Rapport d\'analyse', pageW / 2, y, { align: 'center' })
+  doc.setFontSize(24)
+  color(C.black)
+  const titleLines = doc.splitTextToSize(title, CW)
+  doc.text(titleLines, W / 2, y, { align: 'center' })
+  y += titleLines.length * 10
 
-  // Titre du projet
-  y += 30
-  doc.setFontSize(20)
-  setColor(COLORS.white)
-  const titleLines = doc.splitTextToSize(title, contentW)
-  doc.text(titleLines, pageW / 2, y, { align: 'center' })
-  y += titleLines.length * 8
+  // Sous-titre
+  y += 5
+  doc.setFontSize(11)
+  color(C.muted)
+  doc.text('Rapport d\'analyse', W / 2, y, { align: 'center' })
 
   // Metadonnees
-  y += 15
-  doc.setFontSize(10)
-  setColor(COLORS.muted)
-  if (filename) doc.text(`Fichier : ${filename}`, pageW / 2, y, { align: 'center' })
-  y += 6
-  doc.text(`Date : ${date || new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`, pageW / 2, y, { align: 'center' })
-  y += 6
-  doc.text(`${segments.length} segments • ${speakers.length} locuteur${speakers.length > 1 ? 's' : ''} • ${frequencies.length} mots analyses`, pageW / 2, y, { align: 'center' })
+  y += 20
+  doc.setFontSize(9)
+  color(C.text)
+  const dateStr = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+  const meta = [
+    filename ? `Fichier : ${filename}` : null,
+    `Date : ${dateStr}`,
+    `${segments.length} segments transcrits`,
+    speakers.length > 0 ? `Locuteurs : ${speakers.join(', ')}` : null,
+  ].filter(Boolean)
+  meta.forEach(m => {
+    doc.text(m!, W / 2, y, { align: 'center' })
+    y += 5
+  })
 
-  if (speakers.length > 0) {
-    y += 6
-    doc.text(`Locuteurs : ${speakers.join(', ')}`, pageW / 2, y, { align: 'center' })
+  // ════════════════════════════════════════════
+  // PAGE 2 : NUAGE DE MOTS + ANALYSE IA
+  // ════════════════════════════════════════════
+  newPage()
+
+  // ── Nuage de mots (capture SVG) ──
+  if (wordCloudSvg) {
+    try {
+      doc.setFontSize(13)
+      color(C.black)
+      doc.text('Nuage de mots', M, y)
+      y += 2
+      doc.setFontSize(8)
+      color(C.muted)
+      doc.text('Les mots les plus frequents, dimensionnes par nombre d\'occurrences', M, y + 3)
+      y += 8
+
+      const imgData = await svgToImage(wordCloudSvg, 700, 350)
+      const imgW = CW
+      const imgH = CW * 0.5
+      doc.addImage(imgData, 'PNG', M, y, imgW, imgH)
+      y += imgH + 8
+
+      line()
+    } catch (err) {
+      console.warn('Capture nuage de mots echouee:', err)
+    }
   }
 
-  // ── Page 2 : Analyse IA ──
+  // ── Analyse IA ──
   if (semanticResult) {
-    addPage()
-
-    // Titre section
-    doc.setFontSize(16)
-    setColor(COLORS.primary)
-    doc.text('Analyse semantique', margin, y)
-    y += 10
+    needSpace(40)
+    doc.setFontSize(13)
+    color(C.black)
+    doc.text('Analyse semantique', M, y)
+    y += 8
 
     // Themes
-    doc.setFontSize(11)
-    setColor(COLORS.white)
-    doc.text('Themes identifies', margin, y)
-    y += 6
     doc.setFontSize(9)
-    setColor(COLORS.text)
-    for (const theme of semanticResult.themes) {
-      checkPageBreak(6)
-      doc.text(`•  ${theme}`, margin + 4, y)
-      y += 5
-    }
+    color(C.muted)
+    doc.text('THEMES IDENTIFIES', M, y)
+    y += 5
+    doc.setFontSize(9)
+    color(C.text)
+    // Afficher les themes en ligne avec separateur
+    const themesText = semanticResult.themes.join('  ·  ')
+    const themesLines = doc.splitTextToSize(themesText, CW)
+    doc.text(themesLines, M, y)
+    y += themesLines.length * 4 + 5
 
     // Sentiment
-    y += 8
-    doc.setFontSize(11)
-    setColor(COLORS.white)
-    doc.text('Sentiment general', margin, y)
-    y += 6
+    needSpace(15)
     doc.setFontSize(9)
-
-    const sentimentColors: Record<string, [number, number, number]> = {
-      positif: COLORS.green, negatif: COLORS.red, mixte: COLORS.amber, neutre: COLORS.muted
-    }
-    setColor(sentimentColors[semanticResult.sentiment.label] || COLORS.muted)
-    doc.text(semanticResult.sentiment.label.toUpperCase(), margin + 4, y)
+    color(C.muted)
+    doc.text('SENTIMENT GENERAL', M, y)
     y += 5
-    setColor(COLORS.text)
-    const sentimentLines = doc.splitTextToSize(semanticResult.sentiment.explanation, contentW - 8)
-    doc.text(sentimentLines, margin + 4, y)
-    y += sentimentLines.length * 4 + 2
+    const sentColors: Record<string, [number, number, number]> = {
+      positif: C.green, negatif: C.red, mixte: C.amber, neutre: C.muted
+    }
+    color(sentColors[semanticResult.sentiment.label] || C.muted)
+    doc.setFontSize(10)
+    doc.text(semanticResult.sentiment.label.charAt(0).toUpperCase() + semanticResult.sentiment.label.slice(1), M, y)
+    y += 5
+    color(C.text)
+    doc.setFontSize(9)
+    const sentLines = doc.splitTextToSize(semanticResult.sentiment.explanation, CW)
+    doc.text(sentLines, M, y)
+    y += sentLines.length * 4 + 5
 
     // Points cles
-    y += 8
-    doc.setFontSize(11)
-    setColor(COLORS.white)
-    doc.text('Points cles', margin, y)
-    y += 6
+    needSpace(15)
     doc.setFontSize(9)
-    setColor(COLORS.text)
-    semanticResult.insights.forEach((insight, i) => {
-      checkPageBreak(8)
-      const lines = doc.splitTextToSize(`${i + 1}. ${insight}`, contentW - 8)
-      doc.text(lines, margin + 4, y)
-      y += lines.length * 4 + 2
+    color(C.muted)
+    doc.text('POINTS CLES', M, y)
+    y += 5
+    doc.setFontSize(9)
+    color(C.text)
+    semanticResult.insights.forEach((ins, i) => {
+      needSpace(8)
+      const insLines = doc.splitTextToSize(`${i + 1}.  ${ins}`, CW - 5)
+      doc.text(insLines, M + 2, y)
+      y += insLines.length * 4 + 2
     })
+
+    y += 5
+    line()
   }
 
-  // ── Page : Tableau des frequences ──
-  addPage()
-  doc.setFontSize(16)
-  setColor(COLORS.primary)
-  doc.text('Frequences des mots', margin, y)
-  y += 8
-
-  // En-tete du tableau
+  // ════════════════════════════════════════════
+  // TABLEAU DES FREQUENCES
+  // ════════════════════════════════════════════
+  needSpace(30)
+  doc.setFontSize(13)
+  color(C.black)
+  doc.text('Frequences des mots', M, y)
+  y += 3
   doc.setFontSize(8)
-  setColor(COLORS.muted)
-  const colMot = margin
-  const colTotal = margin + 50
-  const colSpeakerStart = margin + 70
-  const speakerColW = speakers.length > 0 ? Math.min(30, (contentW - 70) / speakers.length) : 0
+  color(C.muted)
+  doc.text('Top 50 des mots les plus utilises, repartis par locuteur', M, y)
+  y += 7
 
-  setFillColor(COLORS.card)
-  doc.rect(margin, y - 3, contentW, 6, 'F')
-  doc.text('Mot', colMot, y)
-  doc.text('Total', colTotal, y)
+  // En-tete
+  fill(C.light)
+  doc.rect(M, y - 3.5, CW, 5.5, 'F')
+  doc.setFontSize(7)
+  color(C.muted)
+  doc.text('Mot', M + 2, y)
+  doc.text('Total', M + 45, y)
   speakers.forEach((s, i) => {
-    doc.text(s.substring(0, 12), colSpeakerStart + i * speakerColW, y)
+    const x = M + 60 + i * Math.min(28, (CW - 60) / speakers.length)
+    doc.text(s.substring(0, 14), x, y)
   })
-  y += 5
+  y += 4
 
-  // Lignes du tableau (top 50 mots)
+  // Lignes
+  const top = frequencies.slice(0, 50)
   doc.setFontSize(8)
-  const topFreqs = frequencies.slice(0, 50)
-  for (const freq of topFreqs) {
-    checkPageBreak(5)
-
-    setColor(COLORS.text)
-    doc.text(freq.word, colMot, y)
-    setColor(COLORS.primary)
-    doc.text(String(freq.total), colTotal, y)
-    setColor(COLORS.muted)
-    speakers.forEach((s, i) => {
-      doc.text(String(freq.speakers[s] || 0), colSpeakerStart + i * speakerColW, y)
+  top.forEach((f, i) => {
+    needSpace(5)
+    // Fond alterne
+    if (i % 2 === 0) {
+      fill(C.light)
+      doc.rect(M, y - 3, CW, 4.5, 'F')
+    }
+    color(C.text)
+    doc.text(f.word, M + 2, y)
+    color(C.primary)
+    doc.text(String(f.total), M + 45, y)
+    color(C.muted)
+    speakers.forEach((s, si) => {
+      const x = M + 60 + si * Math.min(28, (CW - 60) / speakers.length)
+      doc.text(String(f.speakers[s] || 0), x, y)
     })
-
-    // Ligne separatrice legere
-    doc.setDrawColor(40, 50, 60)
-    doc.line(margin, y + 1.5, margin + contentW, y + 1.5)
     y += 4.5
-  }
+  })
 
   if (frequencies.length > 50) {
-    y += 3
-    setColor(COLORS.muted)
+    y += 2
     doc.setFontSize(7)
-    doc.text(`... et ${frequencies.length - 50} mots supplementaires`, margin, y)
+    color(C.muted)
+    doc.text(`+ ${frequencies.length - 50} mots supplementaires`, M + 2, y)
   }
 
-  // ── Pages : Transcription complete ──
-  addPage()
-  doc.setFontSize(16)
-  setColor(COLORS.primary)
-  doc.text('Transcription', margin, y)
-  y += 10
-
-  let lastSpeaker = ''
+  // ════════════════════════════════════════════
+  // TRANSCRIPTION (en paragraphes par locuteur)
+  // ════════════════════════════════════════════
+  newPage()
+  doc.setFontSize(13)
+  color(C.black)
+  doc.text('Transcription', M, y)
+  y += 3
   doc.setFontSize(8)
+  color(C.muted)
+  doc.text(`${segments.length} segments, ${speakers.length} locuteur${speakers.length > 1 ? 's' : ''}`, M, y)
+  y += 8
+
+  // Regrouper les segments consecutifs du meme locuteur en paragraphes
+  let currentSpeaker = ''
+  let paragraphText = ''
+  let paragraphStart = 0
+
+  const flushParagraph = () => {
+    if (!paragraphText) return
+    needSpace(15)
+
+    // Nom du locuteur + timestamp
+    doc.setFontSize(9)
+    color(C.primary)
+    const speakerLabel = currentSpeaker || 'Locuteur'
+    const m = Math.floor(paragraphStart / 60)
+    const s = Math.floor(paragraphStart % 60)
+    const ts = `${m}:${String(s).padStart(2, '0')}`
+    doc.text(`${speakerLabel}`, M, y)
+    color(C.muted)
+    doc.setFontSize(7)
+    doc.text(`  ${ts}`, M + doc.getTextWidth(speakerLabel) + 1, y)
+    y += 4
+
+    // Texte du paragraphe
+    doc.setFontSize(9)
+    color(C.text)
+    const paraLines = doc.splitTextToSize(paragraphText.trim(), CW - 4)
+    paraLines.forEach((pLine: string) => {
+      needSpace(4)
+      doc.text(pLine, M + 2, y)
+      y += 3.8
+    })
+    y += 3
+    paragraphText = ''
+  }
 
   for (const seg of segments) {
-    // Nouveau locuteur
-    if (seg.speaker && seg.speaker !== lastSpeaker) {
-      checkPageBreak(10)
-      y += 3
-      doc.setFontSize(9)
-      setColor(COLORS.primary)
-      doc.text(seg.speaker.toUpperCase(), margin, y)
-      y += 5
-      doc.setFontSize(8)
-      lastSpeaker = seg.speaker
+    const speaker = seg.speaker || ''
+    if (speaker !== currentSpeaker && paragraphText) {
+      flushParagraph()
     }
-
-    checkPageBreak(6)
-
-    // Timestamp
-    const m = Math.floor(seg.start / 60)
-    const s = Math.floor(seg.start % 60)
-    const ts = `${m}:${String(s).padStart(2, '0')}`
-
-    setColor(COLORS.muted)
-    doc.text(ts, margin, y)
-    setColor(COLORS.text)
-    const textLines = doc.splitTextToSize(seg.text, contentW - 20)
-    doc.text(textLines, margin + 18, y)
-    y += textLines.length * 3.5 + 1.5
+    if (speaker !== currentSpeaker) {
+      currentSpeaker = speaker
+      paragraphStart = seg.start
+    }
+    paragraphText += seg.text + ' '
   }
+  flushParagraph() // dernier paragraphe
 
-  // ── Pied de page sur toutes les pages ──
+  // ════════════════════════════════════════════
+  // PIEDS DE PAGE
+  // ════════════════════════════════════════════
   const totalPages = doc.getNumberOfPages()
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i)
     doc.setFontSize(7)
-    setColor(COLORS.muted)
-    doc.text(`Clipr — ${title}`, margin, pageH - 8)
-    doc.text(`Page ${i}/${totalPages}`, pageW - margin, pageH - 8, { align: 'right' })
-    // Ligne separatrice en bas
-    doc.setDrawColor(40, 50, 60)
-    doc.line(margin, pageH - 12, pageW - margin, pageH - 12)
+    color(C.muted)
+    doc.setDrawColor(220, 220, 220)
+    doc.line(M, H - 15, W - M, H - 15)
+    doc.text(`Clipr — ${title}`, M, H - 10)
+    doc.text(`${i} / ${totalPages}`, W - M, H - 10, { align: 'right' })
   }
 
-  // ── Telechargement ──
-  const safeName = (title || 'rapport').replace(/[^a-zA-Z0-9àâäéèêëïîôùûüç_-]/g, '_').substring(0, 50)
+  // ── Telecharger ──
+  const safeName = (title || 'rapport').replace(/[^a-zA-Z0-9àâäéèêëïîôùûüç_\- ]/g, '_').substring(0, 50).trim()
   doc.save(`${safeName}_analyse.pdf`)
 }
