@@ -1246,8 +1246,13 @@ function TranscriptionResult({
       .then((data) => {
         setSemanticResult(data.semanticAnalysis)
         // Sauvegarder les resultats dans le projet pour ne pas relancer Ollama
+        // On charge d'abord les donnees existantes pour ne pas les ecraser
         if (projectId) {
-          api.saveProject({ id: projectId, semanticAnalysis: data.semanticAnalysis }).catch(() => {})
+          api.loadProjectById(projectId).then((project: any) => {
+            if (project?.data) {
+              api.saveProject({ id: projectId, ...project.data, semanticAnalysis: data.semanticAnalysis }).catch(() => {})
+            }
+          }).catch(() => {})
         }
       })
       .catch((err) => setSemanticError(err.message))
