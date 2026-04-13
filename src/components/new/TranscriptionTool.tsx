@@ -1097,6 +1097,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
 // ============================================================
 
 import { computeWordFrequencies, getWordCloudData, getSpeakers } from '@/lib/word-frequency'
+import { exportAnalysisPDF } from '@/lib/export-pdf'
 import type { WordFrequency as WordFreqType } from '@/types'
 
 const RESULT_STORAGE_KEY = 'clipr-transcription-result-layout'
@@ -1278,6 +1279,25 @@ function TranscriptionResult({
     return `${m}:${String(sec).padStart(2, '0')}`
   }
 
+  // Export PDF avec tout le contenu (analyse + nuage + frequences + transcript)
+  const [exportingPdf, setExportingPdf] = useState(false)
+  const handleExportPDF = async () => {
+    setExportingPdf(true)
+    try {
+      await exportAnalysisPDF({
+        title: uploadedFileName || 'Transcription',
+        filename: uploadedFileName,
+        segments,
+        frequencies,
+        speakers,
+        semanticResult,
+      })
+    } catch (err) {
+      console.error('Erreur export PDF:', err)
+    }
+    setExportingPdf(false)
+  }
+
   return (
     <div ref={containerRef} className="relative min-h-[calc(100vh-3.5rem)]">
       {width > 0 && (
@@ -1319,6 +1339,9 @@ function TranscriptionResult({
                       </a>
                     </>
                   )}
+                  <Button variant="ghost" size="sm" onClick={handleExportPDF} disabled={exportingPdf} className="h-6 text-[10px] gap-1 px-2 text-primary">
+                    {exportingPdf ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />} PDF
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={onReset} className="h-6 text-[10px] px-2">Retour</Button>
                 </div>
               </div>
