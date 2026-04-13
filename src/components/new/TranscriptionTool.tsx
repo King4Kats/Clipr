@@ -26,7 +26,7 @@ import { motion, AnimatePresence } from "framer-motion"  // Animations fluides
 import {
   Mic, ArrowLeft, Upload, Loader2, Copy, Download, Trash2,
   CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files, Pencil, X, Check, Brain,
-  RotateCcw, Cloud, Search
+  RotateCcw, Cloud, Search, ChevronDown, Trash
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -1155,10 +1155,78 @@ function TranscriptionResult({
     return DEFAULT_RESULT_LAYOUT
   })
 
+  // Mots exclus par l'utilisateur (retires du tableau et du nuage)
+  const [excludedWords, setExcludedWords] = useState<Set<string>>(new Set())
+
+  // Mot selectionne pour la navigation dans le transcript
+  const [highlightedWord, setHighlightedWord] = useState<string | null>(null)
+  const [highlightIndex, setHighlightIndex] = useState(0) // quelle occurrence
+
+  // Recherche dans le transcript
+  const [transcriptSearch, setTranscriptSearch] = useState('')
+
+  // Refs pour scroller vers les segments du transcript
+  const transcriptScrollRef = useRef<HTMLDivElement>(null)
+
   // Donnees calculees pour le nuage et le tableau (instantane, cote client)
-  const frequencies = useMemo(() => computeWordFrequencies(segments), [segments])
+  // Filtre les mots exclus par l'utilisateur
+  const allFrequencies = useMemo(() => computeWordFrequencies(segments), [segments])
+  const frequencies = useMemo(() => allFrequencies.filter(f => !excludedWords.has(f.word)), [allFrequencies, excludedWords])
   const speakers = useMemo(() => getSpeakers(segments), [segments])
   const cloudData = useMemo(() => getWordCloudData(frequencies), [frequencies])
+
+  // Trouver toutes les occurrences d'un mot dans les segments (indices)
+  const highlightOccurrences = useMemo(() => {
+    if (!highlightedWord) return []
+    const word = highlightedWord.toLowerCase()
+    const indices: number[] = []
+    segments.forEach((seg, i) => {
+      if (seg.text.toLowerCase().includes(word)) indices.push(i)
+    })
+    return indices
+  }, [highlightedWord, segments])
+
+  // Naviguer vers la prochaine occurrence du mot dans le transcript
+  const navigateToWord = useCallback((word: string) => {
+    if (highlightedWord === word) {
+      // Meme mot : passer a l'occurrence suivante
+      const nextIdx = (highlightIndex + 1) % Math.max(1, highlightOccurrences.length)
+      setHighlightIndex(nextIdx)
+      // Scroller vers le segment
+      const segIdx = highlightOccurrences[nextIdx]
+      if (segIdx !== undefined) {
+        const el = transcriptScrollRef.current?.querySelector(`[data-seg-index="${segIdx}"]`)
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    } else {
+      // Nouveau mot : commencer a la premiere occurrence
+      setHighlightedWord(word)
+      setHighlightIndex(0)
+      // On attend le prochain render pour scroller (les occurrences vont etre recalculees)
+      setTimeout(() => {
+        const wordLower = word.toLowerCase()
+        let firstIdx = -1
+        for (let i = 0; i < segments.length; i++) {
+          if (segments[i].text.toLowerCase().includes(wordLower)) { firstIdx = i; break }
+        }
+        if (firstIdx >= 0) {
+          const el = transcriptScrollRef.current?.querySelector(`[data-seg-index="${firstIdx}"]`)
+          el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+      }, 50)
+    }
+  }, [highlightedWord, highlightIndex, highlightOccurrences, segments])
+
+  // Exclure un mot du tableau et du nuage
+  const excludeWord = useCallback((word: string) => {
+    setExcludedWords(prev => new Set([...prev, word]))
+    if (highlightedWord === word) setHighlightedWord(null)
+  }, [highlightedWord])
+
+  // Ajouter un mot exclu de nouveau (le remettre)
+  const includeWord = useCallback((word: string) => {
+    setExcludedWords(prev => { const next = new Set(prev); next.delete(word); return next })
+  }, [])
 
   // Analyse IA — utilise les resultats sauvegardes si disponibles, sinon lance Ollama
   const [semanticResult, setSemanticResult] = useState<any>(savedSemanticResult || null)
@@ -1227,14 +1295,14 @@ function TranscriptionResult({
           useCSSTransforms
           resizeHandles={['se', 'sw', 'ne', 'nw', 'e', 'w', 'n', 's']}
         >
-          {/* ── Panneau 1 : Transcription ── */}
+          {/* ── Panneau 1 : Transcription (avec surlignage et recherche) ── */}
           <div key="transcript" className="h-full">
             <div className="h-full bg-card border border-border rounded-xl overflow-hidden flex flex-col">
               <div className="panel-drag-handle flex items-center justify-between px-4 py-2 border-b border-border cursor-move bg-secondary/20">
                 <div className="flex items-center gap-2">
                   <FileText className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Transcription</span>
-                  <span className="text-[9px] text-muted-foreground/60">{segments.length} segments</span>
+                  <span className="text-[9px] text-muted-foreground/60">{segments.length} seg.</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <Button variant="ghost" size="sm" onClick={onCopy} className="h-6 text-[10px] gap-1 px-2">
@@ -1251,15 +1319,40 @@ function TranscriptionResult({
                       </a>
                     </>
                   )}
-                  <Button variant="ghost" size="sm" onClick={onReset} className="h-6 text-[10px] px-2">Nouveau</Button>
+                  <Button variant="ghost" size="sm" onClick={onReset} className="h-6 text-[10px] px-2">Retour</Button>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
+              {/* Barre de recherche dans le transcript */}
+              <div className="px-3 py-1.5 border-b border-border/50 flex items-center gap-2">
+                <Search className="w-3 h-3 text-muted-foreground shrink-0" />
+                <input
+                  type="text"
+                  value={transcriptSearch}
+                  onChange={e => { setTranscriptSearch(e.target.value); if (e.target.value) navigateToWord(e.target.value) }}
+                  placeholder="Rechercher dans le texte..."
+                  className="flex-1 text-[10px] bg-transparent outline-none text-foreground placeholder:text-muted-foreground/40"
+                />
+                {transcriptSearch && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-[9px] text-muted-foreground">{highlightOccurrences.length} trouvé{highlightOccurrences.length > 1 ? 's' : ''}</span>
+                    <button onClick={() => navigateToWord(transcriptSearch)} className="p-0.5 hover:bg-secondary rounded" title="Occurrence suivante">
+                      <ChevronDown className="w-3 h-3 text-muted-foreground" />
+                    </button>
+                    <button onClick={() => { setTranscriptSearch(''); setHighlightedWord(null) }} className="p-0.5 hover:bg-secondary rounded">
+                      <X className="w-3 h-3 text-muted-foreground" />
+                    </button>
+                  </div>
+                )}
+              </div>
+              {/* Contenu du transcript avec surlignage */}
+              <div ref={transcriptScrollRef} className="flex-1 overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
                 {segments.map((seg, i) => {
                   const prevSpeaker = i > 0 ? segments[i - 1].speaker : null
                   const showSpeaker = seg.speaker && seg.speaker !== prevSpeaker
+                  const isHighlighted = highlightedWord && seg.text.toLowerCase().includes(highlightedWord.toLowerCase())
+                  const isCurrentOccurrence = highlightOccurrences[highlightIndex] === i
                   return (
-                    <div key={i}>
+                    <div key={i} data-seg-index={i}>
                       {showSpeaker && (
                         <div className="mt-3 mb-1 first:mt-0">
                           <span
@@ -1277,11 +1370,17 @@ function TranscriptionResult({
                           >{seg.speaker}</span>
                         </div>
                       )}
-                      <div className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
+                      <div className={`flex gap-3 rounded-lg p-1.5 -mx-1.5 transition-colors ${
+                        isCurrentOccurrence ? 'bg-primary/20 ring-1 ring-primary/40' :
+                        isHighlighted ? 'bg-primary/10' :
+                        'hover:bg-secondary/30'
+                      }`}>
                         <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
                           {fmtTime(seg.start)}
                         </span>
-                        <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
+                        <p className="text-xs text-foreground leading-relaxed">
+                          {highlightedWord ? highlightText(seg.text, highlightedWord) : seg.text}
+                        </p>
                       </div>
                     </div>
                   )
@@ -1298,7 +1397,7 @@ function TranscriptionResult({
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Nuage de mots</span>
               </div>
               <div className="flex-1 overflow-hidden p-2">
-                <WordCloudPanel data={cloudData} frequencies={frequencies} speakers={speakers} />
+                <WordCloudPanel data={cloudData} frequencies={frequencies} speakers={speakers} onWordClick={navigateToWord} />
               </div>
             </div>
           </div>
@@ -1312,7 +1411,13 @@ function TranscriptionResult({
                 <span className="text-[9px] text-muted-foreground/60">{frequencies.length} mots</span>
               </div>
               <div className="flex-1 overflow-y-auto p-3">
-                <FrequencyTablePanel frequencies={frequencies} speakers={speakers} />
+                <FrequencyTablePanel
+                  frequencies={frequencies}
+                  speakers={speakers}
+                  onWordClick={navigateToWord}
+                  onWordExclude={excludeWord}
+                  highlightedWord={highlightedWord}
+                />
               </div>
             </div>
           </div>
@@ -1353,10 +1458,11 @@ import cloudLayout from 'd3-cloud'
 
 const SPEAKER_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
-function WordCloudPanel({ data, frequencies, speakers }: {
+function WordCloudPanel({ data, frequencies, speakers, onWordClick }: {
   data: { text: string; value: number }[]
   frequencies: WordFreqType[]
   speakers: string[]
+  onWordClick?: (word: string) => void
 }) {
   const [words, setWords] = useState<any[]>([])
   const [hoveredWord, setHoveredWord] = useState<string | null>(null)
@@ -1438,6 +1544,7 @@ function WordCloudPanel({ data, frequencies, speakers }: {
             style={{ fontWeight: w.size > 25 ? 700 : 500 }}
             onMouseEnter={() => setHoveredWord(w.text)}
             onMouseLeave={() => setHoveredWord(null)}
+            onClick={() => onWordClick?.(w.text)}
           >{w.text}</text>
         ))}
       </svg>
@@ -1461,7 +1568,12 @@ function WordCloudPanel({ data, frequencies, speakers }: {
 }
 
 // ── Sous-composant : Tableau de frequences ──
-function FrequencyTablePanel({ frequencies, speakers }: { frequencies: WordFreqType[]; speakers: string[] }) {
+function FrequencyTablePanel({ frequencies, speakers, onWordClick, onWordExclude, highlightedWord }: {
+  frequencies: WordFreqType[]; speakers: string[]
+  onWordClick?: (word: string) => void
+  onWordExclude?: (word: string) => void
+  highlightedWord?: string | null
+}) {
   const [search, setSearch] = useState('')
   const [sortCol, setSortCol] = useState<string>('total')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -1503,8 +1615,27 @@ function FrequencyTablePanel({ frequencies, speakers }: { frequencies: WordFreqT
           </thead>
           <tbody>
             {filtered.map((f, i) => (
-              <tr key={f.word} className={`border-t border-border/50 hover:bg-secondary/30 ${i % 2 ? 'bg-secondary/10' : ''}`}>
-                <td className="px-2 py-1 font-medium text-foreground">{f.word}</td>
+              <tr
+                key={f.word}
+                className={`group border-t border-border/50 cursor-pointer transition-colors ${
+                  highlightedWord === f.word ? 'bg-primary/20' :
+                  i % 2 ? 'bg-secondary/10 hover:bg-secondary/30' : 'hover:bg-secondary/30'
+                }`}
+                onClick={() => onWordClick?.(f.word)}
+                title={`Cliquer pour trouver "${f.word}" dans le texte`}
+              >
+                <td className="px-2 py-1 font-medium text-foreground flex items-center gap-1">
+                  {f.word}
+                  {onWordExclude && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onWordExclude(f.word) }}
+                      className="opacity-0 group-hover:opacity-100 hover:text-destructive p-0.5 rounded"
+                      title="Exclure ce mot"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  )}
+                </td>
                 <td className="px-2 py-1 text-right font-mono font-bold text-primary">{f.total}</td>
                 {speakers.map(s => (
                   <td key={s} className="px-2 py-1 text-right font-mono text-muted-foreground">{f.speakers[s] || 0}</td>
@@ -1571,6 +1702,17 @@ function AnalysisIAPanel({ result, loading, error }: { result: any; loading: boo
         </ul>
       </div>
     </div>
+  )
+}
+
+// ── Utilitaire : surligner un mot dans un texte ──
+// Retourne un tableau de JSX avec le mot en surbrillance
+function highlightText(text: string, word: string): React.ReactNode {
+  if (!word) return text
+  const regex = new RegExp(`(${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+  const parts = text.split(regex)
+  return parts.map((part, i) =>
+    regex.test(part) ? <mark key={i} className="bg-primary/30 text-foreground rounded px-0.5">{part}</mark> : part
   )
 }
 
