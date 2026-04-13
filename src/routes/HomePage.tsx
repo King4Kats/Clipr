@@ -38,6 +38,14 @@ export default function HomePage() {
   const [sharedProjects, setSharedProjects] = useState<any[]>([])
   const [showNewProjectChoice, setShowNewProjectChoice] = useState(false)
 
+  // Detecte le type reel d'un projet (robuste meme si toolType est absent)
+  const getProjectType = (project: any): 'transcription' | 'linguistic' | 'ai' | 'manual' => {
+    if (project.data?.toolType === 'transcription' || project.data?.transcriptionItems?.length > 0) return 'transcription'
+    if (project.data?.toolType === 'linguistic' || project.data?.linguisticId) return 'linguistic'
+    if (project.type === 'ai') return 'ai'
+    return 'manual'
+  }
+
   // Reset store if navigating back from a project
   useEffect(() => {
     if (activeProjectId) {
@@ -85,25 +93,17 @@ export default function HomePage() {
     await deleteProject(id)
   }
 
-  const handleProjectClick = (project: any) => {
-    if (editingId === project.id) return
-    if (project.data?.toolType === 'transcription') {
-      navigate('/transcription/' + project.id)
-    } else if (project.data?.toolType === 'linguistic') {
-      navigate('/linguistic/' + project.id)
-    } else {
-      navigate('/project/' + project.id)
-    }
+  // Navigation vers un projet selon son type
+  const navigateToProject = (project: any) => {
+    const type = getProjectType(project)
+    if (type === 'transcription') navigate('/transcription/' + project.id)
+    else if (type === 'linguistic') navigate('/linguistic/' + project.id)
+    else navigate('/project/' + project.id)
   }
 
-  const handleSharedProjectClick = (project: any) => {
-    if (project.data?.toolType === 'transcription') {
-      navigate('/transcription/' + project.id)
-    } else if (project.data?.toolType === 'linguistic') {
-      navigate('/linguistic/' + project.id)
-    } else {
-      navigate('/project/' + project.id)
-    }
+  const handleProjectClick = (project: any) => {
+    if (editingId === project.id) return
+    navigateToProject(project)
   }
 
   return (
@@ -155,7 +155,7 @@ export default function HomePage() {
               >
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors shrink-0">
-                    {project.data?.toolType === 'transcription' ? <Mic className="w-5 h-5" /> : project.data?.toolType === 'linguistic' ? <BookOpen className="w-5 h-5" /> : project.type === 'ai' ? <Cpu className="w-5 h-5" /> : <Film className="w-5 h-5" />}
+                    {getProjectType(project) === 'transcription' ? <Mic className="w-5 h-5" /> : getProjectType(project) === 'linguistic' ? <BookOpen className="w-5 h-5" /> : getProjectType(project) === 'ai' ? <Cpu className="w-5 h-5" /> : <Film className="w-5 h-5" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     {editingId === project.id ? (
@@ -180,15 +180,15 @@ export default function HomePage() {
                     )}
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                        project.data?.toolType === 'transcription'
+                        getProjectType(project) === 'transcription'
                           ? 'bg-primary/10 text-primary'
-                          : project.data?.toolType === 'linguistic'
+                          : getProjectType(project) === 'linguistic'
                           ? 'bg-emerald-500/10 text-emerald-400'
-                          : project.type === 'ai'
+                          : getProjectType(project) === 'ai'
                           ? 'bg-violet-500/10 text-violet-400'
                           : 'bg-blue-500/10 text-blue-400'
                       }`}>
-                        {project.data?.toolType === 'transcription' ? 'Audio' : project.data?.toolType === 'linguistic' ? 'Linguistique' : project.type === 'ai' ? 'IA' : 'Manuel'}
+                        {getProjectType(project) === 'transcription' ? 'Audio' : getProjectType(project) === 'linguistic' ? 'Linguistique' : getProjectType(project) === 'ai' ? 'IA' : 'Manuel'}
                       </span>
                       <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
                         project.status === 'done'
@@ -322,7 +322,7 @@ export default function HomePage() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.05 }}
-                  onClick={() => handleSharedProjectClick(project)}
+                  onClick={() => navigateToProject(project)}
                   className="group p-3 bg-card/50 hover:bg-secondary/50 border border-dashed border-border rounded-xl cursor-pointer transition-all hover:scale-[1.01]"
                 >
                   <div className="flex items-center gap-3">
