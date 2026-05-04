@@ -22,11 +22,13 @@
 
 // ── Imports ──
 import { useState, useCallback, useRef, useEffect } from "react"
-import { Upload, BookOpen, Loader2, Play, Pause, Download, ArrowLeft, ChevronDown, Pencil, RotateCcw } from "lucide-react"
+import { Upload, BookOpen, Loader2, Play, Pause, Download, ArrowLeft, ChevronDown, Pencil, RotateCcw, Globe2, Check } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import api from "@/api"
-import type { LinguisticSequence } from "@/types"
+import type { LinguisticSequence, AlfPoint } from "@/types"
+import AlfPointSelector from "./AlfPointSelector"
+import { ipaToRousselot } from "@/lib/alf-notation"
 
 const ACCEPTED_EXTENSIONS = ".mp4,.mov,.avi,.mkv,.webm,.mts,.wav,.mp3,.flac,.ogg,.m4a,.aac"
 const ALL_EXTENSIONS = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'mts', 'wav', 'mp3', 'flac', 'ogg', 'm4a', 'aac']
@@ -48,6 +50,10 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
   const [whisperModel, setWhisperModel] = useState('large-v3')
   const [language, setLanguage] = useState('fr')
   const [numSpeakers, setNumSpeakers] = useState(10)
+  // Point d'enquete ALF (optionnel) : permet d'enrichir l'analyse avec les
+  // attestations historiques de l'Atlas Linguistique de la France au point
+  // geographique correspondant a l'enregistrement.
+  const [alfPoint, setAlfPoint] = useState<AlfPoint | null>(null)
 
   // Processing
   const [status, setStatus] = useState<ToolStatus>('idle')
@@ -69,6 +75,11 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
   // Editing
   const [editingFrench, setEditingFrench] = useState<number | null>(null)
   const [editingIpa, setEditingIpa] = useState<string | null>(null) // "seqIdx_varIdx"
+  const [editingRousselot, setEditingRousselot] = useState<string | null>(null) // "seqIdx_varIdx"
+
+  // Validation atlas moderne
+  const [validating, setValidating] = useState(false)
+  const [validatedCount, setValidatedCount] = useState<number | null>(null)
 
   const isProcessing = ['uploading', 'queued', 'extracting-audio', 'diarizing', 'transcribing', 'segmenting', 'phonetizing', 'extracting-clips'].includes(status)
 
@@ -187,7 +198,10 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
     setStatus('queued')
     try {
       const result = await api.startLinguistic(uploadedFile.path, uploadedFile.name, {
-        whisperModel, language, numSpeakers
+        whisperModel, language, numSpeakers,
+        // Point d'enquete ALF si l'utilisateur en a selectionne un
+        alfPointId: alfPoint?.id ?? null,
+        alfPointInfo: alfPoint ? { num_alf: alfPoint.num_alf, commune: alfPoint.commune, dept: alfPoint.dept_code } : null
       })
       setTaskId(result.taskId)
       setQueuePosition(result.position)
@@ -232,6 +246,40 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
     const original = sequences[seqIdx]?.variants[varIdx]?.ipa_original
     if (original !== undefined) {
       await saveIpa(seqIdx, varIdx, original)
+    }
+  }
+
+  // Sauvegarde de la notation ALF (Rousselot) — independante de l'IPA.
+  // L'utilisateur peut corriger l'une ou l'autre des deux notations sans
+  // affecter l'autre (les deux sont stockees separement en DB).
+  const saveRousselot = async (seqIdx: number, varIdx: number, rousselot: string) => {
+    if (!linguisticId) return
+    const result = await api.updateLinguisticSequence(linguisticId, seqIdx, { variant_idx: varIdx, rousselot })
+    if (result.sequences) setSequences(result.sequences)
+    setEditingRousselot(null)
+  }
+
+  const resetRousselot = async (seqIdx: number, varIdx: number) => {
+    // Reset = reconvertit depuis l'IPA actuel (pas d'historique stocké pour le moment)
+    const ipa = sequences[seqIdx]?.variants[varIdx]?.ipa
+    if (ipa !== undefined) {
+      await saveRousselot(seqIdx, varIdx, ipaToRousselot(ipa))
+    }
+  }
+
+  // Valide la transcription en l'ajoutant a l'atlas dialectal moderne.
+  // Toutes les variantes (locuteurs) deviennent des attestations historiques
+  // datees, geolocalisees au point ALF si saisi, en double notation.
+  const handleValidateToAtlas = async () => {
+    if (!linguisticId || validating) return
+    setValidating(true)
+    try {
+      const result = await api.validateLinguisticToAtlas(linguisticId)
+      setValidatedCount(result.count)
+    } catch (e: any) {
+      console.error('Erreur validation atlas:', e)
+    } finally {
+      setValidating(false)
     }
   }
 
@@ -363,6 +411,22 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
               </Button>
             </div>
           </div>
+
+          {/* Selection du point d'enquete ALF (optionnel mais recommande) */}
+          <div className="mt-6 bg-card border border-border rounded-xl p-5">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2 mb-3">
+              <BookOpen className="w-3.5 h-3.5" /> Localisation ALF (optionnel)
+            </h3>
+            <p className="text-[11px] text-muted-foreground mb-3">
+              Indiquer la zone geographique de l'enregistrement permet de recuperer les attestations
+              historiques de l'Atlas Linguistique de la France (1900) pour comparer avec les
+              prononciations actuelles.
+            </p>
+            <AlfPointSelector
+              selectedPointId={alfPoint?.id ?? null}
+              onSelect={setAlfPoint}
+            />
+          </div>
         </motion.div>
       )}
 
@@ -432,6 +496,21 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
               )}
               {linguisticId && (
                 <>
+                  {/* Validation atlas moderne : pousse les attestations en DB partagee */}
+                  <Button
+                    variant="outline" size="sm"
+                    onClick={handleValidateToAtlas}
+                    disabled={validating}
+                    className="text-xs gap-1.5 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                    title="Ajouter ces attestations a l'atlas moderne (geolocalise, double notation)"
+                  >
+                    {validating
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : validatedCount !== null
+                        ? <Check className="w-3.5 h-3.5" />
+                        : <Globe2 className="w-3.5 h-3.5" />}
+                    {validatedCount !== null ? `Publie (${validatedCount})` : 'Valider et publier'}
+                  </Button>
                   <a href={api.getLinguisticExportUrl(linguisticId, 'json')} download>
                     <Button variant="outline" size="sm" className="text-xs gap-1.5">
                       <Download className="w-3.5 h-3.5" /> JSON
@@ -488,6 +567,9 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
                   <div className="divide-y divide-border/50">
                     {seq.variants.map((v, vi) => {
                       const editKey = `${si}_${vi}`
+                      // Notation ALF Rousselot : si pas stockee, on la calcule a la volee
+                      // depuis l'IPA. Au prochain enregistrement modifie elle sera persistee.
+                      const rousselot = v.rousselot ?? (v.ipa ? ipaToRousselot(v.ipa) : '')
                       return (
                         <div key={vi} className="p-3 flex items-start gap-3 hover:bg-secondary/20 transition-colors">
                           {/* Speaker */}
@@ -497,22 +579,50 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
                             title="Cliquer pour renommer"
                           >{v.speaker}</span>
 
-                          {/* IPA */}
-                          <div className="flex-1 min-w-0">
-                            {editingIpa === editKey ? (
-                              <input
-                                autoFocus
-                                defaultValue={v.ipa}
-                                onBlur={(e) => saveIpa(si, vi, e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                                className="w-full bg-secondary border border-border rounded px-2 py-1 text-sm font-mono text-foreground"
-                              />
-                            ) : (
-                              <p className="text-sm font-mono text-foreground/80 cursor-pointer hover:text-foreground"
-                                onClick={() => setEditingIpa(editKey)} title="Cliquer pour modifier l'IPA">
-                                {v.ipa ? `/${v.ipa}/` : '(pas d\'IPA)'}
-                              </p>
-                            )}
+                          {/* Double notation : ALF (mise en avant) + IPA (reference) */}
+                          <div className="flex-1 min-w-0 space-y-1">
+                            {/* ALF Rousselot — affichage principal en avant */}
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-[9px] font-bold uppercase text-emerald-400 shrink-0 w-9">ALF</span>
+                              {editingRousselot === editKey ? (
+                                <input
+                                  autoFocus
+                                  defaultValue={rousselot}
+                                  onBlur={(e) => saveRousselot(si, vi, e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                                  className="flex-1 bg-secondary border border-border rounded px-2 py-1 text-sm font-mono text-foreground"
+                                />
+                              ) : (
+                                <p
+                                  className="flex-1 text-sm font-mono font-semibold text-foreground cursor-pointer hover:text-emerald-400"
+                                  onClick={() => setEditingRousselot(editKey)}
+                                  title="Cliquer pour modifier la notation ALF"
+                                >
+                                  {rousselot || '(pas de transcription ALF)'}
+                                </p>
+                              )}
+                            </div>
+                            {/* IPA — reference moderne, plus discret */}
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-[9px] font-bold uppercase text-muted-foreground shrink-0 w-9">IPA</span>
+                              {editingIpa === editKey ? (
+                                <input
+                                  autoFocus
+                                  defaultValue={v.ipa}
+                                  onBlur={(e) => saveIpa(si, vi, e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                                  className="flex-1 bg-secondary border border-border rounded px-2 py-1 text-sm font-mono text-foreground"
+                                />
+                              ) : (
+                                <p
+                                  className="flex-1 text-xs font-mono text-foreground/60 cursor-pointer hover:text-foreground"
+                                  onClick={() => setEditingIpa(editKey)}
+                                  title="Cliquer pour modifier l'IPA"
+                                >
+                                  {v.ipa ? `/${v.ipa}/` : '(pas d\'IPA)'}
+                                </p>
+                              )}
+                            </div>
                             <span className="text-[10px] text-muted-foreground">
                               {fmtTime(v.audio.start)} - {fmtTime(v.audio.end)}
                             </span>
@@ -523,6 +633,11 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
                             {v.ipa !== v.ipa_original && v.ipa_original && (
                               <button onClick={() => resetIpa(si, vi)} className="p-1 rounded hover:bg-secondary" title="Reset IPA original">
                                 <RotateCcw className="w-3 h-3 text-muted-foreground" />
+                              </button>
+                            )}
+                            {v.rousselot && v.rousselot !== ipaToRousselot(v.ipa || '') && (
+                              <button onClick={() => resetRousselot(si, vi)} className="p-1 rounded hover:bg-secondary" title="Recalculer ALF depuis l'IPA">
+                                <RotateCcw className="w-3 h-3 text-emerald-400" />
                               </button>
                             )}
                             {linguisticId && v.audio_extract && (

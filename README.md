@@ -80,6 +80,16 @@
 - Vocabulaire pre-configure Vendee/Bretagne : patrimoine, patois, artisanat, musique traditionnelle
 - Option **large-v3-turbo** pour un traitement plus rapide
 
+### Outil linguistique avec base ALF
+- **Transcription bidouble notation** : IPA (Allosaurus) + ALF Rousselot-Gillieron
+- Base ALF locale (`data/alf.db`) issue du scrape SYMILA Toulouse
+  - 639 points d'enquete geolocalises (commune, departement, dialecte)
+  - ~525 cartes de concepts (mot francais)
+  - 33217 phrases realisees historiques (1902-1910)
+- Saisie du **point d'enquete** par carte ou par commune
+- Comparaison automatique des attestations historiques vs notre transcription
+- Constitution d'un **atlas moderne** alimente par chaque enregistrement valide
+
 ### Analyse semantique
 - Modele **mistral-small:22b** par defaut (excellent en francais)
 - Decoupe thematique intelligente avec titres et timecodes
@@ -432,10 +442,16 @@ Clipr/
         UploadZone.tsx       # Zone d'upload drag & drop
     types/
       index.ts               # Interfaces TypeScript
+      alf-notation.ts        # Conversion IPA <-> ALF (Rousselot-Gillieron)
+      alf-lookup.ts          # Service consultation base ALF locale
+  data/
+    alf.db                   # Base ALF SQLite (issue du scrape SYMILA, ~250 Mo)
   scripts/
     transcribe.py            # Script Python faster-whisper
+    alf-scrape.py            # Aspirateur SYMILA Toulouse -> data/alf.db
   docs/
     index.html               # Documentation technique
+    CR_OUTIL_LINGUISTIQUE.md # Cahier des charges + integration ALF
   Dockerfile                 # Image Docker multi-stage
   docker-compose.yml         # Orchestration des services
 ```
@@ -474,6 +490,8 @@ SQLite stockee dans `DATA_DIR/clipr.db`. Tables :
 | Auth | JWT (jsonwebtoken), bcrypt |
 | Video | FFmpeg (fluent-ffmpeg) |
 | Transcription | faster-whisper (Python), modele large-v3 |
+| Phonetique | Allosaurus (IPA) + module conversion ALF Rousselot |
+| Donnees ALF | SYMILA Toulouse (scrape), CartoDialect, LISN, COCOON (en option) |
 | Analyse | Ollama (mistral-small:22b par defaut) |
 | Temps reel | WebSocket (ws) par projet |
 | Deploiement | Docker Compose, Caddy (HTTPS) |

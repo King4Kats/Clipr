@@ -40,6 +40,15 @@ import * as taskQueueService from './services/task-queue.js'
 import { runAnalysisPipeline } from './services/analysis-pipeline.js'
 import { runTranscriptionPipeline, getTranscription, getTranscriptionHistory, deleteTranscription, exportAsText, exportAsSrt } from './services/transcription-pipeline.js'
 import { runLinguisticPipeline, getLinguisticTranscription, getLinguisticHistory, deleteLinguisticTranscription, updateLinguisticSequence, updateLinguisticLeader, renameLinguisticSpeaker, exportLinguistic } from './services/linguistic-pipeline.js'
+import {
+  isAlfAvailable, listAllPoints, searchPoints, getPointById,
+  findNearestPoints, findCartesByMot, getAttestationsByCarte,
+  lookupMot, getAlfStats
+} from './services/alf-lookup.js'
+import { rousselotToIpa, ipaToRousselot, getMappingTable } from './services/alf-notation.js'
+import {
+  validateLinguisticTranscription, listAttestations, getAtlasStats
+} from './services/atlas-moderne.js'
 import { getDb } from './services/database.js'
 import { requireAuth, requireAdmin, optionalAuth } from './middleware/auth.js'
 
@@ -1145,6 +1154,116 @@ app.get('/api/linguistic/:id/audio/:filename', (req, res) => {
 
   res.setHeader('Content-Type', 'audio/wav')
   createReadStream(clipPath).pipe(res)
+})
+
+// =============================================================================
+// API ALF (Atlas Linguistique de la France)
+// Sources : SYMILA Toulouse + futurs imports (LISN, COCOON, CartoDialect)
+// Tous les endpoints sont en lecture seule, non bloquants si la base ALF
+// n'a pas encore ete scrapee (renvoient des donnees vides + flag available).
+// (imports : voir tout en haut du fichier — alf-lookup, alf-notation)
+// =============================================================================
+
+// Statistiques rapides : disponibilite + comptes par table
+app.get('/api/alf/stats', (req, res) => {
+  res.json(getAlfStats())
+})
+
+// Liste complete des 639 points (pour autocomplete UI carte)
+app.get('/api/alf/points', requireAuth, (req, res) => {
+  res.json({ available: isAlfAvailable(), points: listAllPoints() })
+})
+
+// Recherche d'un point par commune ou departement
+app.get('/api/alf/points/search', requireAuth, (req, res) => {
+  const q = (req.query.q as string || '').trim()
+  if (!q) return res.json({ points: [] })
+  res.json({ points: searchPoints(q) })
+})
+
+// Trouve les N points les plus proches d'une coord (lat,lng)
+app.get('/api/alf/points/nearest', requireAuth, (req, res) => {
+  const lat = parseFloat(req.query.lat as string)
+  const lng = parseFloat(req.query.lng as string)
+  const limit = Math.min(parseInt(req.query.limit as string) || 5, 20)
+  if (isNaN(lat) || isNaN(lng)) return res.status(400).json({ error: 'lat et lng requis' })
+  res.json({ points: findNearestPoints(lat, lng, limit) })
+})
+
+// Detail d'un point par ID
+app.get('/api/alf/points/:id', requireAuth, (req, res) => {
+  const id = parseInt(req.params.id)
+  if (isNaN(id)) return res.status(400).json({ error: 'ID invalide' })
+  const point = getPointById(id)
+  if (!point) return res.status(404).json({ error: 'Point introuvable' })
+  res.json(point)
+})
+
+// Recherche de cartes (concepts) par mot francais
+app.get('/api/alf/cartes/search', requireAuth, (req, res) => {
+  const q = (req.query.q as string || '').trim()
+  if (!q) return res.json({ cartes: [] })
+  res.json({ cartes: findCartesByMot(q) })
+})
+
+// Toutes les attestations IPA d'un concept (filtrable par dept ou langue)
+app.get('/api/alf/cartes/:id/attestations', requireAuth, (req, res) => {
+  const id = parseInt(req.params.id)
+  if (isNaN(id)) return res.status(400).json({ error: 'ID invalide' })
+  const opts: { deptCode?: string; langue?: string } = {}
+  if (req.query.dept) opts.deptCode = req.query.dept as string
+  if (req.query.langue) opts.langue = req.query.langue as string
+  res.json({ attestations: getAttestationsByCarte(id, opts) })
+})
+
+// Lookup combinee : mot francais + (optionnel) point d'enquete
+app.get('/api/alf/lookup', requireAuth, (req, res) => {
+  const mot = (req.query.mot as string || '').trim()
+  const pointId = req.query.pointId ? parseInt(req.query.pointId as string) : undefined
+  if (!mot) return res.status(400).json({ error: 'mot requis' })
+  res.json({ results: lookupMot(mot, pointId) })
+})
+
+// Conversion IPA <-> ALF Rousselot (utilitaire UI / debug)
+app.get('/api/alf/convert', (req, res) => {
+  const ipa = req.query.ipa as string
+  const rousselot = req.query.rousselot as string
+  if (ipa) return res.json({ rousselot: ipaToRousselot(ipa) })
+  if (rousselot) return res.json({ ipa: rousselotToIpa(rousselot) })
+  return res.status(400).json({ error: 'Parametre ipa ou rousselot requis' })
+})
+
+// Table de mapping complete (pour debug et UI doc)
+app.get('/api/alf/mapping', (req, res) => {
+  res.json(getMappingTable())
+})
+
+// =============================================================================
+// API Atlas moderne — alimente par les validations utilisateur
+// =============================================================================
+
+// Statistiques de l'atlas moderne (total attestations, points couverts, etc.)
+app.get('/api/atlas/stats', (req, res) => {
+  res.json(getAtlasStats())
+})
+
+// Liste des attestations modernes (filtrable par point ou concept ALF)
+app.get('/api/atlas/attestations', requireAuth, (req, res) => {
+  const opts: { pointAlfId?: number; carteAlfId?: number; limit?: number } = {}
+  if (req.query.pointId) opts.pointAlfId = parseInt(req.query.pointId as string)
+  if (req.query.carteId) opts.carteAlfId = parseInt(req.query.carteId as string)
+  if (req.query.limit) opts.limit = Math.min(parseInt(req.query.limit as string), 5000)
+  res.json({ attestations: listAttestations(opts) })
+})
+
+// Validation : transfere toutes les variantes d'une transcription dans l'atlas
+app.post('/api/atlas/validate/:linguisticId', requireAuth, (req, res) => {
+  try {
+    const result = validateLinguisticTranscription(req.params.linguisticId)
+    res.json({ success: true, count: result.count })
+  } catch (e: any) {
+    res.status(404).json({ error: e.message })
+  }
 })
 
 // Project export (auth required)

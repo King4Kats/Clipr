@@ -20,8 +20,44 @@ export interface LinguisticVariant {
   speaker: string
   ipa: string
   ipa_original: string
+  rousselot?: string         // Notation ALF (Rousselot-Gillieron) — ajout integration ALF
+  rousselot_original?: string
   audio: { start: number; end: number }
   audio_extract?: string
+}
+
+/** Point d'enquete ALF (Atlas Linguistique de la France) */
+export interface AlfPoint {
+  id: number
+  num_alf: number
+  commune: string
+  dept_code: string
+  dept_nom: string
+  lat: number | null
+  lng: number | null
+  langue: string
+  dialecte: string
+  ipa_local: string
+}
+
+/** Carte (concept) ALF */
+export interface AlfCarte {
+  id: number
+  num_alf: number
+  titre: string
+  is_partial: boolean
+}
+
+/** Attestation IPA d'un concept a un point d'enquete */
+export interface AlfAttestation {
+  realisation_id: number
+  point: AlfPoint
+  ipa: string
+  phrase_fr: string
+  num_phrase: number
+  proprietes: string
+  validee: boolean
+  cartes: AlfCarte[]
 }
 
 /** Sequence linguistique : phrase FR + variantes patois */

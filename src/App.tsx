@@ -17,6 +17,7 @@ import ProjectPage from '@/routes/ProjectPage'
 import SegmentationNewPage from '@/routes/SegmentationNewPage'
 import TranscriptionPage from '@/routes/TranscriptionPage'
 import LinguisticPage from '@/routes/LinguisticPage'
+import AtlasPage from '@/routes/AtlasPage'
 import AdminPage from '@/routes/AdminPage'
 
 function App() {
@@ -36,6 +37,7 @@ function App() {
           <Route path="transcription/:projectId" element={<TranscriptionPage />} />
           <Route path="linguistic" element={<LinguisticPage />} />
           <Route path="linguistic/:projectId" element={<LinguisticPage />} />
+          <Route path="atlas" element={<AtlasPage />} />
           <Route path="segmentation/new" element={<SegmentationNewPage />} />
           <Route path="project/:projectId" element={<ProjectPage />} />
           <Route path="admin" element={<AdminPage />} />

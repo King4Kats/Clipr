@@ -313,4 +313,38 @@ function initSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_linguistic_user ON linguistic_transcriptions(user_id);
   `)
+
+  // Migration : ajout colonne alf_point_id (point d'enquete ALF associe a la
+  // transcription, optionnel). On utilise PRAGMA table_info pour verifier la
+  // presence de la colonne avant d'ajouter (idempotent sur les bases existantes).
+  const linguisticCols = db.prepare("PRAGMA table_info('linguistic_transcriptions')").all() as { name: string }[]
+  if (!linguisticCols.some(c => c.name === 'alf_point_id')) {
+    db.exec('ALTER TABLE linguistic_transcriptions ADD COLUMN alf_point_id INTEGER')
+  }
+
+  // ── Atlas moderne : attestations modernes en double notation ──
+  // Chaque variante validee par l'utilisateur dans l'outil linguistique
+  // alimente cette table. Permet de constituer un atlas dialectal moderne
+  // comparable aux donnees ALF historiques (1900) au meme point d'enquete.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS modern_attestations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      linguistic_id TEXT NOT NULL,        -- lien vers linguistic_transcriptions
+      sequence_idx INTEGER NOT NULL,
+      variant_idx INTEGER NOT NULL,
+      point_alf_id INTEGER,               -- lien vers alf_points (data/alf.db)
+      speaker TEXT,
+      french_text TEXT,                   -- phrase FR du meneur (contexte)
+      ipa TEXT,
+      rousselot TEXT,
+      carte_alf_id INTEGER,               -- concept ALF detecte (data/alf.db) si match
+      audio_extract TEXT,                 -- nom du clip audio
+      validated_by_user INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (linguistic_id) REFERENCES linguistic_transcriptions(id) ON DELETE CASCADE,
+      UNIQUE (linguistic_id, sequence_idx, variant_idx)
+    );
+    CREATE INDEX IF NOT EXISTS idx_modern_point ON modern_attestations(point_alf_id);
+    CREATE INDEX IF NOT EXISTS idx_modern_carte ON modern_attestations(carte_alf_id);
+  `)
 }

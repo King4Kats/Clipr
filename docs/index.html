@@ -186,6 +186,7 @@
     <div class="sidebar-label">Outils</div>
     <a href="#u-transcription">Transcription audio/video</a>
     <a href="#u-linguistique">Transcription linguistique</a>
+    <a href="#u-alf">Base ALF (Atlas Linguistique)</a>
     <a href="#u-diarisation">Identification locuteurs</a>
   </div>
   <div class="dev-section visible" id="sidebarDev">
@@ -214,6 +215,7 @@
     <div class="sidebar-label">API Reference (suite)</div>
     <a href="#d-transcription-api">Transcription</a>
     <a href="#d-linguistic-api">Linguistique</a>
+    <a href="#d-alf-api">ALF (Atlas Linguistique)</a>
     <div class="sidebar-label">Deploiement</div>
     <a href="#d-securite">Securite</a>
     <a href="#d-production">Mise en production</a>
@@ -521,6 +523,53 @@
   <div class="card">
     <h3>Export</h3>
     <p>Exportez vos resultats en <strong>JSON</strong> (structure complete) ou <strong>CSV</strong> (tableau : sequence, francais, locuteur, IPA, debut, fin).</p>
+  </div>
+</section>
+
+<section class="section" id="u-alf">
+  <h2 class="section-title">Base ALF (Atlas Linguistique de la France)</h2>
+  <div class="card">
+    <h3>A quoi ca sert ?</h3>
+    <p>Clipr embarque une base locale issue de l'<strong>Atlas Linguistique de la France</strong> de Jules Gillieron (1902-1910), via l'aspiration de la base SYMILA Toulouse. Cette base contient :</p>
+    <ul>
+      <li><strong>639 points d'enquete</strong> : communes francaises et zones limitrophes geolocalisees</li>
+      <li><strong>525 cartes lexicales</strong> : un concept francais par carte (ex: "vache", "chasseur")</li>
+      <li><strong>33217 phrases realisees</strong> : prononciations historiques par point d'enquete, en notation phonetique IPA</li>
+    </ul>
+    <p>L'outil de transcription linguistique affiche desormais <strong>deux notations</strong> par variante :</p>
+    <ul>
+      <li><strong>ALF (Rousselot-Gillieron)</strong> : notation historique, mise en avant</li>
+      <li><strong>IPA</strong> : alphabet phonetique international moderne (genere par Allosaurus)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Comment l'utiliser</h3>
+    <ol>
+      <li>Avant de lancer une analyse, indiquez le <strong>point d'enquete</strong> via la carte interactive ou le champ commune</li>
+      <li>Le pipeline produit automatiquement les deux notations pour chaque variante</li>
+      <li>Si le concept est attestee dans l'ALF au point local, la prononciation historique de 1900 s'affiche en comparaison</li>
+      <li>Vous pouvez editer les deux notations independamment ; chaque correction enrichit la base d'apprentissage</li>
+    </ol>
+    <div class="tip">La base ALF est consultee uniquement pour les <strong>concepts</strong> de l'ALF (~525 mots ciblant agriculture, animaux, parties du corps, vocabulaire rural). Pour les autres mots, seule la transcription Allosaurus est affichee.</div>
+  </div>
+  <div class="card">
+    <h3>Atlas moderne</h3>
+    <p>Chaque enregistrement validee alimente notre <strong>atlas moderne</strong> en double notation. Cet atlas est consultable via la vue <code>/atlas</code> qui presente sur carte de France :</p>
+    <ul>
+      <li>Les attestations historiques ALF (1900) au meme point d'enquete</li>
+      <li>Vos attestations modernes par locuteur, datees</li>
+      <li>Permet de mesurer l'evolution dialectale sur 120 ans</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Conversion IPA &lt;-&gt; ALF</h3>
+    <p>Le module <code>alf-notation.ts</code> convertit une chaine entre les deux notations. La table couvre :</p>
+    <ul>
+      <li>36 consonnes (avec consonnes mouillees, palatales, vélaires)</li>
+      <li>8 voyelles avec diacritiques d'ouverture, fermeture, longueur, nasalite</li>
+      <li>~80 symboles totaux (couverture gallo-romane complete)</li>
+    </ul>
+    <p>Limitation : pour les voyelles ou Rousselot fermee et neutre donnent le meme son IPA (ex: <code>e</code> et <code>é</code>), le round-trip prefere la forme neutre. C'est une ambiguite intrinseque du systeme Rousselot, pas un bug.</p>
   </div>
 </section>
 
@@ -1230,6 +1279,111 @@ linguistic:complete   {taskId, linguisticId, sequenceCount, duration}</pre>
   "language": "fr",              // Langue du meneur
   "numSpeakers": 10              // Nombre total de locuteurs
 }</pre>
+  </div>
+</section>
+
+<section class="section" id="d-alf-api">
+  <h2 class="section-title">API — Base ALF (Atlas Linguistique de la France)</h2>
+  <div class="card">
+    <h3>Acquisition des donnees</h3>
+    <p>Script Python : <code>scripts/alf-scrape.py</code> (aspirateur SYMILA Toulouse vers <code>data/alf.db</code>).</p>
+    <pre># Scrape complet (~6 min, ~9 Mo final)
+python scripts/alf-scrape.py
+
+# Test rapide
+python scripts/alf-scrape.py --max-phrases 100
+
+# Reprise sans re-faire les points / cartes
+python scripts/alf-scrape.py --skip-points --skip-cartes
+
+# Reprise depuis un offset specifique (apres erreur SYMILA)
+python scripts/alf-scrape.py --skip-points --skip-cartes --start-offset 26000</pre>
+    <h3>Source</h3>
+    <p>SYMILA Toulouse : <a href="http://symila.univ-tlse2.fr/alf" target="_blank" rel="noopener">http://symila.univ-tlse2.fr/alf</a> (CC BY-SA, transposition Rousselot-Gillieron vers IPA realisee par CLLE-ERSS).</p>
+  </div>
+  <div class="card">
+    <h3>Schema SQLite (data/alf.db)</h3>
+    <table>
+      <tr><th>Table</th><th>Lignes</th><th>Description</th></tr>
+      <tr><td><code>alf_points</code></td><td>639</td><td>Points d'enquete (commune, dept, lat, lng, langue, dialecte, ipa_local)</td></tr>
+      <tr><td><code>alf_cartes</code></td><td>525</td><td>Concepts (mot francais, num_alf, titre)</td></tr>
+      <tr><td><code>alf_phrases_sources</code></td><td>52</td><td>Phrases du questionnaire (texte_fr, num_phrase)</td></tr>
+      <tr><td><code>alf_realisations</code></td><td>32717</td><td>Prononciations IPA par point (phrase_source_id, point_id, ipa, proprietes)</td></tr>
+      <tr><td><code>alf_realisation_cartes</code></td><td>100450</td><td>Liens m:n realisation &lt;-&gt; cartes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Module conversion IPA &lt;-&gt; ALF</h3>
+    <p>Fichier : <code>server/services/alf-notation.ts</code> (49 tests, fichier <code>alf-notation.test.ts</code>).</p>
+    <pre>import { rousselotToIpa, ipaToRousselot, getMappingTable } from './alf-notation.js'
+
+rousselotToIpa('vakė')      // -> 'vakə'
+ipaToRousselot('ɛ')         // -> 'è'
+ipaToRousselot('aː')        // -> 'ā'
+getMappingTable()           // -> { consonants: [...], vowels: [...] }</pre>
+    <h3>Couverture</h3>
+    <ul>
+      <li>36 consonnes (palatales, velaires, mouillees, semi-voyelles)</li>
+      <li>8 voyelles bases (a, e, ė, i, o, u, ꭒ, œ) avec diacritiques d'ouverture, fermeture, longueur, nasalite</li>
+      <li>~80 symboles totaux (couverture gallo-romane complete)</li>
+    </ul>
+    <h3>Limitation</h3>
+    <p>Pour les voyelles ou Rousselot fermee et neutre donnent le meme son IPA (ex: <code>e</code> et <code>é</code> donnent /e/), le round-trip prefere la forme neutre. C'est une ambiguite intrinseque du systeme Rousselot, pas un bug.</p>
+  </div>
+  <div class="card">
+    <h3>Module de consultation ALF</h3>
+    <p>Fichier : <code>server/services/alf-lookup.ts</code> (better-sqlite3 readonly).</p>
+    <pre>import { listAllPoints, searchPoints, getPointById, findNearestPoints,
+         findCartesByMot, getAttestationsByCarte, lookupMot, getAlfStats,
+         isAlfAvailable } from './alf-lookup.js'
+
+// Liste les 639 points d'enquete (autocomplete UI)
+listAllPoints()
+
+// Cherche un point par commune ou dept
+searchPoints('vendée')
+
+// Trouve les 5 points les plus proches d'une coord
+findNearestPoints(46.5, -1.5, 5)
+
+// Cherche un concept ALF par mot francais
+findCartesByMot('vache')
+
+// Toutes les attestations d'un concept (filtrable par dept ou langue)
+getAttestationsByCarte(36, { langue: 'oïl' })
+
+// Lookup combinee mot + point
+lookupMot('vache', pointId=480)
+
+// Stats DB
+getAlfStats() // { available, points, cartes, phrases, realisations }</pre>
+  </div>
+  <div class="card">
+    <h3>Sources complementaires (a venir)</h3>
+    <table>
+      <tr><th>Source</th><th>Apport</th></tr>
+      <tr><td>Atlas sonore LISN</td><td>Attestations modernes 1999-2010 (IPA + audio), CC BY-NC-SA</td></tr>
+      <tr><td>COCOON Huma-num</td><td>Atlas regionaux (Alsace, Gascogne, Languedoc, Ile-de-France...)</td></tr>
+      <tr><td>CartoDialect (ECLATS)</td><td>ALF vectorise et annote (donnees XML-TEI)</td></tr>
+      <tr><td>Thesoc Nice</td><td>Specialise occitan</td></tr>
+    </table>
+    <p>Toutes ces sources stockent leur contenu dans <code>data/alf.db</code> avec une colonne <code>source</code> pour traçabilite.</p>
+  </div>
+  <div class="card">
+    <h3>Atlas moderne (en developpement)</h3>
+    <p>Chaque enregistrement validee dans l'outil linguistique est ajoute a <code>data/atlas_moderne.db</code> :</p>
+    <pre>CREATE TABLE modern_attestations (
+  id INTEGER PRIMARY KEY,
+  concept_id INTEGER,           -- lien alf_cartes
+  point_alf_id INTEGER,         -- lien alf_points
+  locuteur TEXT,
+  ipa TEXT,
+  rousselot TEXT,
+  audio_path TEXT,
+  date_recording TEXT,
+  validated_by_user INTEGER
+);</pre>
+    <p>Vue dediee <code>/atlas</code> permettra la visualisation comparative carte de France : attestations historiques ALF (1900) vs modernes collectees.</p>
   </div>
 </section>
 

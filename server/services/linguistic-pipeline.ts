@@ -27,6 +27,7 @@
 // ── Imports Node.js et services internes ──
 import { extname, join } from 'path'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs'
+import { ipaToRousselot } from './alf-notation.js'
 import { execSync, spawn } from 'child_process'
 import * as ffmpegService from './ffmpeg.js'       // Extraction audio, manipulation vidéo
 import * as whisperService from './whisper.js'      // Transcription vocale → texte
@@ -54,6 +55,8 @@ interface LinguisticVariant {
   speaker: string
   ipa: string
   ipa_original: string
+  rousselot?: string         // Notation ALF (Rousselot-Gillieron) — convertie depuis IPA
+  rousselot_original?: string // Backup de la conversion automatique
   audio: { start: number; end: number }
   audio_extract?: string
 }
@@ -911,6 +914,12 @@ Format strict, un par ligne : 1. FR ou 1. FAUX`
         const ipa = ipaMap.get(`${si}_${vi}`) || ''
         sequences[si].variants[vi].ipa = ipa
         sequences[si].variants[vi].ipa_original = ipa
+        // Conversion automatique vers la notation ALF (Rousselot-Gillieron)
+        // L'utilisateur pourra ensuite editer l'une ou l'autre des deux
+        // notations independamment depuis l'interface.
+        const rousselot = ipa ? ipaToRousselot(ipa) : ''
+        sequences[si].variants[vi].rousselot = rousselot
+        sequences[si].variants[vi].rousselot_original = rousselot
       }
     }
   }
@@ -950,12 +959,14 @@ Format strict, un par ligne : 1. FR ou 1. FAUX`
   // On enregistre toutes les séquences, les speakers identifiés, et la durée
   // dans la table linguistic_transcriptions. Si un projet est associé, on le met à jour.
   const speakers = [...new Set(sequences.flatMap(s => s.variants.map(v => v.speaker)))]
+  // Point d'enquete ALF (optionnel) saisi par l'utilisateur dans la config
+  const alfPointId: number | null = typeof config.alfPointId === 'number' ? config.alfPointId : null
   const db = getDb()
   db.prepare(
-    `INSERT INTO linguistic_transcriptions (id, user_id, task_id, filename, leader_speaker, sequences, speakers, duration, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO linguistic_transcriptions (id, user_id, task_id, filename, leader_speaker, sequences, speakers, duration, alf_point_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(linguisticId, userId, task.id, filename, 'meneur',
-    JSON.stringify(sequences), JSON.stringify(speakers), duration, new Date().toISOString())
+    JSON.stringify(sequences), JSON.stringify(speakers), duration, alfPointId, new Date().toISOString())
 
   const projectId = config.projectId as string | undefined
   if (projectId) {
@@ -1175,6 +1186,11 @@ export function updateLinguisticSequence(id: string, seqIdx: number, updates: an
   if (updates.variant_idx !== undefined && updates.ipa !== undefined) {
     const vi = updates.variant_idx
     if (vi >= 0 && vi < sequences[seqIdx].variants.length) sequences[seqIdx].variants[vi].ipa = updates.ipa
+  }
+  // Mise a jour de la notation ALF (Rousselot-Gillieron) — independante de l'IPA
+  if (updates.variant_idx !== undefined && updates.rousselot !== undefined) {
+    const vi = updates.variant_idx
+    if (vi >= 0 && vi < sequences[seqIdx].variants.length) sequences[seqIdx].variants[vi].rousselot = updates.rousselot
   }
   db.prepare('UPDATE linguistic_transcriptions SET sequences = ? WHERE id = ?').run(JSON.stringify(sequences), id)
   return sequences

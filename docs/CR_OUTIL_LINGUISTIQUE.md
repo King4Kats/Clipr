@@ -230,3 +230,132 @@ speakers TEXT (JSON),
 duration REAL,
 created_at TEXT
 ```
+
+---
+
+## Integration ALF (Atlas Linguistique de la France)
+
+### Objectif
+Enrichir la transcription linguistique avec les donnees historiques de l'ALF
+de Gillieron (1902-1910) : 639 points d'enquete en France et zones limitrophes,
+~1900 cartes lexicales en notation phonetique Rousselot-Gillieron.
+
+L'outil affiche desormais **deux notations** par variante de locuteur :
+- L'**IPA** moderne (genere par Allosaurus a partir de l'audio)
+- L'**ALF (Rousselot-Gillieron)** historique converti depuis l'IPA OU recupere
+  directement de la base ALF si le mot/concept est attestee
+
+### Pipeline etendu
+
+Apres l'etape 8 (transcription IPA Allosaurus) :
+
+```
+Step 8b : CONVERSION IPA -> ALF (Rousselot)
+  | Module : server/services/alf-notation.ts
+  | Pas de modele, pas de GPU : table de mapping deterministe
+  | Voyelles avec timbre (ouvert/ferme) + longueur + nasalite
+  | ~80 symboles couverts (gallo-roman complet)
+  v
+Step 8c : LOOKUP ALF historique (optionnel)
+  | Module : server/services/alf-lookup.ts
+  | DB : data/alf.db (SQLite, scrape SYMILA)
+  | Si concept francais detecte ET point d'enquete saisi :
+  |   recupere les attestations ALF voisines pour comparaison
+  v
+Step 9 : EXTRACTION CLIPS
+  ...
+```
+
+### Sources de donnees
+
+| Source | Usage | Volume |
+|---|---|---|
+| **SYMILA Toulouse** | Source principale (1900 cartes, 639 points, IPA + Rousselot) | ~250 Mo |
+| **CartoDialect (ECLATS)** | Backup et donnees vectorisees | a la demande |
+| **Atlas sonore LISN** | Attestations modernes (1999-2010, IPA + audio) | a la demande |
+| **COCOON Huma-num** | Atlas regionaux (Alsace, Gascogne, Languedoc...) | a la demande |
+| **Thesoc Nice** | Specialise occitan | a la demande |
+
+### Acquisition des donnees ALF
+
+Script : `scripts/alf-scrape.py`
+- Aspire la base SYMILA (http://symila.univ-tlse2.fr/alf)
+- Endpoints :
+  - `/alf/lieux/{id}/show` -> 639 points (commune, dept, lat/lng, dialecte)
+  - `/alf/cartesALF` -> 525+ concepts (mot FR + numero ALF)
+  - `/alf/phraserealisee/ajax/leipzig2` (POST) -> 33217 phrases realisees
+- Throttle 0.3s entre requetes (politesse)
+- Idempotent : INSERT OR IGNORE, peut etre relance
+- Volume final : ~250 Mo SQLite a `data/alf.db`
+
+Usage :
+```bash
+python scripts/alf-scrape.py                   # full
+python scripts/alf-scrape.py --max-phrases 100 # test rapide
+python scripts/alf-scrape.py --skip-points     # reprise sans recharger les points
+```
+
+### Schema SQLite ALF
+
+```sql
+alf_points          -- 639 points d'enquete
+  id, num_alf, commune, dept_code, dept_nom, lat, lng, langue, dialecte, ipa_local
+
+alf_cartes          -- 525+ concepts (mots francais)
+  id, num_alf, titre, is_partial
+
+alf_phrases_sources -- 181 phrases du questionnaire
+  id, num_phrase, texte_fr
+
+alf_realisations    -- 33217 prononciations par point
+  id, phrase_source_id, point_id, ipa, proprietes, complete, validee
+
+alf_realisation_cartes (m:n) -- liens realisation <-> cartes
+  realisation_id, carte_id
+```
+
+### Module de conversion ALF <-> IPA
+
+Fichier : `server/services/alf-notation.ts` + tests `alf-notation.test.ts`
+
+API publique :
+```typescript
+rousselotToIpa(rousselot: string): string
+ipaToRousselot(ipa: string): string
+getMappingTable(): { consonants, vowels }
+```
+
+Limitations :
+- Le systeme Rousselot a une ambiguite intrinseque sur les voyelles "neutres"
+  vs "fermees" (ex: `e` neutre et `é` fermee donnent tous les deux /e/ en IPA).
+  Le round-trip prefere la forme neutre dans ce cas.
+- Couverture : 36 consonnes + 8 voyelles avec diacritiques (ouverture, fermeture,
+  longueur, nasalite). 49 tests unitaires couvrant les cas typiques gallo-romans.
+
+### Saisie du point d'enquete
+
+Dans la configuration du projet (avant l'analyse), nouveau composant :
+- Carte Leaflet des 639 points ALF (clusterises)
+- Champ recherche commune (autocomplete sur communes francaises)
+- Selection d'un point d'enquete -> stocke `alf_point_id` dans le projet
+
+### Affichage des resultats
+
+Pour chaque variante de locuteur, deux notations editables cote a cote :
+- ALF (Rousselot) : mise en avant
+- IPA (Allosaurus) : reference moderne
+- Si attestation ALF historique disponible pour le concept au point local :
+  affichee en troisieme ligne avec le numero du point
+
+### Atlas moderne
+
+Chaque enregistrement valide alimente `data/atlas_moderne.db` qui devient
+notre propre atlas vivant en double notation. Schema :
+```sql
+modern_attestations
+  id, concept_id (lien alf_cartes), point_alf_id (lien alf_points),
+  locuteur, ipa, rousselot, audio_path, date_recording, validated_by_user
+```
+
+Une vue dediee `/atlas` permet de visualiser sur carte les attestations
+collectees, comparees aux attestations ALF historiques au meme point.

@@ -508,6 +508,47 @@ const api = {
   onLinguisticProgress: (cb: (data: any) => void) => onWsEvent('linguistic:progress', cb),
   onLinguisticComplete: (cb: (data: any) => void) => onWsEvent('linguistic:complete', cb),
 
+  // ── ALF (Atlas Linguistique de la France) ──
+  getAlfStats: () => get<{ available: boolean; points: number; cartes: number; phrases: number; realisations: number }>('/api/alf/stats'),
+  getAlfPoints: () => get<{ available: boolean; points: import('./types').AlfPoint[] }>('/api/alf/points'),
+  searchAlfPoints: (q: string) => get<{ points: import('./types').AlfPoint[] }>(`/api/alf/points/search?q=${encodeURIComponent(q)}`),
+  findNearestAlfPoints: (lat: number, lng: number, limit = 5) =>
+    get<{ points: import('./types').AlfPoint[] }>(`/api/alf/points/nearest?lat=${lat}&lng=${lng}&limit=${limit}`),
+  searchAlfCartes: (q: string) =>
+    get<{ cartes: import('./types').AlfCarte[] }>(`/api/alf/cartes/search?q=${encodeURIComponent(q)}`),
+  getAlfAttestations: (carteId: number, opts?: { dept?: string; langue?: string }) => {
+    const params = new URLSearchParams()
+    if (opts?.dept) params.set('dept', opts.dept)
+    if (opts?.langue) params.set('langue', opts.langue)
+    return get<{ attestations: import('./types').AlfAttestation[] }>(
+      `/api/alf/cartes/${carteId}/attestations${params.toString() ? '?' + params.toString() : ''}`
+    )
+  },
+  lookupAlf: (mot: string, pointId?: number) => {
+    const params = new URLSearchParams({ mot })
+    if (pointId !== undefined) params.set('pointId', String(pointId))
+    return get<{ results: { carte: import('./types').AlfCarte; attestations: import('./types').AlfAttestation[] }[] }>(
+      `/api/alf/lookup?${params.toString()}`
+    )
+  },
+  convertIpaToRousselot: (ipa: string) =>
+    get<{ rousselot: string }>(`/api/alf/convert?ipa=${encodeURIComponent(ipa)}`),
+  convertRousselotToIpa: (rousselot: string) =>
+    get<{ ipa: string }>(`/api/alf/convert?rousselot=${encodeURIComponent(rousselot)}`),
+
+  // ── Atlas moderne (attestations validees) ──
+  getAtlasStats: () => get<{ total: number; pointsCount: number; conceptsCount: number; recordings: number }>('/api/atlas/stats'),
+  getAtlasAttestations: (opts?: { pointId?: number; carteId?: number; limit?: number }) => {
+    const params = new URLSearchParams()
+    if (opts?.pointId !== undefined) params.set('pointId', String(opts.pointId))
+    if (opts?.carteId !== undefined) params.set('carteId', String(opts.carteId))
+    if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
+    const qs = params.toString()
+    return get<{ attestations: any[] }>(`/api/atlas/attestations${qs ? '?' + qs : ''}`)
+  },
+  validateLinguisticToAtlas: (linguisticId: string) =>
+    post<{ success: boolean; count: number }>(`/api/atlas/validate/${linguisticId}`, {}),
+
   // ── Abonnement aux channels WebSocket par projet ──
   subscribeToProject,
   unsubscribeFromProject,

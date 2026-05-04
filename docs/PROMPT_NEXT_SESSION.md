@@ -27,8 +27,14 @@ Documenter les langues vernaculaires. Un meneur dit une phrase en francais, puis
 ### Etat actuel
 Le pipeline produit 63 sequences dont ~20 sont correctes. Le probleme principal : ~43 faux positifs FR (vernaculaire que le lang-id classe comme francais, et Whisper produit du pseudo-francais coherent dessus).
 
+### Integration ALF (Atlas Linguistique de la France) — En cours
+- Module de conversion IPA <-> ALF Rousselot : `server/services/alf-notation.ts` (49 tests OK)
+- Service de consultation base ALF : `server/services/alf-lookup.ts`
+- Scraper SYMILA : `scripts/alf-scrape.py` (-> `data/alf.db`, ~250 Mo)
+- TODO : carte + champ commune dans config projet, affichage double notation dans LinguisticTool, base atlas moderne, vue carte
+
 ### Lire le CR complet
-`docs/CR_OUTIL_LINGUISTIQUE.md` contient le cahier des charges, le pipeline detaille, les 14 approches testees, les resultats du dernier test avec le tableau des bonnes phrases, et les problemes restants.
+`docs/CR_OUTIL_LINGUISTIQUE.md` contient le cahier des charges, le pipeline detaille, les 14 approches testees, les resultats du dernier test avec le tableau des bonnes phrases, les problemes restants, et la section integration ALF (sources, schema SQLite, conversion phonetique, atlas moderne).
 
 ## Problemes a resoudre (par priorite)
 
