@@ -22,7 +22,7 @@
 
 // ── Imports ──
 import { useState, useCallback, useRef, useEffect } from "react"
-import { Upload, BookOpen, Loader2, Play, Pause, Download, ArrowLeft, ChevronDown, Pencil, RotateCcw, Globe2, Check } from "lucide-react"
+import { Upload, BookOpen, Loader2, Play, Pause, Download, ArrowLeft, ChevronDown, Pencil, RotateCcw, Globe2, Check, Users, User } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import api from "@/api"
@@ -45,6 +45,12 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
   const [uploadedFile, setUploadedFile] = useState<{ path: string; name: string; duration: number } | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Mode de l'outil :
+  //  - 'round-table' : tour de table classique (un meneur FR + N intervenants en patois)
+  //  - 'single'      : enregistrement solo d'une personne qui parle directement en patois
+  // null = pas encore choisi → on affiche l'ecran de selection au demarrage
+  const [mode, setMode] = useState<'round-table' | 'single' | null>(null)
 
   // Config
   const [whisperModel, setWhisperModel] = useState('large-v3')
@@ -198,7 +204,11 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
     setStatus('queued')
     try {
       const result = await api.startLinguistic(uploadedFile.path, uploadedFile.name, {
-        whisperModel, language, numSpeakers,
+        whisperModel, language,
+        // En mode 'single' (audio solo d'une personne), on force numSpeakers=1
+        // ce qui permet a la diarisation de ne pas chercher a separer les voix.
+        numSpeakers: mode === 'single' ? 1 : numSpeakers,
+        mode: mode || 'round-table',
         // Point d'enquete ALF si l'utilisateur en a selectionne un
         alfPointId: alfPoint?.id ?? null,
         alfPointInfo: alfPoint ? { num_alf: alfPoint.num_alf, commune: alfPoint.commune, dept: alfPoint.dept_code } : null
@@ -330,8 +340,58 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
         </div>
       </div>
 
-      {/* Upload zone */}
-      {!uploadedFile && status !== 'uploading' && (
+      {/* Selecteur de mode (ecran d'accueil de l'outil) */}
+      {mode === null && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+          className="space-y-3"
+        >
+          <p className="text-xs text-muted-foreground mb-4">
+            Quel type d'enregistrement souhaites-tu traiter ?
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Mode tour de table */}
+            <button
+              onClick={() => setMode('round-table')}
+              className="text-left p-6 bg-card border-2 border-border hover:border-emerald-500 rounded-xl transition-all group"
+            >
+              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center mb-3 group-hover:bg-emerald-500/20">
+                <Users className="w-6 h-6 text-emerald-400" />
+              </div>
+              <h3 className="text-sm font-bold text-foreground mb-1">Tour de table</h3>
+              <p className="text-xs text-muted-foreground mb-2">
+                Un meneur dit chaque phrase en français, plusieurs intervenants la repetent
+                a tour de role en patois.
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                → L'outil decoupe en sequences (phrase FR + variantes patois par locuteur),
+                produit IPA + ALF pour chaque variante.
+              </p>
+            </button>
+
+            {/* Mode audio solo */}
+            <button
+              onClick={() => setMode('single')}
+              className="text-left p-6 bg-card border-2 border-border hover:border-emerald-500 rounded-xl transition-all group"
+            >
+              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center mb-3 group-hover:bg-emerald-500/20">
+                <User className="w-6 h-6 text-emerald-400" />
+              </div>
+              <h3 className="text-sm font-bold text-foreground mb-1">Audio solo</h3>
+              <p className="text-xs text-muted-foreground mb-2">
+                Une seule personne s'enregistre, parlant directement en patois (sans meneur FR).
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                → L'outil transcrit toute la duree, decoupe par phrases naturelles,
+                produit IPA + ALF.
+              </p>
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Upload zone (apparait apres choix du mode) */}
+      {mode !== null && !uploadedFile && status !== 'uploading' && (
         <motion.div
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
           className="cursor-pointer"
@@ -389,11 +449,20 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
                 <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                   <BookOpen className="w-3.5 h-3.5" /> Configuration
                 </h3>
-                <div>
-                  <label className="text-[10px] font-bold uppercase text-muted-foreground">Nombre de locuteurs</label>
-                  <input type="number" min={2} max={20} value={numSpeakers} onChange={(e) => setNumSpeakers(parseInt(e.target.value) || 10)}
-                    className="w-full mt-1 bg-secondary border border-border rounded-lg px-3 py-2 text-xs text-foreground" />
-                  <p className="text-[9px] text-muted-foreground mt-1">Meneur + intervenants (ex: 1 meneur + 9 locuteurs = 10)</p>
+                {/* Champ "nombre de locuteurs" : seulement en mode tour de table */}
+                {mode === 'round-table' && (
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-muted-foreground">Nombre de locuteurs</label>
+                    <input type="number" min={2} max={20} value={numSpeakers} onChange={(e) => setNumSpeakers(parseInt(e.target.value) || 10)}
+                      className="w-full mt-1 bg-secondary border border-border rounded-lg px-3 py-2 text-xs text-foreground" />
+                    <p className="text-[9px] text-muted-foreground mt-1">Meneur + intervenants (ex: 1 meneur + 9 locuteurs = 10)</p>
+                  </div>
+                )}
+                {/* Indicateur mode (informatif, non editable une fois lance) */}
+                <div className="text-[10px] text-muted-foreground">
+                  Mode : <span className="font-bold text-emerald-400">
+                    {mode === 'single' ? 'Audio solo (1 personne)' : 'Tour de table'}
+                  </span>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase text-muted-foreground">Modele Whisper</label>
