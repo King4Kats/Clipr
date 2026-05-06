@@ -5,7 +5,7 @@
 <h1 align="center">Clipr</h1>
 
 <p align="center">
-  <strong>Plateforme web multi-utilisateurs pour segmenter automatiquement des videos longues en extraits thematiques grace a l'IA locale</strong>
+  <strong>Une boite a outils web pour transcrire, decouper et analyser des videos avec une IA qui tourne 100% chez vous</strong>
 </p>
 
 <p align="center">
@@ -20,74 +20,81 @@
 
 ---
 
-## Table des matieres
+## C'est quoi Clipr ?
 
-- [Fonctionnalites](#fonctionnalites)
-- [Architecture](#architecture-docker)
-- [Prerequis](#prerequis)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Guide utilisateur](#guide-utilisateur)
-- [Administration](#administration)
-- [API Reference](#api-reference)
-- [Securite](#securite)
-- [Developpement](#developpement)
-- [Licence](#licence)
+Clipr est une **plateforme web auto-hebergee** qui aide a travailler sur des contenus audio et video longs : interviews, conferences, documentaires, podcasts, captations de terrain.
+
+L'idee : au lieu d'envoyer vos fichiers a un service en ligne, **tout tourne sur votre propre machine** (ou votre serveur). Les videos ne sortent pas, les transcriptions restent privees, et le moteur d'IA (Whisper pour la voix, un LLM local pour l'analyse) fonctionne sans connexion.
+
+C'est multi-utilisateurs, multi-projets, et concu pour qu'une equipe puisse partager et collaborer sans dependre du cloud.
 
 ---
 
-## Fonctionnalites
+## Les 3 outils
 
-### Multi-projets
-- Jusqu'a **6 projets** simultanes par utilisateur
-- Creer, renommer, supprimer des projets depuis la page d'accueil
-- Travailler sur un **projet manuel** pendant qu'un **projet IA** s'analyse en arriere-plan
-- Badges visuels : type (IA/Manuel), statut (Brouillon/En cours/Termine)
+Clipr regroupe trois outils qui partagent la meme base (comptes, projets, partage, IA) mais qui repondent a des besoins differents.
 
-### Analyse IA en arriere-plan
-- Pipeline complete cote serveur : extraction audio, transcription, analyse semantique
-- L'utilisateur peut naviguer librement pendant le traitement
-- Resultats sauvegardes automatiquement en base de donnees
-- Progression en temps reel via WebSocket par projet
+### 1. Transcription audio/video
 
-### Multi-utilisateurs
-- Systeme d'authentification JWT (inscription/connexion)
-- Isolation des projets par utilisateur
-- Premier utilisateur inscrit = **administrateur**
-- Roles : `admin` et `user`
+> Transformer la parole en texte, et explorer ce qui a ete dit.
 
-### Collaboration
-- Partager un projet avec d'autres utilisateurs
-- Roles de partage : **Lecteur** (consultation) et **Editeur** (modification)
-- Recherche d'utilisateurs pour le partage
-- Section "Partages avec moi" sur la page d'accueil
+- Transcription automatique avec **Whisper large-v3** (excellent en francais)
+- **Diarisation** : identifie qui parle (locuteur 1, locuteur 2, etc.)
+- **Vue NLE en 4 panneaux** : transcript synchronise, nuage de mots, frequences des termes, analyse semantique IA
+- Recherche dans le transcript, clic sur un mot pour voir tous ses usages
+- Traitement par lots (plusieurs fichiers a la suite)
+- **Export PDF** soigne avec template propre, ou export texte brut
 
-### Verrouillage IA
-- Un seul utilisateur peut utiliser l'IA a la fois
-- Affichage "IA utilisee par {nom} sur {projet}" pour les autres
-- Timeout automatique de 30 minutes
-- Liberation automatique en fin de traitement ou en cas d'erreur
+Cas d'usage : journalistes, chercheurs, doc makers qui veulent fouiller dans des heures de rushes.
 
-### Dashboard Admin
-- Vue d'ensemble : stats, sante systeme, statut IA
-- Liste de tous les projets de tous les utilisateurs
-- Gestion des utilisateurs
-- Visualiseur de logs en temps reel
+### 2. Segmentation video
 
-### Transcription avancee
-- Modele **Whisper large-v3** pour une qualite optimale
-- `initial_prompt` avec vocabulaire de domaine (configurable par projet)
-- Vocabulaire pre-configure Vendee/Bretagne : patrimoine, patois, artisanat, musique traditionnelle
-- Option **large-v3-turbo** pour un traitement plus rapide
+> Decouper automatiquement une video longue en extraits thematiques.
 
-### Analyse semantique
-- Modele **mistral-small:22b** par defaut (excellent en francais)
-- Decoupe thematique intelligente avec titres et timecodes
-- Consignes de decoupe personnalisables par projet
+- Pipeline complet : extraction audio → transcription → analyse semantique par LLM
+- Le LLM (par defaut **mistral-small:22b** via Ollama) decoupe le contenu en sequences avec **titres et timecodes**
+- **Consignes personnalisables** par projet : on peut dire au LLM ce qu'on cherche
+- Mode **manuel** disponible : ajout/edition des segments a la main dans une timeline
+- Export des extraits en MP4
+
+Cas d'usage : creer des clips courts a partir d'une longue interview, monter un best-of, archiver par theme.
+
+### 3. Transcription linguistique
+
+> Outil specialise pour l'analyse de la langue parlee, avec un focus sur les dialectes et le patrimoine oral.
+
+- Pipeline linguistique avec nettoyage des noms propres et normalisation
+- Vocabulaire pre-charge **Vendee/Bretagne** (patrimoine, patois, artisanat, musique trad)
+- Export adapte aux besoins de transcription scientifique
+
+Cas d'usage : chercheurs en linguistique, ethnologues, archivistes du patrimoine oral.
 
 ---
 
-## Architecture Docker
+## Pourquoi auto-heberge ?
+
+- **Confidentialite** : aucune donnee ne quitte votre infra
+- **Pas d'abonnement** : un Docker Compose, vos propres ressources
+- **Choix du modele** : vous installez le LLM que vous voulez via Ollama
+- **Personnalisation** : prompts, vocabulaire, consignes adaptes a votre domaine
+
+---
+
+## Demarrer en 3 commandes
+
+```bash
+git clone https://github.com/King4Kats/Clipr.git
+cd Clipr
+docker compose up -d
+```
+
+Puis ouvrir **http://localhost:3000**, creer un compte (le premier inscrit devient admin), et c'est parti.
+
+---
+
+## Architecture
+
+Trois services qui tournent ensemble dans Docker Compose. Pensez-les comme trois conteneurs qui parlent entre eux sur un reseau prive :
 
 ```
 +-------------------------------------------------------------+
@@ -100,210 +107,119 @@
 |  |  SQLite (donnees)    |  |  GPU         |  |  Proxy     |  |
 |  |  FFmpeg              |  |              |  |  HTTPS     |  |
 |  |  Python/Whisper      |  |              |  |            |  |
-|  |  JWT Auth            |  |  :11434      |  |  :443      |  |
-|  |  WebSocket           |  |              |  |  :80       |  |
-|  |  :3000               |  |              |  |            |  |
+|  |  JWT Auth            |  |              |  |            |  |
+|  |  WebSocket           |  |  :11434      |  |  :443      |  |
+|  |  :3000               |  |              |  |  :80       |  |
 |  +---------------------+  +--------------+  +------------+  |
 |                                                              |
 +-------------------------------------------------------------+
 ```
 
-| Service | Role | Port | Details |
-|---------|------|------|---------|
-| **clipr** | Application principale | `3000` | Express, SQLite, FFmpeg, Whisper, JWT |
-| **ollama** | Serveur LLM local | `11434` | Acceleration GPU (CUDA/ROCm) |
-| **caddy** | Reverse proxy HTTPS | `80/443` | Certificats automatiques Let's Encrypt |
+**En clair :**
+
+| Service | Ce qu'il fait | Analogie |
+|---------|--------------|----------|
+| **clipr** | C'est l'application : le site web, l'API, la base de donnees, et le code qui appelle Whisper et FFmpeg. | Le cerveau et le visage de l'app. |
+| **ollama** | Un serveur a part qui fait tourner le LLM (le modele de langage qui analyse le texte). On lui envoie une requete HTTP, il repond. | Le specialiste qu'on consulte. |
+| **caddy** | Un reverse proxy : il recoit les requetes du navigateur en HTTPS et les transmet a Clipr. Il gere aussi le certificat SSL automatiquement. | Le portier qui filtre et redirige. |
+
+Pourquoi separer **ollama** de **clipr** ? Parce que le LLM consomme beaucoup de RAM/GPU et qu'on veut pouvoir le redemarrer ou le remplacer sans toucher a l'app. Et parce qu'Ollama existe deja comme image Docker prete a l'emploi.
 
 ---
 
 ## Prerequis
 
-- **Docker** >= 20.10
-- **Docker Compose** >= 2.0
-- **GPU** recommande :
-  - NVIDIA (CUDA) : optimal pour Whisper et Ollama
-  - AMD (ROCm) : Ollama fonctionne, Whisper en CPU (`int8`)
-  - CPU seul : fonctionne mais plus lent
+- **Docker** >= 20.10 et **Docker Compose** >= 2.0
+- Une machine avec au moins **16 Go de RAM** (le LLM en consomme beaucoup)
+- **GPU recommande** mais pas obligatoire :
+  - NVIDIA (CUDA) : top, tout va vite
+  - AMD (ROCm) : Ollama fonctionne, Whisper tournera en CPU
+  - CPU seul : ca marche, mais c'est lent (compter ~1x temps reel pour Whisper)
 
-### Espace disque recommande
+### Espace disque
 
-| Composant | Taille |
-|-----------|--------|
+| Quoi | Combien |
+|------|---------|
 | Image Docker Clipr | ~2 GB |
 | Modele Whisper large-v3 | ~3 GB (telecharge au premier usage) |
 | Modele mistral-small:22b | ~14 GB |
-| Donnees projets | Variable |
-
----
-
-## Installation
-
-### Installation rapide
-
-```bash
-git clone https://github.com/King4Kats/Clipr.git
-cd Clipr
-docker compose up -d
-```
-
-L'application est accessible sur **http://localhost:3000**.
-
-### Premier lancement
-
-1. Ouvrir http://localhost:3000
-2. **Creer un compte** — le premier utilisateur devient automatiquement administrateur
-3. L'assistant de configuration verifie les dependances (FFmpeg, Whisper, Ollama)
-4. Telecharger le modele LLM depuis les parametres si necessaire
+| Vos projets | depend des videos |
 
 ---
 
 ## Configuration
 
-### Variables d'environnement
+### Variables d'environnement principales
 
-| Variable | Defaut | Description |
-|----------|--------|-------------|
-| `PORT` | `3000` | Port du serveur |
-| `DATA_DIR` | `/data` | Repertoire de stockage (DB, uploads, exports) |
-| `JWT_SECRET` | Auto-genere | **Important** : definir en production pour persister les sessions |
-| `CORS_ORIGINS` | `*` | Origines autorisees (separer par virgule) |
-| `OLLAMA_HOST` | `ollama` | Hostname du serveur Ollama |
-| `OLLAMA_PORT` | `11434` | Port Ollama |
+| Variable | Defaut | A quoi ca sert |
+|----------|--------|----------------|
+| `PORT` | `3000` | Port d'ecoute du serveur web |
+| `DATA_DIR` | `/data` | Ou sont stockes la base SQLite, les uploads et les exports |
+| `JWT_SECRET` | Auto-genere | La cle secrete qui signe les tokens de connexion. **A definir en prod** sinon les sessions sautent a chaque redemarrage. |
+| `CORS_ORIGINS` | `*` | Quels domaines peuvent appeler l'API. En prod, mettre votre domaine. |
+| `OLLAMA_HOST` | `ollama` | Le hostname du conteneur Ollama (laisser tel quel sauf cas particulier) |
+| `OLLAMA_PORT` | `11434` | Port d'Ollama (idem) |
 
-### Configuration production
+### Pour la prod
 
-```bash
-# docker-compose.yml — ajout des variables
+```yaml
+# docker-compose.yml
 services:
   clipr:
     environment:
-      - JWT_SECRET=votre-secret-aleatoire-tres-long
-      - CORS_ORIGINS=https://clipr.votre-domaine.fr
+      - JWT_SECRET=une-cle-aleatoire-tres-longue-genre-32-caracteres
+      - CORS_ORIGINS=https://clipr.mon-domaine.fr
 ```
 
-### Nom de domaine (HTTPS)
+### HTTPS avec votre domaine
 
-Modifier `caddy/Caddyfile` :
+Editez `caddy/Caddyfile` :
 
 ```
-clipr.votre-domaine.fr {
+clipr.mon-domaine.fr {
     reverse_proxy clipr:3000
 }
 ```
 
-Caddy obtient automatiquement un certificat Let's Encrypt.
-
----
-
-## Guide utilisateur
-
-### Inscription et connexion
-
-1. Ouvrir l'application
-2. Cliquer **S'inscrire** et remplir : nom d'utilisateur, email, mot de passe
-3. Le premier inscrit obtient le role **admin**
-4. Les suivants ont le role **user**
-
-### Creer un projet
-
-**Methode 1** : Cliquer le bouton **+ Nouveau** ou la carte **Nouveau Projet**
-
-**Methode 2** : Glisser-deposer un fichier video dans la zone d'upload (cree automatiquement un projet)
-
-### Analyse IA (projet automatique)
-
-1. Importer une ou plusieurs videos dans le projet
-2. Configurer les parametres dans le panneau **Assistant IA** :
-   - **Modele LLM** : choisir parmi les modeles Ollama installes
-   - **Modele Whisper** : `large-v3` (qualite) ou `large-v3-turbo` (vitesse)
-   - **Consignes** : instructions personnalisees pour la decoupe
-   - **Vocabulaire Whisper** : termes de domaine pour ameliorer la transcription
-3. Cliquer **Lancer l'analyse**
-4. Le traitement s'execute **en arriere-plan** — vous pouvez :
-   - Revenir a l'accueil
-   - Travailler sur un autre projet
-   - Fermer le navigateur (les resultats sont sauves cote serveur)
-5. Le projet passe au statut **Termine** quand l'analyse est finie
-
-### Projet manuel
-
-1. Creer un projet et importer des videos
-2. Ajouter des segments manuellement dans la timeline
-3. Renommer, reordonner, ajuster les timecodes
-4. Exporter les extraits
-
-### Gestion des projets
-
-- **Renommer** : icone crayon au survol d'une carte, ou cliquer le nom dans le header
-- **Supprimer** : icone poubelle au survol
-- **Partager** : icone partage au survol → modale de partage
-
-### Partage et collaboration
-
-1. Survoler un projet et cliquer l'icone **Partager**
-2. Rechercher un utilisateur par nom ou email
-3. Choisir le role :
-   - **Lecteur** : consultation seule
-   - **Editeur** : peut modifier le projet
-4. Les projets partages apparaissent dans la section **Partages avec moi**
-5. Cliquer sur le badge du role pour le changer (lecteur/editeur)
-
-### Export
-
-- **Video** : export des segments en MP4
-- **Texte** : export de la transcription
-- **Projet** : export complet en JSON (reimportable)
+Caddy se debrouille tout seul pour obtenir un certificat Let's Encrypt. Pas besoin de toucher a OpenSSL.
 
 ---
 
 ## Administration
 
-Accessible uniquement aux utilisateurs avec le role `admin` (icone bouclier dans le header).
+L'admin a une icone bouclier dans le header. Le dashboard a 4 onglets :
 
-### Vue d'ensemble
-- Nombre d'utilisateurs et de projets
-- Utilisation du disque
-- Statut de l'IA (libre ou utilisee par qui)
-- Etat des services (Ollama, FFmpeg)
-
-### Projets
-- Tableau de **tous** les projets de tous les utilisateurs
-- Proprietaire, type, statut, nombre de segments, date de mise a jour
-
-### Utilisateurs
-- Liste des comptes avec role, email, date d'inscription
-
-### Logs
-- Visualiseur des 200 dernieres lignes du log serveur
-- Coloration syntaxique : erreurs en rouge, warnings en orange
-- Rafraichissement manuel
+- **Vue d'ensemble** : nombre d'utilisateurs, projets, espace disque, statut IA
+- **Projets** : tous les projets de tout le monde (proprietaire, type, statut, segments)
+- **Utilisateurs** : tous les comptes
+- **Logs** : 200 dernieres lignes du serveur, en couleur (rouge = erreur, orange = warning)
 
 ---
 
 ## API Reference
 
+Toutes les routes (sauf `register`/`login`) demandent un header `Authorization: Bearer <token>`.
+
 ### Authentification
 
 | Methode | Route | Auth | Description |
 |---------|-------|------|-------------|
-| POST | `/api/auth/register` | Non | Inscription (rate-limited: 10/15min) |
-| POST | `/api/auth/login` | Non | Connexion (rate-limited: 10/15min) |
-| GET | `/api/auth/me` | JWT | Profil utilisateur courant |
-
-Toutes les autres routes necessitent un header `Authorization: Bearer <token>`.
+| POST | `/api/auth/register` | Non | Inscription (limite : 10 essais / 15min) |
+| POST | `/api/auth/login` | Non | Connexion (limite : 10 essais / 15min) |
+| GET | `/api/auth/me` | JWT | Profil de l'utilisateur courant |
 
 ### Projets
 
 | Methode | Route | Description |
 |---------|-------|-------------|
-| GET | `/api/project/history` | Liste des projets de l'utilisateur (max 6) |
-| POST | `/api/project/create` | Creer un projet `{name, type}` |
+| GET | `/api/project/history` | Liste des projets (max 12) |
+| POST | `/api/project/create` | Creer `{name, type}` |
 | POST | `/api/project/save` | Sauvegarder `{id, ...data}` |
 | POST | `/api/project/autosave` | Auto-sauvegarde |
-| GET | `/api/project/load/:id` | Charger un projet (proprietaire ou partage) |
+| GET | `/api/project/load/:id` | Charger un projet |
 | PATCH | `/api/project/:id/rename` | Renommer `{name}` |
 | DELETE | `/api/project/:id` | Supprimer (soft delete) |
-| PATCH | `/api/project/:id/status` | Changer le statut `{status}` |
+| PATCH | `/api/project/:id/status` | Changer le statut |
 | POST | `/api/project/:id/analyze` | Lancer l'analyse IA en arriere-plan |
 
 ### Partage
@@ -321,7 +237,7 @@ Toutes les autres routes necessitent un header `Authorization: Bearer <token>`.
 | Methode | Route | Description |
 |---------|-------|-------------|
 | GET | `/api/ai/status` | Statut du verrou IA |
-| GET | `/api/ollama/check` | Verifier si Ollama est actif |
+| GET | `/api/ollama/check` | Ollama est-il actif ? |
 | GET | `/api/ollama/models` | Lister les modeles installes |
 | POST | `/api/ollama/pull` | Telecharger un modele |
 
@@ -329,37 +245,33 @@ Toutes les autres routes necessitent un header `Authorization: Bearer <token>`.
 
 | Methode | Route | Description |
 |---------|-------|-------------|
-| POST | `/api/upload` | Upload de videos (max 5 GB, formats video uniquement) |
-| GET | `/api/files/:filename` | Streamer un fichier upload |
+| POST | `/api/upload` | Upload videos (max 5 GB) |
+| GET | `/api/files/:filename` | Streamer un fichier |
 | POST | `/api/export/segment` | Exporter un segment video |
 | POST | `/api/export/text` | Exporter du texte |
 | GET | `/api/export/download/:filename` | Telecharger un export |
 
-### Administration (admin uniquement)
+### Admin (role admin uniquement)
 
 | Methode | Route | Description |
 |---------|-------|-------------|
-| GET | `/api/admin/users` | Liste de tous les utilisateurs |
-| GET | `/api/admin/projects` | Liste de tous les projets |
-| GET | `/api/admin/system` | Sante systeme (disque, services, IA) |
-| GET | `/api/admin/logs?lines=N` | Dernieres lignes de log |
+| GET | `/api/admin/users` | Tous les utilisateurs |
+| GET | `/api/admin/projects` | Tous les projets |
+| GET | `/api/admin/system` | Sante systeme |
+| GET | `/api/admin/logs?lines=N` | Logs serveur |
 | POST | `/api/update` | Declencher une mise a jour |
 
 ### WebSocket
 
-Connexion : `ws://host/ws`
-
-**Messages client -> serveur :**
+Connexion : `ws://host/ws`. Le client s'authentifie puis souscrit a un projet pour recevoir les events de progression en temps reel.
 
 ```json
+// Client -> Serveur
 {"type": "auth", "token": "jwt-token"}
 {"type": "subscribe", "projectId": "uuid"}
 {"type": "unsubscribe"}
-```
 
-**Messages serveur -> client :**
-
-```json
+// Serveur -> Client
 {"type": "progress", "projectId": "uuid", "step": "transcribing", "progress": 45, "message": "..."}
 {"type": "transcript:segment", "projectId": "uuid", "id": "0", "start": 1.2, "end": 3.5, "text": "..."}
 {"type": "analysis:complete", "projectId": "uuid", "segments": [...], "transcript": [...]}
@@ -370,25 +282,19 @@ Connexion : `ws://host/ws`
 
 ## Securite
 
-### Mesures implementees
+Ce qui est en place :
 
-- **Authentification JWT** sur toutes les routes sensibles
-- **Rate limiting** sur login/register (10 tentatives / 15 minutes)
-- **Bcrypt** pour le hachage des mots de passe (10 rounds)
-- **Path traversal protection** : validation `resolve()` + `startsWith()` sur tous les endpoints fichiers
-- **IDOR protection** : verification de propriete sur toutes les operations projet
-- **Validation des uploads** : types MIME video/audio uniquement, noms de fichiers assainis
+- **Auth JWT** sur toutes les routes sensibles
+- **Rate limiting** sur login/register (10 essais / 15min)
+- **Bcrypt** pour les mots de passe (10 rounds)
+- **Path traversal** : tous les endpoints fichiers valident `resolve()` + `startsWith()`
+- **IDOR** : verification de propriete sur chaque operation projet
+- **Validation des uploads** : MIME video/audio uniquement, noms assainis
 - **WebSocket authentifie** : token JWT requis avant souscription
-- **Soft delete** : les projets supprimes ne sont pas effaces physiquement
-- **CORS configurable** via `CORS_ORIGINS`
-- **JWT secret** : genere aleatoirement si non configure (definir `JWT_SECRET` en production)
+- **Soft delete** : un projet supprime n'est pas efface physiquement
+- **CORS configurable**
 
-### Recommandations production
-
-1. **Definir `JWT_SECRET`** avec une valeur aleatoire forte (32+ caracteres)
-2. **Configurer `CORS_ORIGINS`** avec votre domaine
-3. **HTTPS** via Caddy (automatique avec un nom de domaine)
-4. **Sauvegardes** regulieres du volume `clipr-data` (contient la DB SQLite et les fichiers)
+Pour la prod : definir un `JWT_SECRET` long et aleatoire, configurer `CORS_ORIGINS`, activer HTTPS via Caddy, sauvegarder regulierement le volume `clipr-data`.
 
 ---
 
@@ -398,107 +304,104 @@ Connexion : `ws://host/ws`
 
 ```
 Clipr/
-  server/                    # Backend Express
-    index.ts                 # Routes API, WebSocket, middleware
-    logger.ts                # Systeme de logs
-    middleware/
-      auth.ts                # Middleware JWT (requireAuth, requireAdmin)
+  server/                    # Backend Express (l'API)
+    index.ts                 # Point d'entree, routes, WebSocket
+    middleware/auth.ts       # JWT (requireAuth, requireAdmin)
     services/
-      database.ts            # SQLite (schema, migrations)
+      database.ts            # SQLite : schema + migrations
       auth.ts                # Inscription, connexion, JWT
-      project-history.ts     # CRUD projets (scope par utilisateur)
+      project-history.ts     # CRUD projets
       sharing.ts             # Partage de projets
-      ai-lock.ts             # Verrouillage IA
-      whisper.ts             # Transcription (spawn Python)
-      ollama.ts              # Analyse LLM (HTTP client)
+      ai-lock.ts             # Verrou IA (un user a la fois)
+      whisper.ts             # Transcription (lance Python)
+      ollama.ts              # Appel HTTP a Ollama
       ffmpeg.ts              # Operations video
-  src/                       # Frontend React
-    api.ts                   # Client HTTP/WebSocket avec auth JWT
+  src/                       # Frontend React (le site)
+    api.ts                   # Client HTTP/WebSocket avec auth
+    routes/                  # Pages React Router
+      HomePage.tsx           # Accueil + liste projets
+      TranscriptionPage.tsx  # Outil 1
+      SegmentationNewPage.tsx# Outil 2
+      LinguisticPage.tsx     # Outil 3
+      AdminPage.tsx          # Dashboard admin
     store/
-      useStore.ts            # Store Zustand (etat projet actif)
-      useAuthStore.ts        # Store auth (login, register, token)
-    components/
-      AuthScreen.tsx         # Page login/register
-      AdminDashboard.tsx     # Dashboard admin (4 onglets)
-      ShareDialog.tsx        # Modale de partage
-      SetupWizard.tsx        # Assistant premier lancement
-      new/
-        Header.tsx           # Barre de navigation
-        AIAnalysisPanel.tsx  # Panneau config + lancement IA
-        EditorLayout.tsx     # Editeur NLE
-        VideoPreview.tsx     # Lecteur video
-        Timeline.tsx         # Timeline des segments
-        ProgressPanel.tsx    # Ecran de progression
-        UploadZone.tsx       # Zone d'upload drag & drop
-    types/
-      index.ts               # Interfaces TypeScript
-  scripts/
-    transcribe.py            # Script Python faster-whisper
-  docs/
-    index.html               # Documentation technique
-  Dockerfile                 # Image Docker multi-stage
-  docker-compose.yml         # Orchestration des services
+      useStore.ts            # Etat projet actif (Zustand)
+      useAuthStore.ts        # Etat auth (token, user)
+    components/new/          # Composants des outils
+      TranscriptionTool.tsx  # Vue 4 panneaux
+      LinguisticTool.tsx
+      EditorLayout.tsx       # Editeur NLE (segmentation)
+      VideoPreview.tsx
+      Timeline.tsx
+      ...
+  scripts/transcribe.py      # Script Python qui appelle faster-whisper
+  docs/index.html            # Doc utilisateur
 ```
 
-### Lancer en mode developpement
+### Lancer en dev
 
 ```bash
 npm install
-npm run dev          # Client (Vite HMR) + Serveur (tsx watch)
+npm run dev          # Vite (client) + tsx watch (serveur), tout en parallele
 ```
 
-### Build de production
+Vite recharge le front a chaque changement. tsx redemarre le serveur a chaque modif TypeScript.
+
+### Build prod
 
 ```bash
-npm run build        # Build client (Vite) + serveur (TypeScript)
-npm start            # Lancer le serveur de production
+npm run build        # Compile front (Vite) + serveur (tsc)
+npm start            # Lance le serveur compile
 ```
 
 ### Base de donnees
 
-SQLite stockee dans `DATA_DIR/clipr.db`. Tables :
+SQLite, fichier unique dans `DATA_DIR/clipr.db`. Pourquoi SQLite ? Parce que c'est un fichier, zero config, zero serveur DB a maintenir, et largement suffisant pour quelques dizaines d'utilisateurs.
 
-| Table | Description |
-|-------|-------------|
-| `users` | Comptes utilisateurs (id, username, email, password_hash, role) |
-| `projects` | Projets (id, user_id, name, type, status, data JSON, timestamps) |
-| `project_shares` | Partages (project_id, user_id, role) |
-| `ai_locks` | Verrous IA (user_id, project_id, expires_at) |
+| Table | Contenu |
+|-------|---------|
+| `users` | id, username, email, password_hash, role |
+| `projects` | id, user_id, name, type, status, data (JSON), timestamps |
+| `project_shares` | project_id, user_id, role |
+| `ai_locks` | user_id, project_id, expires_at |
 
-### Stack technique
+### Stack
 
-| Couche | Technologie |
-|--------|-------------|
-| Frontend | React 18, TypeScript, Zustand, Tailwind CSS, Framer Motion |
-| Backend | Express.js, TypeScript, better-sqlite3 |
-| Auth | JWT (jsonwebtoken), bcrypt |
-| Video | FFmpeg (fluent-ffmpeg) |
-| Transcription | faster-whisper (Python), modele large-v3 |
-| Analyse | Ollama (mistral-small:22b par defaut) |
-| Temps reel | WebSocket (ws) par projet |
-| Deploiement | Docker Compose, Caddy (HTTPS) |
+| Couche | Techno | Pourquoi |
+|--------|--------|----------|
+| Frontend | React 18 + TypeScript | Standard, ecosysteme riche |
+| State | Zustand | Plus simple que Redux pour ce qu'on fait |
+| Style | Tailwind CSS + Radix UI | Rapide a styler, accessible par defaut |
+| Animations | Framer Motion | Transitions fluides sans douleur |
+| Backend | Express + TypeScript | Simple, eprouve, bien type |
+| DB | better-sqlite3 | Synchrone, rapide, parfait pour SQLite |
+| Auth | jsonwebtoken + bcrypt | Standard de l'industrie |
+| Video | fluent-ffmpeg | Wrapper Node sympa pour FFmpeg |
+| Transcription | faster-whisper (Python) | Plus rapide que whisper.cpp pour large-v3 |
+| LLM | Ollama HTTP | API simple, gere les modeles tout seul |
+| Temps reel | ws (WebSocket) | Push de progression au front |
 
 ---
 
-## Commandes Docker
+## Commandes Docker utiles
 
-| Commande | Description |
-|----------|-------------|
-| `docker compose up -d` | Demarrer tous les services |
-| `docker compose down` | Arreter tous les services |
-| `docker compose logs -f clipr` | Logs Clipr en temps reel |
-| `docker compose restart clipr` | Redemarrer Clipr |
-| `docker compose build --no-cache` | Reconstruire sans cache |
-| `docker compose exec clipr sh` | Shell dans le conteneur |
+| Commande | Quoi |
+|----------|------|
+| `docker compose up -d` | Demarrer tous les services en arriere-plan |
+| `docker compose down` | Tout arreter |
+| `docker compose logs -f clipr` | Suivre les logs en temps reel |
+| `docker compose restart clipr` | Redemarrer juste l'app |
+| `docker compose build --no-cache` | Reconstruire from scratch |
+| `docker compose exec clipr sh` | Ouvrir un shell dans le conteneur |
 
 ---
 
 ## Licence
 
-Ce projet est distribue sous licence **GPL-3.0**. Voir le fichier [LICENSE](LICENSE) pour les details.
+Ce projet est distribue sous licence **GPL-3.0**. Voir [LICENSE](LICENSE).
 
 ---
 
 <p align="center">
-  <sub>Fait avec par <a href="https://github.com/King4Kats">King4Kats</a></sub>
+  <sub>Fait par <a href="https://github.com/King4Kats">King4Kats</a></sub>
 </p>
