@@ -15,6 +15,15 @@ services:
       - OLLAMA_PORT=11434
       - JWT_SECRET=${JWT_SECRET}
       - HF_TOKEN=${HF_TOKEN}
+      # ─── Validation des inscriptions par email (SMTP temonia.fr:465 SSL) ───
+      - SMTP_HOST=${SMTP_HOST:-temonia.fr}
+      - SMTP_PORT=${SMTP_PORT:-465}
+      - SMTP_SECURE=${SMTP_SECURE:-true}
+      - SMTP_USER=${SMTP_USER:-clipr@temonia.fr}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM:-clipr@temonia.fr}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-clipr@temonia.fr}
+      - PUBLIC_URL=${PUBLIC_URL:-https://clipr-temonia.flavienauvray.me}
     deploy:
       resources:
         reservations:
@@ -51,6 +60,25 @@ services:
     depends_on:
       - clipr
 
+  # Caddy : reverse proxy HTTPS pour exposer Clipr directement via clipr.temonia.fr
+  # Auto Let's Encrypt (HTTP-01 challenge sur port 80), WebSocket transparent.
+  # Necessite port forwarding 80/443 du routeur vers cette machine.
+  caddy:
+    image: caddy:latest
+    container_name: clipr-caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - clipr
+
 volumes:
   clipr-data:
   ollama-data:
+  caddy-data:
+  caddy-config:

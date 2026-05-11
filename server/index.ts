@@ -34,6 +34,8 @@ import * as whisperService from './services/whisper.js'
 import * as ollamaService from './services/ollama.js'
 import * as projectService from './services/project-history.js'
 import * as authService from './services/auth.js'
+import * as settingsService from './services/settings.js'
+import * as mailer from './services/mailer.js'
 import * as aiLockService from './services/ai-lock.js'
 import * as sharingService from './services/sharing.js'
 import * as taskQueueService from './services/task-queue.js'
@@ -338,13 +340,77 @@ taskQueueService.initQueue(
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: Date.now() }))
 
 // ── Authentification (protégée par rate limiting) ──
-app.post('/api/auth/register', authLimiter, (req, res) => {
+app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
+    // Verification du flag d'ouverture des inscriptions (toggle admin)
+    // Exception : si aucun utilisateur en DB, on autorise (bootstrap admin).
+    const db = getDb()
+    const userCount = (db.prepare('SELECT COUNT(*) as cnt FROM users').get() as any).cnt
+    if (userCount > 0 && !settingsService.getBool('registration_open', true)) {
+      return res.status(403).json({ error: 'Les inscriptions sont actuellement fermees', code: 'registration_closed' })
+    }
+
     const { username, email, password } = req.body
     const result = authService.register(username, email, password)
-    res.json(result)
+
+    // Si compte en attente, notifier l'admin par email (async, pas bloquant)
+    if (result.pending && result.approvalToken) {
+      mailer.notifyAdminPendingSignup({
+        username: result.user.username,
+        email: result.user.email,
+        approvalToken: result.approvalToken,
+      }).catch(() => {})
+      return res.json({ pending: true, message: 'Inscription enregistree. Un administrateur va valider ton compte. Tu recevras un email a son activation.' })
+    }
+
+    // Premier utilisateur (admin auto) : connexion immediate
+    res.json({ user: result.user, token: result.token, pending: false })
   } catch (err: any) { res.status(400).json({ error: err.message }) }
 })
+
+/**
+ * Endpoints publics d'approbation/rejet via le lien envoye dans l'email a l'admin.
+ * Le token (32 octets aleatoires) est lui-meme le secret — aucune auth requise.
+ * Reponse en HTML simple (l'admin clique depuis sa messagerie).
+ */
+app.get('/api/auth/approve/:token', async (req, res) => {
+  try {
+    const user = authService.setUserStatusByToken(req.params.token, 'active')
+    mailer.notifyUserDecision({ to: user.email, username: user.username, approved: true }).catch(() => {})
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    res.send(decisionHtml(true, user.username))
+  } catch (err: any) {
+    res.status(400).setHeader('Content-Type', 'text/html; charset=utf-8')
+    res.send(decisionHtml(true, '', err.message))
+  }
+})
+
+app.get('/api/auth/reject/:token', async (req, res) => {
+  try {
+    const user = authService.setUserStatusByToken(req.params.token, 'rejected')
+    mailer.notifyUserDecision({ to: user.email, username: user.username, approved: false }).catch(() => {})
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    res.send(decisionHtml(false, user.username))
+  } catch (err: any) {
+    res.status(400).setHeader('Content-Type', 'text/html; charset=utf-8')
+    res.send(decisionHtml(false, '', err.message))
+  }
+})
+
+function decisionHtml(approved: boolean, username: string, error?: string): string {
+  const color = error ? '#dc2626' : (approved ? '#16a34a' : '#dc2626')
+  const title = error ? 'Erreur' : (approved ? 'Compte approuve' : 'Compte rejete')
+  const body = error ? error : (approved
+    ? `Le compte de <strong>${username}</strong> a ete active. L'utilisateur a ete notifie par email.`
+    : `Le compte de <strong>${username}</strong> a ete rejete.`)
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title></head>
+<body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa">
+  <div style="max-width:420px;padding:32px;background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.06);text-align:center">
+    <h1 style="color:${color};margin:0 0 12px">${title}</h1>
+    <p style="color:#555;font-size:14px;line-height:1.5">${body}</p>
+  </div>
+</body></html>`
+}
 
 app.post('/api/auth/login', authLimiter, (req, res) => {
   try {
@@ -363,6 +429,53 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 // Admin: list all users
 app.get('/api/admin/users', requireAuth, requireAdmin, (_req, res) => {
   res.json(authService.listUsers())
+})
+
+// Admin: inscriptions en attente de validation
+app.get('/api/admin/users/pending', requireAuth, requireAdmin, (_req, res) => {
+  res.json(authService.listPendingUsers())
+})
+
+// Admin: approuver/rejeter une inscription en attente
+app.post('/api/admin/users/:id/approve', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const user = authService.setUserStatus(req.params.id, 'active', req.user!.userId)
+    mailer.notifyUserDecision({ to: user.email, username: user.username, approved: true }).catch(() => {})
+    res.json(user)
+  } catch (err: any) { res.status(400).json({ error: err.message }) }
+})
+
+app.post('/api/admin/users/:id/reject', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const user = authService.setUserStatus(req.params.id, 'rejected', req.user!.userId)
+    mailer.notifyUserDecision({ to: user.email, username: user.username, approved: false }).catch(() => {})
+    res.json(user)
+  } catch (err: any) { res.status(400).json({ error: err.message }) }
+})
+
+// Admin: lire/modifier le flag d'ouverture des inscriptions
+app.get('/api/admin/settings/registration', requireAuth, requireAdmin, (_req, res) => {
+  res.json({
+    open: settingsService.getBool('registration_open', true),
+    mailerConfigured: mailer.isMailerConfigured(),
+    adminEmail: process.env.ADMIN_EMAIL || null,
+  })
+})
+
+app.put('/api/admin/settings/registration', requireAuth, requireAdmin, (req, res) => {
+  const open = !!req.body?.open
+  settingsService.setBool('registration_open', open)
+  logger.info(`Inscriptions ${open ? 'ouvertes' : 'fermees'} par admin ${req.user!.username}`)
+  res.json({ open })
+})
+
+// Endpoint public : indique au front si les inscriptions sont ouvertes
+// (pour masquer le formulaire d'inscription si fermees, sauf premier user)
+app.get('/api/auth/registration-status', (_req, res) => {
+  const db = getDb()
+  const userCount = (db.prepare('SELECT COUNT(*) as cnt FROM users').get() as any).cnt
+  const open = userCount === 0 || settingsService.getBool('registration_open', true)
+  res.json({ open, bootstrap: userCount === 0 })
 })
 
 // Admin: list all projects

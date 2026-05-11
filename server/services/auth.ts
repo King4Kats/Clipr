@@ -53,6 +53,7 @@ export interface User {
   email: string
   role: 'user' | 'admin'
   created_at: string
+  status?: 'pending' | 'active' | 'rejected'
 }
 
 /**
@@ -73,44 +74,102 @@ export interface AuthPayload {
  * @returns L'objet utilisateur créé et un token JWT pour connexion immédiate
  * @throws Error si les données sont invalides ou si le nom/email existe déjà
  */
-export function register(username: string, email: string, password: string): { user: User; token: string } {
+/**
+ * Resultat d'une inscription :
+ *  - si premier utilisateur (admin auto) → status 'active' + token (connexion immediate)
+ *  - sinon → status 'pending' (token absent, admin doit valider d'abord)
+ */
+export interface RegisterResult {
+  user: User
+  token?: string
+  pending: boolean
+  approvalToken?: string
+}
+
+export function register(username: string, email: string, password: string): RegisterResult {
   const db = getDb()
 
   // --- Validation des données d'entrée ---
   if (!username || username.length < 2) throw new Error('Nom d\'utilisateur trop court (min 2 caractères)')
   if (!email || !email.includes('@')) throw new Error('Email invalide')
-  if (!password || password.length < 4) throw new Error('Mot de passe trop court (min 4 caractères)')
+  // Mot de passe renforce : min 8 caracteres
+  if (!password || password.length < 8) throw new Error('Mot de passe trop court (min 8 caractères)')
 
   // On vérifie que le nom d'utilisateur et l'email ne sont pas déjà pris
-  const existing = db.prepare('SELECT id FROM users WHERE username = ? OR email = ?').get(username, email) as any
+  const existing = db.prepare('SELECT id FROM users WHERE username = ? OR email = ?').get(username, email.toLowerCase()) as any
   if (existing) throw new Error('Nom d\'utilisateur ou email déjà utilisé')
 
   // Génération d'un identifiant unique pour le nouvel utilisateur
   const id = randomUUID()
 
-  // Hashage du mot de passe avec bcrypt (le "10" est le nombre de tours de salage,
-  // plus c'est élevé plus c'est sécurisé mais lent)
+  // Hashage du mot de passe avec bcrypt (le "10" est le nombre de tours de salage)
   const password_hash = bcrypt.hashSync(password, 10)
 
-  // Astuce : le tout premier utilisateur inscrit devient automatiquement admin.
-  // Cela évite de devoir configurer manuellement un compte admin au déploiement.
+  // Astuce : le tout premier utilisateur inscrit devient admin actif direct
+  // (sinon on ne peut pas amorcer l'instance — personne pour valider personne).
   const userCount = (db.prepare('SELECT COUNT(*) as cnt FROM users').get() as any).cnt
-  const role = userCount === 0 ? 'admin' : 'user'
+  const isFirst = userCount === 0
+  const role: 'user' | 'admin' = isFirst ? 'admin' : 'user'
+  const status: 'active' | 'pending' = isFirst ? 'active' : 'pending'
 
-  // Insertion du nouvel utilisateur en base de données.
-  // L'email est converti en minuscules pour éviter les doublons (Ex: "Foo@Bar.com" = "foo@bar.com")
+  // Token aleatoire (URL-safe) pour les liens d'approbation/rejet par email
+  const approvalToken = isFirst ? null : require('crypto').randomBytes(32).toString('hex')
+
   db.prepare(
-    'INSERT INTO users (id, username, email, password_hash, role) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, username, email.toLowerCase(), password_hash, role)
+    'INSERT INTO users (id, username, email, password_hash, role, status, approval_token) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, username, email.toLowerCase(), password_hash, role, status, approvalToken)
 
-  // Construction de l'objet User à retourner (sans le mot de passe hashé)
-  const user: User = { id, username, email: email.toLowerCase(), role: role as 'user' | 'admin', created_at: new Date().toISOString() }
+  const user: User = { id, username, email: email.toLowerCase(), role, created_at: new Date().toISOString(), status }
 
-  // Génération d'un token JWT pour que l'utilisateur soit connecté immédiatement après inscription
-  const token = generateToken(user)
+  if (isFirst) {
+    const token = generateToken(user)
+    logger.info(`User registered (first → admin actif): ${username}`)
+    return { user, token, pending: false }
+  }
 
-  logger.info(`User registered: ${username} (${role})`)
-  return { user, token }
+  logger.info(`User registered (pending): ${username}`)
+  return { user, pending: true, approvalToken: approvalToken! }
+}
+
+/** Liste des inscriptions en attente de validation. */
+export function listPendingUsers(): User[] {
+  const db = getDb()
+  return db.prepare(
+    "SELECT id, username, email, role, created_at, status FROM users WHERE status = 'pending' ORDER BY created_at"
+  ).all() as User[]
+}
+
+/**
+ * Approuve ou rejette un compte par son ID (action admin via dashboard).
+ * @param adminId identifiant de l'admin qui valide (trace)
+ */
+export function setUserStatus(userId: string, newStatus: 'active' | 'rejected', adminId: string): User {
+  const db = getDb()
+  const row = db.prepare('SELECT id, username, email, role, status FROM users WHERE id = ?').get(userId) as any
+  if (!row) throw new Error('Utilisateur introuvable')
+  if (row.status === newStatus) return row
+  db.prepare(
+    "UPDATE users SET status = ?, approved_at = datetime('now'), approved_by = ?, approval_token = NULL WHERE id = ?"
+  ).run(newStatus, adminId, userId)
+  logger.info(`User ${row.username} → ${newStatus} (par admin ${adminId})`)
+  return { ...row, status: newStatus }
+}
+
+/**
+ * Approuve/rejette via l'approval_token (lien dans l'email envoye a l'admin).
+ * Ne necessite pas d'auth car le token est lui-meme le secret.
+ */
+export function setUserStatusByToken(token: string, newStatus: 'active' | 'rejected'): User {
+  const db = getDb()
+  const row = db.prepare(
+    'SELECT id, username, email, role, status FROM users WHERE approval_token = ?'
+  ).get(token) as any
+  if (!row) throw new Error('Lien invalide ou deja utilise')
+  db.prepare(
+    "UPDATE users SET status = ?, approved_at = datetime('now'), approved_by = 'email-link', approval_token = NULL WHERE id = ?"
+  ).run(newStatus, row.id)
+  logger.info(`User ${row.username} → ${newStatus} (via lien email)`)
+  return { ...row, status: newStatus }
 }
 
 /**
@@ -129,18 +188,21 @@ export function login(login: string, password: string): { user: User; token: str
 
   // Recherche de l'utilisateur par nom d'utilisateur ou par email
   const row = db.prepare(
-    'SELECT id, username, email, password_hash, role, created_at FROM users WHERE username = ? OR email = ?'
+    'SELECT id, username, email, password_hash, role, created_at, status FROM users WHERE username = ? OR email = ?'
   ).get(login, login.toLowerCase()) as any
 
   // Si aucun utilisateur trouvé, on lance une erreur
   if (!row) throw new Error('Identifiants incorrects')
 
   // On compare le mot de passe fourni avec le hash stocké en base.
-  // bcrypt.compareSync gère le salage automatiquement.
   if (!bcrypt.compareSync(password, row.password_hash)) throw new Error('Identifiants incorrects')
 
+  // Refus si compte non valide par l'admin
+  if (row.status === 'pending') throw new Error('Compte en attente de validation par l\'administrateur')
+  if (row.status === 'rejected') throw new Error('Inscription refusee')
+
   // Construction de l'objet User (sans le password_hash) et génération du token
-  const user: User = { id: row.id, username: row.username, email: row.email, role: row.role, created_at: row.created_at }
+  const user: User = { id: row.id, username: row.username, email: row.email, role: row.role, created_at: row.created_at, status: row.status }
   const token = generateToken(user)
 
   return { user, token }

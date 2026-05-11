@@ -347,4 +347,29 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_modern_point ON modern_attestations(point_alf_id);
     CREATE INDEX IF NOT EXISTS idx_modern_carte ON modern_attestations(carte_alf_id);
   `)
+
+  // ── Table settings : configuration clé/valeur (persistante en DB) ──
+  // Sert pour le flag d'ouverture des inscriptions et autres paramètres admin.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `)
+  // Valeur par défaut : inscriptions ouvertes (admin pourra fermer via UI)
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('registration_open', '1')").run()
+
+  // ── Migration : colonnes de validation des comptes par l'admin ──
+  // status = pending | active | rejected ; approval_token = secret signé pour les liens email
+  const userCols = db.prepare("PRAGMA table_info('users')").all() as { name: string }[]
+  const hasCol = (n: string) => userCols.some(c => c.name === n)
+  if (!hasCol('status')) {
+    // Les comptes existants sont marqués 'active' (rétrocompatibilité)
+    db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+    logger.info('Migration: added status column to users')
+  }
+  if (!hasCol('approval_token')) db.exec('ALTER TABLE users ADD COLUMN approval_token TEXT')
+  if (!hasCol('approved_at')) db.exec('ALTER TABLE users ADD COLUMN approved_at TEXT')
+  if (!hasCol('approved_by')) db.exec('ALTER TABLE users ADD COLUMN approved_by TEXT')
 }

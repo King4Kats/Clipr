@@ -23,7 +23,7 @@ import { motion } from 'framer-motion'
 // Icônes SVG utilisées dans l'interface (chaque icône correspond à un élément visuel)
 import {
   Users, FolderKanban, HardDrive, Activity, RefreshCw,
-  CheckCircle, XCircle, Lock, ScrollText, ArrowLeft, Cpu, Trash2, ExternalLink
+  CheckCircle, XCircle, Lock, ScrollText, ArrowLeft, Cpu, Trash2, ExternalLink, UserCheck
 } from 'lucide-react'
 // Composant bouton réutilisable du design system de l'application
 import { Button } from '@/components/ui/button'
@@ -70,13 +70,15 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
   // Récupération du token JWT pour authentifier les requêtes API admin
   const { token } = useAuthStore()
 
-  // Onglet actif : vue d'ensemble, projets, utilisateurs ou logs
-  const [tab, setTab] = useState<'overview' | 'projects' | 'users' | 'logs'>('overview')
+  // Onglet actif : vue d'ensemble, projets, utilisateurs, inscriptions en attente, logs
+  const [tab, setTab] = useState<'overview' | 'projects' | 'users' | 'pending' | 'logs'>('overview')
 
   // Données récupérées depuis le backend
   const [system, setSystem] = useState<SystemHealth | null>(null) // Santé du système
   const [projects, setProjects] = useState<any[]>([])              // Liste de tous les projets
   const [users, setUsers] = useState<any[]>([])                    // Liste de tous les utilisateurs
+  const [pendingUsers, setPendingUsers] = useState<any[]>([])      // Inscriptions en attente de validation
+  const [regSettings, setRegSettings] = useState<{ open: boolean; mailerConfigured: boolean; adminEmail: string | null } | null>(null)
   const [logs, setLogs] = useState<string[]>([])                   // Lignes de log du serveur
   const [logTotal, setLogTotal] = useState(0)                      // Nombre total de lignes de log
   const [loading, setLoading] = useState(false)                    // Indicateur de chargement global
@@ -116,6 +118,43 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
     } catch {}
   }, [token])
 
+  /** Liste des inscriptions en attente de validation. */
+  const fetchPending = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/users/pending', { headers })
+      if (res.ok) setPendingUsers(await res.json())
+    } catch {}
+  }, [token])
+
+  /** Etat actuel des inscriptions (ouvertes/fermees + config mailer). */
+  const fetchRegSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/settings/registration', { headers })
+      if (res.ok) setRegSettings(await res.json())
+    } catch {}
+  }, [token])
+
+  /** Approuve ou rejette une inscription en attente. */
+  const decideUser = async (id: string, action: 'approve' | 'reject') => {
+    try {
+      const res = await fetch(`/api/admin/users/${id}/${action}`, { method: 'POST', headers })
+      if (res.ok) { await fetchPending(); await fetchUsers() }
+    } catch {}
+  }
+
+  /** Bascule le flag d'ouverture des inscriptions. */
+  const toggleRegistration = async () => {
+    if (!regSettings) return
+    try {
+      const res = await fetch('/api/admin/settings/registration', {
+        method: 'PUT',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ open: !regSettings.open }),
+      })
+      if (res.ok) await fetchRegSettings()
+    } catch {}
+  }
+
   /**
    * Récupère les 200 dernières lignes de logs du serveur.
    * Le backend renvoie aussi le nombre total de lignes disponibles.
@@ -137,7 +176,7 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
    */
   const refreshAll = async () => {
     setLoading(true)
-    await Promise.all([fetchSystem(), fetchProjects(), fetchUsers(), fetchLogs()])
+    await Promise.all([fetchSystem(), fetchProjects(), fetchUsers(), fetchPending(), fetchRegSettings(), fetchLogs()])
     setLoading(false)
   }
 
@@ -190,6 +229,7 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
           { id: 'overview' as const, label: 'Vue d\'ensemble', icon: Activity },
           { id: 'projects' as const, label: 'Projets', icon: FolderKanban },
           { id: 'users' as const, label: 'Utilisateurs', icon: Users },
+          { id: 'pending' as const, label: `Inscriptions${pendingUsers.length ? ` (${pendingUsers.length})` : ''}`, icon: UserCheck },
           { id: 'logs' as const, label: 'Logs', icon: ScrollText },
         ].map(t => (
           <button
@@ -326,6 +366,64 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ===== ONGLET : INSCRIPTIONS EN ATTENTE ===== */}
+      {tab === 'pending' && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+          {/* Bandeau de controle : toggle ouverture des inscriptions + etat mailer */}
+          <div className="bg-card border border-border rounded-xl p-4 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold text-foreground">
+                Inscriptions {regSettings?.open ? 'ouvertes' : 'fermees'}
+              </div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">
+                {regSettings?.mailerConfigured
+                  ? <>Notifications envoyees a <span className="font-mono">{regSettings.adminEmail || '?'}</span></>
+                  : <span className="text-amber-500">SMTP non configure — pas d'emails, validation manuelle uniquement</span>}
+              </div>
+            </div>
+            <Button variant={regSettings?.open ? 'secondary' : 'default'} size="sm" onClick={toggleRegistration} className="h-8 text-xs">
+              {regSettings?.open ? 'Fermer les inscriptions' : 'Ouvrir les inscriptions'}
+            </Button>
+          </div>
+
+          {/* Liste des comptes en attente */}
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-secondary/30">
+                  <th className="text-left p-3 font-semibold text-muted-foreground">Utilisateur</th>
+                  <th className="text-left p-3 font-semibold text-muted-foreground">Email</th>
+                  <th className="text-left p-3 font-semibold text-muted-foreground">Demande le</th>
+                  <th className="text-right p-3 font-semibold text-muted-foreground">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingUsers.map((u: any) => (
+                  <tr key={u.id} className="border-b border-border/50 hover:bg-secondary/20">
+                    <td className="p-3 font-medium text-foreground">{u.username}</td>
+                    <td className="p-3 text-muted-foreground">{u.email}</td>
+                    <td className="p-3 text-muted-foreground">
+                      {new Date(u.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td className="p-3 text-right">
+                      <Button variant="default" size="sm" onClick={() => decideUser(u.id, 'approve')} className="h-7 text-[11px] gap-1 mr-1.5">
+                        <CheckCircle className="w-3 h-3" /> Approuver
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={() => decideUser(u.id, 'reject')} className="h-7 text-[11px] gap-1">
+                        <XCircle className="w-3 h-3" /> Rejeter
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {pendingUsers.length === 0 && (
+                  <tr><td colSpan={4} className="p-6 text-center text-muted-foreground">Aucune inscription en attente</td></tr>
+                )}
               </tbody>
             </table>
           </div>

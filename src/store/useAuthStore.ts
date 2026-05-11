@@ -42,7 +42,8 @@ interface AuthState {
 
   // ── Actions ──
   login: (login: string, password: string) => Promise<boolean>       // Se connecter
-  register: (username: string, email: string, password: string) => Promise<boolean>  // S'inscrire
+  // S'inscrire : retourne { ok, pending } — si pending, le compte attend la validation admin
+  register: (username: string, email: string, password: string) => Promise<{ ok: boolean; pending: boolean; message?: string }>
   logout: () => void                    // Se déconnecter
   checkAuth: () => Promise<void>        // Vérifier si le token stocké est encore valide
   clearError: () => void                // Effacer le message d'erreur
@@ -105,13 +106,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Erreur d\'inscription')
 
-      // Connecter automatiquement après l'inscription
+      // Cas 1 : compte en attente de validation admin → pas de connexion auto
+      if (data.pending) {
+        return { ok: true, pending: true, message: data.message }
+      }
+
+      // Cas 2 : premier utilisateur (admin auto) → connexion immediate
       localStorage.setItem(STORAGE_KEY, data.token)
       set({ user: data.user, token: data.token, isAuthenticated: true, error: null })
-      return true
+      return { ok: true, pending: false }
     } catch (e: any) {
       set({ error: e.message })
-      return false
+      return { ok: false, pending: false }
     }
   },
 
