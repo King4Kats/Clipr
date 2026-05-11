@@ -36,6 +36,7 @@ import * as projectService from './services/project-history.js'
 import * as authService from './services/auth.js'
 import * as settingsService from './services/settings.js'
 import * as mailer from './services/mailer.js'
+import { extractText, createTextTranscription } from './services/text-import.js'
 import * as aiLockService from './services/ai-lock.js'
 import * as sharingService from './services/sharing.js'
 import * as taskQueueService from './services/task-queue.js'
@@ -264,6 +265,19 @@ const chunkStorage = multer.diskStorage({
   filename: (_req, _file, cb) => cb(null, `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`)
 })
 const chunkUpload = multer({ storage: chunkStorage, limits: { fileSize: 100 * 1024 * 1024 } })
+
+// Upload texte (txt/docx/pdf) en memoire — pas besoin de persister sur disque,
+// on extrait directement puis on jette le buffer.
+const ALLOWED_TEXT_EXTS = ['.txt', '.docx', '.pdf']
+const textUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB suffisant pour des textes
+  fileFilter: (_req, file, cb) => {
+    const ext = extname(file.originalname).toLowerCase()
+    if (ALLOWED_TEXT_EXTS.includes(ext)) cb(null, true)
+    else cb(new Error('Format non supporte. Accepte : .txt, .docx, .pdf'))
+  },
+})
 
 async function assembleChunks(chunkDir: string, outputPath: string, totalChunks: number): Promise<void> {
   const ws = createWriteStream(outputPath)
@@ -1097,6 +1111,29 @@ app.post('/api/transcription/start/batch', requireAuth, (req, res) => {
 
   res.json({ success: true, batchId, tasks, projectId })
 })
+/**
+ * Import d'un fichier texte (.txt/.docx/.pdf) → transcription synthetique
+ * decoupee par paragraphe. Reutilise tout le flow d'analyse semantique existant.
+ */
+app.post('/api/text/import', requireAuth, textUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Fichier manquant' })
+    const text = await extractText(req.file.buffer, req.file.originalname)
+    if (!text || text.trim().length < 10) {
+      return res.status(400).json({ error: 'Texte trop court ou extraction echouee' })
+    }
+    const result = createTextTranscription({
+      userId: req.user!.userId,
+      filename: req.file.originalname,
+      text,
+    })
+    res.json({ success: true, ...result })
+  } catch (err: any) {
+    logger.error(`[TextImport] ${err.message}`)
+    res.status(400).json({ error: err.message })
+  }
+})
+
 app.get('/api/transcription/history', requireAuth, (req, res) => {
   res.json(getTranscriptionHistory(req.user!.userId))
 })

@@ -95,6 +95,11 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Import de fichier texte (.txt/.docx/.pdf) → transcription synthetique + analyse
+  const textInputRef = useRef<HTMLInputElement>(null)
+  const [textImporting, setTextImporting] = useState(false)
+  const [textImportError, setTextImportError] = useState<string | null>(null)
+
   // Batch state
   const [batchItems, setBatchItems] = useState<BatchItem[]>([])
   const [batchMode, setBatchMode] = useState(false)
@@ -380,6 +385,39 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
     if (files.length > 0) handleFilesSelect(files)
   }, [handleFilesSelect])
 
+  /**
+   * Importe un fichier texte (.txt/.docx/.pdf) : extrait le texte cote serveur,
+   * cree une transcription synthetique (decoupee par paragraphes) puis l'affiche
+   * comme une transcription normale → analyse semantique disponible.
+   */
+  const handleTextImport = useCallback(async (selected: File) => {
+    setTextImportError(null)
+    setTextImporting(true)
+    try {
+      const form = new FormData()
+      form.append('file', selected)
+      const token = localStorage.getItem('clipr-auth-token')
+      const res = await fetch('/api/text/import', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Echec import')
+
+      // Bascule directement sur la transcription importee (comme apres un Whisper)
+      const transcription = await api.getTranscription(data.transcriptionId)
+      setTranscriptionId(data.transcriptionId)
+      setSegments(transcription.segments || [])
+      setStatus('done')
+      setShowSemanticAnalysis(true) // ouvre direct l'analyse, c'est le but
+    } catch (e: any) {
+      setTextImportError(e.message || 'Echec import')
+    } finally {
+      setTextImporting(false)
+    }
+  }, [])
+
   // Start transcription
   const handleStart = async () => {
     if (!uploadedFile) return
@@ -555,15 +593,15 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
               </div>
               {item.status === 'done' && item.transcriptionId && (
                 <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                  <a href={api.getTranscriptionExportUrl(item.transcriptionId, 'txt')} download onClick={(e) => e.stopPropagation()}>
-                    <button className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
-                      <Download className="w-3 h-3" /> .txt
-                    </button>
+                  {/* Lien direct stylise comme un bouton. Un vrai <button> imbrique dans
+                      <a> intercepte le clic et empeche le download — d'ou le <span>. */}
+                  <a href={api.getTranscriptionExportUrl(item.transcriptionId, 'txt')} download onClick={(e) => e.stopPropagation()}
+                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
+                    <Download className="w-3 h-3" /> .txt
                   </a>
-                  <a href={api.getTranscriptionExportUrl(item.transcriptionId, 'srt')} download onClick={(e) => e.stopPropagation()}>
-                    <button className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
-                      <Download className="w-3 h-3" /> .srt
-                    </button>
+                  <a href={api.getTranscriptionExportUrl(item.transcriptionId, 'srt')} download onClick={(e) => e.stopPropagation()}
+                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
+                    <Download className="w-3 h-3" /> .srt
                   </a>
                 </div>
               )}
@@ -610,15 +648,13 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
           </div>
           {selectedItem.transcriptionId && !selectedItemLoading && (
             <div className="flex items-center gap-2 shrink-0">
-              <a href={api.getTranscriptionExportUrl(selectedItem.transcriptionId, 'txt')} download>
-                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
-                  <Download className="w-3.5 h-3.5" /> .txt
-                </button>
+              <a href={api.getTranscriptionExportUrl(selectedItem.transcriptionId, 'txt')} download
+                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
+                <Download className="w-3.5 h-3.5" /> .txt
               </a>
-              <a href={api.getTranscriptionExportUrl(selectedItem.transcriptionId, 'srt')} download>
-                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
-                  <Download className="w-3.5 h-3.5" /> .srt
-                </button>
+              <a href={api.getTranscriptionExportUrl(selectedItem.transcriptionId, 'srt')} download
+                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors">
+                <Download className="w-3.5 h-3.5" /> .srt
               </a>
               <button
                 onClick={() => setShowSemanticAnalysis(true)}
@@ -754,6 +790,36 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
                 </div>
               )}
             </motion.div>
+          )}
+
+          {/* ── Import de texte (.txt/.docx/.pdf) → analyse sans audio ── */}
+          {!uploadedFile && !batchMode && status !== 'done' && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center justify-center gap-3 -mt-3">
+              <span className="text-xs text-muted-foreground">ou</span>
+              <input
+                ref={textInputRef}
+                type="file"
+                accept=".txt,.docx,.pdf"
+                onChange={(e) => e.target.files?.[0] && handleTextImport(e.target.files[0])}
+                className="hidden"
+              />
+              <button
+                type="button"
+                disabled={textImporting}
+                onClick={() => textInputRef.current?.click()}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/70 text-xs font-medium text-foreground transition-colors disabled:opacity-50"
+              >
+                {textImporting
+                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Extraction...</>
+                  : <><Upload className="w-3.5 h-3.5" /> Importer un texte (.txt / .docx / .pdf)</>}
+              </button>
+            </motion.div>
+          )}
+          {textImportError && (
+            <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-xs text-destructive">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {textImportError}
+            </div>
           )}
 
           {/* Batch file list */}
@@ -943,12 +1009,14 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
                   </Button>
                   {transcriptionId && (
                     <>
-                      <a href={api.getTranscriptionExportUrl(transcriptionId, 'txt')} download>
-                        <Button variant="ghost" size="sm" className="text-xs gap-1.5"><Download className="w-3.5 h-3.5" /> .txt</Button>
-                      </a>
-                      <a href={api.getTranscriptionExportUrl(transcriptionId, 'srt')} download>
-                        <Button variant="ghost" size="sm" className="text-xs gap-1.5"><Download className="w-3.5 h-3.5" /> .srt</Button>
-                      </a>
+                      {/* asChild : le Button rend l'anchor en lui appliquant ses styles
+                          (Radix Slot), evite le <button> imbrique qui intercepte le clic. */}
+                      <Button asChild variant="ghost" size="sm" className="text-xs gap-1.5">
+                        <a href={api.getTranscriptionExportUrl(transcriptionId, 'txt')} download><Download className="w-3.5 h-3.5" /> .txt</a>
+                      </Button>
+                      <Button asChild variant="ghost" size="sm" className="text-xs gap-1.5">
+                        <a href={api.getTranscriptionExportUrl(transcriptionId, 'srt')} download><Download className="w-3.5 h-3.5" /> .srt</a>
+                      </Button>
                     </>
                   )}
                   <Button variant="outline" size="sm" onClick={() => setShowSemanticAnalysis(true)} className="text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/10">
@@ -1339,12 +1407,12 @@ function TranscriptionResult({
                   </Button>
                   {transcriptionId && (
                     <>
-                      <a href={api.getTranscriptionExportUrl(transcriptionId, 'txt')} download>
-                        <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1 px-2"><Download className="w-3 h-3" /> .txt</Button>
-                      </a>
-                      <a href={api.getTranscriptionExportUrl(transcriptionId, 'srt')} download>
-                        <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1 px-2"><Download className="w-3 h-3" /> .srt</Button>
-                      </a>
+                      <Button asChild variant="ghost" size="sm" className="h-6 text-[10px] gap-1 px-2">
+                        <a href={api.getTranscriptionExportUrl(transcriptionId, 'txt')} download><Download className="w-3 h-3" /> .txt</a>
+                      </Button>
+                      <Button asChild variant="ghost" size="sm" className="h-6 text-[10px] gap-1 px-2">
+                        <a href={api.getTranscriptionExportUrl(transcriptionId, 'srt')} download><Download className="w-3 h-3" /> .srt</a>
+                      </Button>
                     </>
                   )}
                   <Button variant="ghost" size="sm" onClick={handleExportPDF} disabled={exportingPdf} className="h-6 text-[10px] gap-1 px-2 text-primary">
