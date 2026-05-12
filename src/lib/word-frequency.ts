@@ -140,8 +140,16 @@ function tokenize(text: string): string[] {
     .filter(w => w.length >= 3)
 }
 
-export function computeWordFrequencies(segments: TranscriptSegment[], options?: { minFreq?: number }): WordFrequency[] {
+export function computeWordFrequencies(
+  segments: TranscriptSegment[],
+  options?: { minFreq?: number; forcedWords?: Set<string> }
+): WordFrequency[] {
   const minFreq = options?.minFreq ?? 1
+  // Mots forces : bypass le filtre stopwords (cles normalisees pour matcher la cle interne)
+  const forcedKeys = new Set<string>()
+  if (options?.forcedWords) {
+    options.forcedWords.forEach(w => forcedKeys.add(normalizeWord(w)))
+  }
   // Map : cle normalisee → { displayWord, total, speakers }
   const wordMap = new Map<string, { displayWord: string; displayCount: Map<string, number>; total: number; speakers: Record<string, number> }>()
 
@@ -151,8 +159,8 @@ export function computeWordFrequencies(segments: TranscriptSegment[], options?: 
 
     for (const word of words) {
       const key = normalizeWord(word)
-      // Filtrer les stop words sur la cle normalisee
-      if (FRENCH_STOP_WORDS.has(key) || FRENCH_STOP_WORDS.has(word)) continue
+      // Filtrer les stop words sur la cle normalisee, sauf si le mot est force
+      if (!forcedKeys.has(key) && (FRENCH_STOP_WORDS.has(key) || FRENCH_STOP_WORDS.has(word))) continue
 
       const entry = wordMap.get(key)
       if (entry) {

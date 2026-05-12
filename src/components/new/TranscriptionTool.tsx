@@ -26,7 +26,7 @@ import { motion, AnimatePresence } from "framer-motion"  // Animations fluides
 import {
   Mic, ArrowLeft, Upload, Loader2, Copy, Download, Trash2,
   CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files, Pencil, X, Check, Brain,
-  RotateCcw, Cloud, Search, ChevronDown, Trash
+  RotateCcw, Cloud, Search, ChevronDown, Trash, Settings
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -144,6 +144,20 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         }
       }).catch(() => {})
     }
+  }, [initialProject?.id])
+
+  // Persister mots exclus / forces dans le projet (controles depuis TranscriptionResult)
+  const persistExcludedWords = useCallback((next: string[]) => {
+    if (!initialProject?.id) return
+    api.loadProjectById(initialProject.id).then((project: any) => {
+      if (project?.data) api.saveProject({ id: initialProject.id, ...project.data, excludedWords: next }).catch(() => {})
+    }).catch(() => {})
+  }, [initialProject?.id])
+  const persistForcedWords = useCallback((next: string[]) => {
+    if (!initialProject?.id) return
+    api.loadProjectById(initialProject.id).then((project: any) => {
+      if (project?.data) api.saveProject({ id: initialProject.id, ...project.data, forcedWords: next }).catch(() => {})
+    }).catch(() => {})
   }, [initialProject?.id])
   // Recherche dans le transcript de la vue post-transcribe simple
   const [postSearch, setPostSearch] = useState('')
@@ -645,6 +659,10 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         savedSemanticResult={initialProject?.data?.semanticAnalysis}
         wordColors={wordColors}
         onWordColorsChange={persistWordColors}
+        initialExcluded={initialProject?.data?.excludedWords}
+        initialForced={initialProject?.data?.forcedWords}
+        onExcludedWordsChange={persistExcludedWords}
+        onForcedWordsChange={persistForcedWords}
       />
     )
   }
@@ -744,6 +762,10 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         ollamaModel="qwen2.5:14b"
         wordColors={wordColors}
         onWordColorsChange={persistWordColors}
+        initialExcluded={initialProject?.data?.excludedWords}
+        initialForced={initialProject?.data?.forcedWords}
+        onExcludedWordsChange={persistExcludedWords}
+        onForcedWordsChange={persistForcedWords}
       />
     )
   }
@@ -1245,6 +1267,10 @@ function TranscriptionResult({
   savedSemanticResult,
   wordColors,
   onWordColorsChange,
+  initialExcluded,
+  initialForced,
+  onExcludedWordsChange,
+  onForcedWordsChange,
 }: {
   segments: TranscriptSegment[]
   transcriptionId: string | null
@@ -1256,10 +1282,16 @@ function TranscriptionResult({
   ollamaModel: string
   projectId?: string
   savedSemanticResult?: any
-  /** Map mot → couleur custom (controlee + persistee par le parent) */
   wordColors?: Record<string, string>
-  /** Callback complet quand la map est modifiee (pour persister au save projet) */
   onWordColorsChange?: (next: Record<string, string>) => void
+  /** Mots exclus charges depuis le projet (initial state) */
+  initialExcluded?: string[]
+  /** Mots forces charges depuis le projet (initial state) */
+  initialForced?: string[]
+  /** Callback de persistence pour les mots exclus */
+  onExcludedWordsChange?: (next: string[]) => void
+  /** Callback de persistence pour les mots forces */
+  onForcedWordsChange?: (next: string[]) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -1274,8 +1306,20 @@ function TranscriptionResult({
     return DEFAULT_RESULT_LAYOUT
   })
 
-  // Mots exclus par l'utilisateur (retires du tableau et du nuage)
-  const [excludedWords, setExcludedWords] = useState<Set<string>>(new Set())
+  // Mots exclus par l'utilisateur (retires du tableau et du nuage), persistes dans le projet
+  const [excludedWords, setExcludedWords] = useState<Set<string>>(() => new Set<string>(initialExcluded || []))
+  // Mots forces : bypass des stopwords (mot normalement filtre mais voulu dans le nuage)
+  const [forcedWords, setForcedWords] = useState<Set<string>>(() => new Set<string>(initialForced || []))
+
+  // Wrappers : update local + notifier le parent (qui sauvegarde dans le projet)
+  const updateExcluded = useCallback((next: Set<string>) => {
+    setExcludedWords(next)
+    onExcludedWordsChange?.(Array.from(next))
+  }, [onExcludedWordsChange])
+  const updateForced = useCallback((next: Set<string>) => {
+    setForcedWords(next)
+    onForcedWordsChange?.(Array.from(next))
+  }, [onForcedWordsChange])
 
   // Handler color picker : update la map et propage au parent
   const handleWordColorChange = useCallback((word: string, color: string | null) => {
@@ -1298,8 +1342,11 @@ function TranscriptionResult({
   const wordCloudSvgRef = useRef<SVGElement | null>(null)
 
   // Donnees calculees pour le nuage et le tableau (instantane, cote client)
-  // Filtre les mots exclus par l'utilisateur
-  const allFrequencies = useMemo(() => computeWordFrequencies(segments), [segments])
+  // Le calcul accepte les mots forces (bypass des stopwords) et exclut ensuite les mots blacklistes
+  const allFrequencies = useMemo(
+    () => computeWordFrequencies(segments, { forcedWords }),
+    [segments, forcedWords]
+  )
   const frequencies = useMemo(() => allFrequencies.filter(f => !excludedWords.has(f.word)), [allFrequencies, excludedWords])
   const speakers = useMemo(() => getSpeakers(segments), [segments])
   const cloudData = useMemo(() => getWordCloudData(frequencies), [frequencies])
@@ -1346,16 +1393,32 @@ function TranscriptionResult({
     }
   }, [highlightedWord, highlightIndex, highlightOccurrences, segments])
 
-  // Exclure un mot du tableau et du nuage
+  // Exclure un mot du tableau et du nuage (et persister)
   const excludeWord = useCallback((word: string) => {
-    setExcludedWords(prev => new Set([...prev, word]))
+    const next = new Set(excludedWords); next.add(word)
+    updateExcluded(next)
     if (highlightedWord === word) setHighlightedWord(null)
-  }, [highlightedWord])
+  }, [excludedWords, updateExcluded, highlightedWord])
 
-  // Ajouter un mot exclu de nouveau (le remettre)
+  // Re-inclure un mot precedemment exclu
   const includeWord = useCallback((word: string) => {
-    setExcludedWords(prev => { const next = new Set(prev); next.delete(word); return next })
-  }, [])
+    const next = new Set(excludedWords); next.delete(word)
+    updateExcluded(next)
+  }, [excludedWords, updateExcluded])
+
+  // Forcer l'inclusion d'un mot normalement filtre par les stopwords
+  const forceWord = useCallback((word: string) => {
+    const trimmed = word.trim().toLowerCase()
+    if (!trimmed) return
+    const next = new Set(forcedWords); next.add(trimmed)
+    updateForced(next)
+  }, [forcedWords, updateForced])
+
+  // Retirer un mot force (revient au filtre stopwords standard)
+  const unforceWord = useCallback((word: string) => {
+    const next = new Set(forcedWords); next.delete(word)
+    updateForced(next)
+  }, [forcedWords, updateForced])
 
   // Analyse IA — utilise les resultats sauvegardes si disponibles, sinon lance Ollama
   const [semanticResult, setSemanticResult] = useState<any>(savedSemanticResult || null)
@@ -1562,6 +1625,12 @@ function TranscriptionResult({
                   svgRef={wordCloudSvgRef}
                   wordColors={wordColors}
                   onWordColorChange={handleWordColorChange}
+                  excludedWords={excludedWords}
+                  forcedWords={forcedWords}
+                  onWordExclude={excludeWord}
+                  onWordInclude={includeWord}
+                  onWordForce={forceWord}
+                  onWordUnforce={unforceWord}
                 />
               </div>
             </div>
@@ -1626,21 +1695,32 @@ const SPEAKER_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '
 // Palette du color picker des mots du nuage
 const WORD_PALETTE = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#a855f7', '#ec4899']
 
-function WordCloudPanel({ data, frequencies, speakers, onWordClick, svgRef, wordColors, onWordColorChange }: {
+function WordCloudPanel({
+  data, frequencies, speakers, onWordClick, svgRef,
+  wordColors, onWordColorChange,
+  excludedWords, forcedWords,
+  onWordExclude, onWordInclude, onWordForce, onWordUnforce,
+}: {
   data: { text: string; value: number }[]
   frequencies: WordFreqType[]
   speakers: string[]
   onWordClick?: (word: string) => void
   svgRef?: React.MutableRefObject<SVGElement | null>
-  /** Couleurs custom mot → couleur (passees par le parent, persistees) */
   wordColors?: Record<string, string>
-  /** Callback quand l'utilisateur change la couleur d'un mot (null = reset) */
   onWordColorChange?: (word: string, color: string | null) => void
+  excludedWords?: Set<string>
+  forcedWords?: Set<string>
+  onWordExclude?: (word: string) => void
+  onWordInclude?: (word: string) => void
+  onWordForce?: (word: string) => void
+  onWordUnforce?: (word: string) => void
 }) {
   const [words, setWords] = useState<any[]>([])
   const [hoveredWord, setHoveredWord] = useState<string | null>(null)
-  // Mot dont la palette est ouverte (clic droit sur un mot)
   const [pickerWord, setPickerWord] = useState<string | null>(null)
+  // Affichage du mini panneau de gestion des mots (exclus / forces)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [forceInput, setForceInput] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 500, h: 300 })
 
@@ -1735,8 +1815,15 @@ function WordCloudPanel({ data, frequencies, speakers, onWordClick, svgRef, word
           className="absolute left-1/2 -translate-x-1/2 bottom-2 z-30 bg-card border border-border rounded-lg p-2 shadow-xl"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="text-[10px] text-muted-foreground mb-1.5 px-1">
-            Couleur de <span className="font-bold text-foreground">« {pickerWord} »</span>
+          <div className="text-[10px] text-muted-foreground mb-1.5 px-1 flex items-center justify-between gap-3">
+            <span>Couleur de <span className="font-bold text-foreground">« {pickerWord} »</span></span>
+            {onWordExclude && (
+              <button
+                onClick={() => { onWordExclude(pickerWord); setPickerWord(null) }}
+                className="text-[10px] text-destructive hover:underline font-semibold"
+                title="Retirer ce mot du nuage et du tableau"
+              >Exclure</button>
+            )}
           </div>
           <div className="flex items-center gap-1">
             {WORD_PALETTE.map(c => (
@@ -1752,6 +1839,75 @@ function WordCloudPanel({ data, frequencies, speakers, onWordClick, svgRef, word
               className="w-5 h-5 rounded-full border border-border bg-secondary text-[9px] font-bold text-muted-foreground hover:text-foreground"
               title="Reset"
             >✕</button>
+          </div>
+        </div>
+      )}
+
+      {/* Bouton settings (en haut a droite) — ouvre le panneau de gestion des mots */}
+      {(onWordExclude || onWordForce) && (
+        <button
+          onClick={() => setSettingsOpen(s => !s)}
+          className="absolute top-1 right-1 z-20 p-1 rounded-md bg-secondary/60 hover:bg-secondary text-muted-foreground hover:text-foreground"
+          title="Gerer les mots du nuage"
+        >
+          <Settings className="w-3 h-3" />
+        </button>
+      )}
+
+      {/* Mini panneau : mots exclus + mots ajoutes (forces) */}
+      {settingsOpen && (
+        <div className="absolute top-8 right-1 z-30 w-72 bg-card border border-border rounded-lg shadow-xl p-3 space-y-3 text-[11px]">
+          {/* Ajout d'un mot force */}
+          <div>
+            <div className="font-semibold text-foreground mb-1.5">Ajouter un mot</div>
+            <div className="text-[10px] text-muted-foreground mb-1.5">
+              Mot normalement filtre (stopword) que tu veux quand meme dans le nuage.
+            </div>
+            <form
+              onSubmit={(e) => { e.preventDefault(); if (forceInput.trim()) { onWordForce?.(forceInput); setForceInput('') } }}
+              className="flex gap-1"
+            >
+              <input
+                value={forceInput}
+                onChange={e => setForceInput(e.target.value)}
+                placeholder="ex: oui"
+                className="flex-1 px-2 py-1 bg-secondary/50 border border-border rounded text-[11px] outline-none focus:ring-1 focus:ring-primary/50"
+              />
+              <button type="submit" className="px-2 py-1 rounded bg-primary text-primary-foreground text-[10px] font-semibold hover:bg-primary/90">
+                Ajouter
+              </button>
+            </form>
+            {forcedWords && forcedWords.size > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {Array.from(forcedWords).map(w => (
+                  <span key={w} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-mono">
+                    {w}
+                    <button onClick={() => onWordUnforce?.(w)} className="hover:text-emerald-200" title="Retirer">
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Liste des mots exclus */}
+          <div className="pt-2 border-t border-border">
+            <div className="font-semibold text-foreground mb-1.5">Mots exclus ({excludedWords?.size || 0})</div>
+            {!excludedWords || excludedWords.size === 0 ? (
+              <div className="text-[10px] text-muted-foreground italic">Aucun. Clic droit sur un mot du nuage → Exclure.</div>
+            ) : (
+              <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+                {Array.from(excludedWords).map(w => (
+                  <span key={w} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-destructive/10 text-destructive text-[10px] font-mono">
+                    {w}
+                    <button onClick={() => onWordInclude?.(w)} className="hover:opacity-70" title="Remettre">
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
