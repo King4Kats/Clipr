@@ -599,8 +599,11 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
         try {
           const ollamaModel = config.ollamaModel || 'qwen2.5:14b'
           const rescueOllamaTexts = rescueTexts.map((r, i) => `${i+1}. "${r.text}"`).join('\n')
-          const rescuePrompt = `Tu analyses des phrases transcrites depuis un enregistrement audio de collectage linguistique rural. Un meneur dit des phrases en francais decrivant des objets, ustensiles, actions du quotidien ou de la vie paysanne.
-
+          // Contexte fourni par l'utilisateur (axes de focalisation) — aide Ollama a
+          // accepter du vocabulaire specifique a un domaine (peche, vigne, cuisine, etc.)
+          const focusContext: string = (config.focusContext || '').toString().trim()
+          const focusHint = focusContext ? `\n\nCONTEXTE FOURNI PAR L'UTILISATEUR (a prendre en compte pour reconnaitre le vocabulaire specifique) : ${focusContext}\n` : ''
+          const rescuePrompt = `Tu analyses des phrases transcrites depuis un enregistrement audio de collectage linguistique rural. Un meneur dit des phrases en francais decrivant des objets, ustensiles, actions du quotidien ou de la vie paysanne.${focusHint}
 IMPORTANT : le vocabulaire peut etre ancien, regional ou rare (ex: "clissee", "mazarine", "terrine", "ecumoire", "grilloir"). Accepte les phrases meme si certains mots sont inhabituels, tant que la structure est du francais.
 
 Reponds "FR" si la phrase a une structure grammaticale francaise (sujet + verbe + complement), meme avec des mots rares.
@@ -809,8 +812,9 @@ Pour chaque numero, reponds UNIQUEMENT "FR" ou "FAUX". Format strict :
         try {
           const ollamaModel = config.ollamaModel || 'qwen2.5:14b'
           const diarOllamaTexts = diarTexts.map((r, i) => `${i + 1}. "${r.text}"`).join('\n')
-          const diarPrompt = `Tu analyses des phrases transcrites depuis un enregistrement audio. Un meneur dit des phrases en francais standard decrivant des objets, ustensiles ou actions du quotidien.
-
+          const focusContextDiar: string = (config.focusContext || '').toString().trim()
+          const focusHintDiar = focusContextDiar ? `\nCONTEXTE FOURNI PAR L'UTILISATEUR : ${focusContextDiar}\n` : ''
+          const diarPrompt = `Tu analyses des phrases transcrites depuis un enregistrement audio. Un meneur dit des phrases en francais standard decrivant des objets, ustensiles ou actions du quotidien.${focusHintDiar}
 Pour chaque phrase, reponds "FR" si c'est du vrai francais coherent et comprehensible, ou "FAUX" si c'est du charabia, des mots inventes, ou des phrases sans sens clair.
 
 ${diarOllamaTexts}

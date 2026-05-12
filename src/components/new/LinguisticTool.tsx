@@ -60,6 +60,13 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
   // attestations historiques de l'Atlas Linguistique de la France au point
   // geographique correspondant a l'enregistrement.
   const [alfPoint, setAlfPoint] = useState<AlfPoint | null>(null)
+  // Axes de focalisation : contexte libre injecte dans les prompts Ollama
+  // pour adapter l'analyse (ex: "vocabulaire de peche en mer Vendee").
+  const [focusContext, setFocusContext] = useState('')
+  // Mode relance : modal pour saisir un nouveau contexte sur un projet existant
+  const [showRelaunch, setShowRelaunch] = useState(false)
+  const [relaunchContext, setRelaunchContext] = useState('')
+  const [relaunching, setRelaunching] = useState(false)
 
   // Processing
   const [status, setStatus] = useState<ToolStatus>('idle')
@@ -205,13 +212,11 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
     try {
       const result = await api.startLinguistic(uploadedFile.path, uploadedFile.name, {
         whisperModel, language,
-        // En mode 'single' (audio solo d'une personne), on force numSpeakers=1
-        // ce qui permet a la diarisation de ne pas chercher a separer les voix.
         numSpeakers: mode === 'single' ? 1 : numSpeakers,
         mode: mode || 'round-table',
-        // Point d'enquete ALF si l'utilisateur en a selectionne un
         alfPointId: alfPoint?.id ?? null,
-        alfPointInfo: alfPoint ? { num_alf: alfPoint.num_alf, commune: alfPoint.commune, dept: alfPoint.dept_code } : null
+        alfPointInfo: alfPoint ? { num_alf: alfPoint.num_alf, commune: alfPoint.commune, dept: alfPoint.dept_code } : null,
+        focusContext,
       })
       setTaskId(result.taskId)
       setQueuePosition(result.position)
@@ -473,6 +478,18 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
                     <option value="small">Small</option>
                   </select>
                 </div>
+                {/* Axes de focalisation : aide Ollama a accepter du vocabulaire specifique */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground">Axes de focalisation</label>
+                  <textarea
+                    value={focusContext}
+                    onChange={(e) => setFocusContext(e.target.value)}
+                    placeholder="Ex: vocabulaire de cuisine paysanne ; collectage en patois limousin ; termes de la peche cotiere..."
+                    rows={3}
+                    className="w-full mt-1 bg-secondary border border-border rounded-lg px-3 py-2 text-xs text-foreground resize-none placeholder:text-muted-foreground/40"
+                  />
+                  <p className="text-[9px] text-muted-foreground mt-1">Contexte libre — aide a reconnaitre le vocabulaire specifique. Optionnel.</p>
+                </div>
               </div>
 
               <Button onClick={handleStart} className="w-full h-10 bg-emerald-600 hover:bg-emerald-700 text-white font-bold uppercase tracking-wide rounded-lg text-xs">
@@ -550,6 +567,17 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
               )}
             </div>
             <div className="flex gap-2">
+              {/* Relancer SANS re-uploader, en injectant un nouveau contexte */}
+              {linguisticId && (
+                <Button
+                  variant="outline" size="sm"
+                  onClick={() => { setRelaunchContext(focusContext); setShowRelaunch(true) }}
+                  className="text-xs gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                  title="Relancer l'analyse sur le meme audio avec un nouveau contexte de focalisation"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Relancer avec contexte
+                </Button>
+              )}
               {uploadedFile && (
                 <Button variant="outline" size="sm" className="text-xs gap-1.5"
                   onClick={() => {
@@ -560,7 +588,7 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
                     setProgress(0)
                     setTaskId(null)
                   }}>
-                  <RotateCcw className="w-3.5 h-3.5" /> Relancer
+                  <RotateCcw className="w-3.5 h-3.5" /> Recommencer
                 </Button>
               )}
               {linguisticId && (
@@ -738,6 +766,80 @@ const LinguisticTool = ({ onBack, initialProject }: LinguisticToolProps) => {
           </Button>
         </div>
       )}
+
+      {/* Modal Relancer avec contexte */}
+      <AnimatePresence>
+        {showRelaunch && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => !relaunching && setShowRelaunch(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-card border border-border rounded-xl p-6 w-full max-w-lg space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div>
+                <h3 className="text-sm font-bold text-foreground mb-1">Relancer l'analyse</h3>
+                <p className="text-[11px] text-muted-foreground">
+                  On reprend le meme audio mais on relance les etapes de classification (Whisper sera refait).
+                  Ajoute un contexte specifique si l'analyse precedente n'etait pas pertinente.
+                </p>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase text-muted-foreground">Axes de focalisation</label>
+                <textarea
+                  value={relaunchContext}
+                  onChange={(e) => setRelaunchContext(e.target.value)}
+                  placeholder="Ex: termes de cuisine paysanne ; outils agricoles ; lexique de la vigne..."
+                  rows={4}
+                  className="w-full mt-1 bg-secondary border border-border rounded-lg px-3 py-2 text-xs text-foreground resize-none placeholder:text-muted-foreground/40"
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setShowRelaunch(false)} disabled={relaunching}>
+                  Annuler
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  disabled={relaunching}
+                  onClick={async () => {
+                    if (!linguisticId) return
+                    setRelaunching(true)
+                    try {
+                      const token = localStorage.getItem('clipr-auth-token')
+                      const res = await fetch(`/api/linguistic/${linguisticId}/relaunch`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                        body: JSON.stringify({ focusContext: relaunchContext })
+                      })
+                      const data = await res.json()
+                      if (!res.ok) throw new Error(data.error || 'Echec relance')
+                      // On bascule en etat queued + on met a jour le focusContext local
+                      setFocusContext(relaunchContext)
+                      setTaskId(data.taskId)
+                      setQueuePosition(data.position)
+                      setStatus('queued')
+                      setSequences([])
+                      setShowRelaunch(false)
+                    } catch (e: any) {
+                      alert(e.message)
+                    } finally {
+                      setRelaunching(false)
+                    }
+                  }}
+                >
+                  {relaunching ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <RotateCcw className="w-3.5 h-3.5 mr-1.5" />}
+                  Relancer
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

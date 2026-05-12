@@ -1403,11 +1403,56 @@ app.post('/api/linguistic/start', requireAuth, (req, res) => {
       whisperPrompt: config?.whisperPrompt || '',
       numSpeakers: config?.numSpeakers || 10,
       projectId: project.id,
-      leaderSpeaker: config?.leaderSpeaker || ''
+      leaderSpeaker: config?.leaderSpeaker || '',
+      // Axes de focalisation : contexte libre injecte dans les prompts Ollama
+      // pour adapter l'analyse au domaine de l'enregistrement (peche, cuisine,
+      // metiers paysans...). Aide a accepter du vocabulaire specifique.
+      focusContext: config?.focusContext || '',
+      mode: config?.mode || 'round-table',
+      alfPointId: config?.alfPointId ?? null,
+      alfPointInfo: config?.alfPointInfo ?? null,
     }
 
     const task = taskQueueService.enqueueTask(userId, 'linguistic', taskConfig)
     res.json({ success: true, taskId: task.id, position: task.position, projectId: project.id })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+/**
+ * Relance une transcription linguistique avec un (nouveau) contexte de focalisation.
+ * Reprend le fichier audio deja uploade (pas besoin de re-uploader) et cree une
+ * nouvelle tache linguistic. L'ancienne transcription est conservee.
+ */
+app.post('/api/linguistic/:id/relaunch', requireAuth, (req, res) => {
+  try {
+    const userId = req.user!.userId
+    const original = getLinguisticTranscription(req.params.id, userId, req.user!.role)
+    if (!original) return res.status(404).json({ error: 'Transcription introuvable' })
+
+    // On recupere le chemin du fichier d'origine via le projet associe (linguisticItems[0])
+    const db = getDb()
+    const taskRow = db.prepare('SELECT config FROM task_queue WHERE id = ?').get((original as any).task_id) as any
+    if (!taskRow) return res.status(404).json({ error: 'Configuration originale introuvable' })
+    const oldConfig = JSON.parse(taskRow.config || '{}')
+    if (!oldConfig.filePath || !existsSync(oldConfig.filePath)) {
+      return res.status(400).json({ error: 'Fichier audio source introuvable sur le disque, impossible de relancer' })
+    }
+
+    const focusContext = (req.body?.focusContext || '').toString()
+    // On reprend le meme projet pour ne pas en multiplier (sinon l'historique se pollue)
+    const projectId: string = oldConfig.projectId
+    if (projectId) {
+      projectService.updateProjectStatus(projectId, 'processing')
+    }
+
+    const newConfig = {
+      ...oldConfig,
+      focusContext,
+      // On garde le meme projectId : la nouvelle transcription ecrasera la precedente cote affichage
+      projectId,
+    }
+    const task = taskQueueService.enqueueTask(userId, 'linguistic', newConfig)
+    res.json({ success: true, taskId: task.id, position: task.position, projectId })
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
