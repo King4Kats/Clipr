@@ -84,6 +84,11 @@ const FRENCH_STOP_WORDS = new Set([
   // Pronoms et adverbes (formes normalisees)
   'ou', 'deja', 'la-bas', 'peut-etre',
   'aussi', 'encore', 'dessus', 'dessous', 'dedans', 'dehors',
+  // Verbes et conjonctions courts (3 chars) souvent issus de transcriptions
+  'qui', 'que', 'qua', 'tel', 'lui', 'eux', 'soi',
+  'sur', 'par', 'sou', 'rev', 'pre', 'mes', 'tes', 'ses',
+  // Particules
+  'oh', 'ah', 'eh', 'ha', 'he', 'ho', 'oye', 'hop',
 ])
 
 /**
@@ -111,19 +116,38 @@ function normalizeWord(word: string): string {
     .replace(/[\u0300-\u036f]/g, '')
 }
 
-export function computeWordFrequencies(segments: TranscriptSegment[]): WordFrequency[] {
+/**
+ * Prefixes d'elision francais a retirer (l', d', j', n', m', s', t', c', qu', jusqu', lorsqu', puisqu')
+ * pour que "j'ai" donne "ai" au lieu de "j" + "ai", et "aujourd'hui" reste un seul mot.
+ */
+const ELISION_PREFIX_RE = /^(l|d|j|n|m|s|t|c|qu|jusqu|lorsqu|puisqu)['’]/i
+
+/**
+ * Decoupe un texte en mots en gardant les apostrophes INTERIEURES intactes
+ * (aujourd'hui reste un seul token). Retire ensuite les prefixes d'elision
+ * (j', l', d'... → "" ; "j'ai" → "ai" ; "aujourd'hui" → "aujourd'hui").
+ */
+function tokenize(text: string): string[] {
+  // Remplacer apostrophes typographiques par apostrophe simple, virer ponctuation
+  // (sauf l'apostrophe et le tiret qui peuvent etre internes a un mot)
+  const cleaned = text
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[.,!?;:"«»""()\[\]{}\/\\0-9…–—]/g, ' ')
+  return cleaned
+    .split(/\s+/)
+    .map(w => w.replace(ELISION_PREFIX_RE, '').replace(/^['\-]+|['\-]+$/g, ''))
+    .filter(w => w.length >= 3)
+}
+
+export function computeWordFrequencies(segments: TranscriptSegment[], options?: { minFreq?: number }): WordFrequency[] {
+  const minFreq = options?.minFreq ?? 1
   // Map : cle normalisee → { displayWord, total, speakers }
-  // On garde la forme la plus courante du mot pour l'affichage
   const wordMap = new Map<string, { displayWord: string; displayCount: Map<string, number>; total: number; speakers: Record<string, number> }>()
 
   for (const segment of segments) {
     const speaker = segment.speaker || 'Inconnu'
-    // Nettoyage du texte : minuscules, suppression ponctuation, split sur espaces
-    const words = segment.text
-      .toLowerCase()
-      .replace(/[.,!?;:'"«»""''()\-–—…\[\]{}\/\\0-9]/g, ' ')
-      .split(/\s+/)
-      .filter(w => w.length >= 3)
+    const words = tokenize(segment.text)
 
     for (const word of words) {
       const key = normalizeWord(word)
@@ -149,9 +173,10 @@ export function computeWordFrequencies(segments: TranscriptSegment[]): WordFrequ
   }
 
   // Conversion en tableau avec le mot affiche (forme la plus courante)
-  // Tri par frequence decroissante, top 200
+  // Tri par frequence decroissante, top 200, filtre min freq
   return Array.from(wordMap.entries())
     .map(([_key, data]) => ({ word: data.displayWord, total: data.total, speakers: data.speakers }))
+    .filter(f => f.total >= minFreq)
     .sort((a, b) => b.total - a.total)
     .slice(0, 200)
 }

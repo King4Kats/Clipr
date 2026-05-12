@@ -130,6 +130,23 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   const [copied, setCopied] = useState(false)
   // Affichage du panneau d'analyse semantique (nuage de mots, frequences, themes)
   const [showSemanticAnalysis, setShowSemanticAnalysis] = useState(false)
+  // Map mot → couleur custom (choisie via le color picker du nuage)
+  // Persistee dans le projet pour retrouver les surlignages a la prochaine ouverture.
+  const [wordColors, setWordColors] = useState<Record<string, string>>(initialProject?.data?.wordColors || {})
+
+  // Sauvegarder wordColors dans le projet quand ca change (si on a un projet ouvert)
+  const persistWordColors = useCallback((next: Record<string, string>) => {
+    setWordColors(next)
+    if (initialProject?.id) {
+      api.loadProjectById(initialProject.id).then((project: any) => {
+        if (project?.data) {
+          api.saveProject({ id: initialProject.id, ...project.data, wordColors: next }).catch(() => {})
+        }
+      }).catch(() => {})
+    }
+  }, [initialProject?.id])
+  // Recherche dans le transcript de la vue post-transcribe simple
+  const [postSearch, setPostSearch] = useState('')
 
   // Project mode state (when opened from home page project card)
   const [projectItems, setProjectItems] = useState<any[]>(initialProject?.data?.transcriptionItems || [])
@@ -626,6 +643,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         ollamaModel="qwen2.5:14b"
         projectId={initialProject?.id}
         savedSemanticResult={initialProject?.data?.semanticAnalysis}
+        wordColors={wordColors}
+        onWordColorsChange={persistWordColors}
       />
     )
   }
@@ -723,6 +742,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         onReset={() => setShowSemanticAnalysis(false)}
         onSegmentsUpdate={setSegments}
         ollamaModel="qwen2.5:14b"
+        wordColors={wordColors}
+        onWordColorsChange={persistWordColors}
       />
     )
   }
@@ -1025,10 +1046,33 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
                   <Button variant="outline" size="sm" onClick={handleReset} className="text-xs">Nouvelle transcription</Button>
                 </div>
               </div>
+              {/* Barre de recherche dans le transcript : surligne toutes les occurrences
+                  du terme tape (insensible a la casse). */}
+              <div className="px-4 py-2 border-b border-border flex items-center gap-2 bg-secondary/10">
+                <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={postSearch}
+                  onChange={e => setPostSearch(e.target.value)}
+                  placeholder="Rechercher un mot dans le transcript..."
+                  className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
+                />
+                {postSearch && (
+                  <>
+                    <span className="text-[10px] text-muted-foreground">
+                      {segments.filter(s => s.text.toLowerCase().includes(postSearch.toLowerCase())).length} segment(s)
+                    </span>
+                    <button onClick={() => setPostSearch('')} className="p-0.5 hover:bg-secondary rounded">
+                      <X className="w-3 h-3 text-muted-foreground" />
+                    </button>
+                  </>
+                )}
+              </div>
               <div className="max-h-[500px] overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
                 {segments.map((seg, i) => {
                   const prevSpeaker = i > 0 ? segments[i - 1].speaker : null
                   const showSpeaker = seg.speaker && seg.speaker !== prevSpeaker
+                  const matches = postSearch && seg.text.toLowerCase().includes(postSearch.toLowerCase())
                   return (
                     <div key={i}>
                       {showSpeaker && (
@@ -1044,9 +1088,11 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
                           >{seg.speaker}</span>
                         </div>
                       )}
-                      <div className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
+                      <div className={`flex gap-3 rounded-lg p-1.5 -mx-1.5 transition-colors ${matches ? 'bg-primary/10' : 'hover:bg-secondary/30'}`}>
                         <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">{fmtTime(seg.start)}</span>
-                        <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
+                        <p className="text-xs text-foreground leading-relaxed">
+                          {colorizeAndHighlight(seg.text, wordColors, postSearch || null)}
+                        </p>
                       </div>
                     </div>
                   )
@@ -1197,6 +1243,8 @@ function TranscriptionResult({
   ollamaModel,
   projectId,
   savedSemanticResult,
+  wordColors,
+  onWordColorsChange,
 }: {
   segments: TranscriptSegment[]
   transcriptionId: string | null
@@ -1206,10 +1254,12 @@ function TranscriptionResult({
   onReset: () => void
   onSegmentsUpdate: (segs: TranscriptSegment[]) => void
   ollamaModel: string
-  /** ID du projet pour sauvegarder les resultats */
   projectId?: string
-  /** Resultats deja sauvegardes dans le projet (evite de relancer Ollama) */
   savedSemanticResult?: any
+  /** Map mot → couleur custom (controlee + persistee par le parent) */
+  wordColors?: Record<string, string>
+  /** Callback complet quand la map est modifiee (pour persister au save projet) */
+  onWordColorsChange?: (next: Record<string, string>) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -1226,6 +1276,14 @@ function TranscriptionResult({
 
   // Mots exclus par l'utilisateur (retires du tableau et du nuage)
   const [excludedWords, setExcludedWords] = useState<Set<string>>(new Set())
+
+  // Handler color picker : update la map et propage au parent
+  const handleWordColorChange = useCallback((word: string, color: string | null) => {
+    const next = { ...(wordColors || {}) }
+    if (color === null) delete next[word]
+    else next[word] = color
+    onWordColorsChange?.(next)
+  }, [wordColors, onWordColorsChange])
 
   // Mot selectionne pour la navigation dans le transcript
   const [highlightedWord, setHighlightedWord] = useState<string | null>(null)
@@ -1478,7 +1536,7 @@ function TranscriptionResult({
                           {fmtTime(seg.start)}
                         </span>
                         <p className="text-xs text-foreground leading-relaxed">
-                          {highlightedWord ? highlightText(seg.text, highlightedWord) : seg.text}
+                          {colorizeAndHighlight(seg.text, wordColors, highlightedWord)}
                         </p>
                       </div>
                     </div>
@@ -1496,7 +1554,15 @@ function TranscriptionResult({
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Nuage de mots</span>
               </div>
               <div className="flex-1 overflow-hidden p-2">
-                <WordCloudPanel data={cloudData} frequencies={frequencies} speakers={speakers} onWordClick={navigateToWord} svgRef={wordCloudSvgRef} />
+                <WordCloudPanel
+                  data={cloudData}
+                  frequencies={frequencies}
+                  speakers={speakers}
+                  onWordClick={navigateToWord}
+                  svgRef={wordCloudSvgRef}
+                  wordColors={wordColors}
+                  onWordColorChange={handleWordColorChange}
+                />
               </div>
             </div>
           </div>
@@ -1557,15 +1623,24 @@ import cloudLayout from 'd3-cloud'
 
 const SPEAKER_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
-function WordCloudPanel({ data, frequencies, speakers, onWordClick, svgRef }: {
+// Palette du color picker des mots du nuage
+const WORD_PALETTE = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#a855f7', '#ec4899']
+
+function WordCloudPanel({ data, frequencies, speakers, onWordClick, svgRef, wordColors, onWordColorChange }: {
   data: { text: string; value: number }[]
   frequencies: WordFreqType[]
   speakers: string[]
   onWordClick?: (word: string) => void
   svgRef?: React.MutableRefObject<SVGElement | null>
+  /** Couleurs custom mot → couleur (passees par le parent, persistees) */
+  wordColors?: Record<string, string>
+  /** Callback quand l'utilisateur change la couleur d'un mot (null = reset) */
+  onWordColorChange?: (word: string, color: string | null) => void
 }) {
   const [words, setWords] = useState<any[]>([])
   const [hoveredWord, setHoveredWord] = useState<string | null>(null)
+  // Mot dont la palette est ouverte (clic droit sur un mot)
+  const [pickerWord, setPickerWord] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 500, h: 300 })
 
@@ -1632,22 +1707,54 @@ function WordCloudPanel({ data, frequencies, speakers, onWordClick, svgRef }: {
         </div>
       )}
       <svg ref={(el) => { if (svgRef) svgRef.current = el }} viewBox={`${-size.w/2} ${-size.h/2} ${size.w} ${size.h}`} className="w-full h-full">
-        {words.map((w, i) => (
-          <text
-            key={`${w.text}-${i}`}
-            textAnchor="middle"
-            transform={`translate(${w.x},${w.y}) rotate(${w.rotate})`}
-            fontSize={w.size}
-            fill={w.color}
-            opacity={hoveredWord && hoveredWord !== w.text ? 0.2 : 1}
-            className="cursor-pointer transition-opacity duration-150 select-none"
-            style={{ fontWeight: w.size > 25 ? 700 : 500 }}
-            onMouseEnter={() => setHoveredWord(w.text)}
-            onMouseLeave={() => setHoveredWord(null)}
-            onClick={() => onWordClick?.(w.text)}
-          >{w.text}</text>
-        ))}
+        {words.map((w, i) => {
+          // Couleur custom (palette user) sinon couleur du speaker dominant
+          const fill = wordColors?.[w.text] || w.color
+          return (
+            <text
+              key={`${w.text}-${i}`}
+              textAnchor="middle"
+              transform={`translate(${w.x},${w.y}) rotate(${w.rotate})`}
+              fontSize={w.size}
+              fill={fill}
+              opacity={hoveredWord && hoveredWord !== w.text ? 0.2 : 1}
+              className="cursor-pointer transition-opacity duration-150 select-none"
+              style={{ fontWeight: w.size > 25 ? 700 : 500 }}
+              onMouseEnter={() => setHoveredWord(w.text)}
+              onMouseLeave={() => setHoveredWord(null)}
+              onClick={() => onWordClick?.(w.text)}
+              onContextMenu={(e) => { e.preventDefault(); setPickerWord(pickerWord === w.text ? null : w.text) }}
+            >{w.text}</text>
+          )
+        })}
       </svg>
+
+      {/* Palette de couleurs ouverte au clic droit sur un mot */}
+      {pickerWord && (
+        <div
+          className="absolute left-1/2 -translate-x-1/2 bottom-2 z-30 bg-card border border-border rounded-lg p-2 shadow-xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="text-[10px] text-muted-foreground mb-1.5 px-1">
+            Couleur de <span className="font-bold text-foreground">« {pickerWord} »</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {WORD_PALETTE.map(c => (
+              <button
+                key={c}
+                onClick={() => { onWordColorChange?.(pickerWord, c); setPickerWord(null) }}
+                className="w-5 h-5 rounded-full border-2 border-transparent hover:border-foreground/30 transition-colors"
+                style={{ backgroundColor: c }}
+              />
+            ))}
+            <button
+              onClick={() => { onWordColorChange?.(pickerWord, null); setPickerWord(null) }}
+              className="w-5 h-5 rounded-full border border-border bg-secondary text-[9px] font-bold text-muted-foreground hover:text-foreground"
+              title="Reset"
+            >✕</button>
+          </div>
+        </div>
+      )}
       {hoveredFreq && (
         <div className="absolute top-1 right-1 bg-card border border-border rounded-lg p-2 shadow-lg text-[10px] z-20 max-w-[200px]">
           <div className="font-bold text-foreground mb-1">« {hoveredFreq.word} »</div>
@@ -1814,6 +1921,47 @@ function highlightText(text: string, word: string): React.ReactNode {
   return parts.map((part, i) =>
     regex.test(part) ? <mark key={i} className="bg-primary/30 text-foreground rounded px-0.5">{part}</mark> : part
   )
+}
+
+/**
+ * Coloriser un texte : applique les couleurs custom (wordColors) sur chaque
+ * occurrence des mots concernes, en gardant aussi le surlignage de recherche
+ * (searchWord) si fourni. Les deux peuvent se cumuler.
+ */
+function colorizeAndHighlight(
+  text: string,
+  wordColors: Record<string, string> | undefined,
+  searchWord: string | null
+): React.ReactNode {
+  const colorWords = wordColors ? Object.keys(wordColors).filter(w => w.length > 0) : []
+  // Si rien a faire, retour direct
+  if (colorWords.length === 0 && !searchWord) return text
+
+  // Construit une regex qui matche soit un mot colore soit le searchWord (insensible a la casse)
+  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const allWords = [...colorWords, ...(searchWord ? [searchWord] : [])]
+    .map(escape)
+    .sort((a, b) => b.length - a.length) // mots longs d'abord pour eviter les sous-matches
+  const regex = new RegExp(`(${allWords.join('|')})`, 'gi')
+  const parts = text.split(regex)
+
+  return parts.map((part, i) => {
+    if (!part) return null
+    const lower = part.toLowerCase()
+    // Couleur custom prioritaire
+    const customColor = wordColors && Object.entries(wordColors).find(([w]) => w.toLowerCase() === lower)?.[1]
+    const isSearch = searchWord && lower === searchWord.toLowerCase()
+    if (customColor && isSearch) {
+      return <mark key={i} className="bg-primary/30 rounded px-0.5" style={{ color: customColor }}>{part}</mark>
+    }
+    if (customColor) {
+      return <span key={i} style={{ color: customColor, fontWeight: 600 }}>{part}</span>
+    }
+    if (isSearch) {
+      return <mark key={i} className="bg-primary/30 text-foreground rounded px-0.5">{part}</mark>
+    }
+    return part
+  })
 }
 
 export default TranscriptionTool

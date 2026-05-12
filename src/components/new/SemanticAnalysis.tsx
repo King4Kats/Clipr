@@ -33,7 +33,14 @@ interface SemanticAnalysisProps {
   ollamaModel: string
   /** Callback pour fermer le panneau */
   onClose: () => void
+  /** Map mot → couleur custom (controle par le parent pour persister dans le projet) */
+  wordColors?: Record<string, string>
+  /** Callback quand l'utilisateur change la couleur d'un mot (null = reset) */
+  onWordColorChange?: (word: string, color: string | null) => void
 }
+
+// Palette de couleurs pour le picker (8 couleurs sympas + reset)
+const COLOR_PALETTE = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#a855f7', '#ec4899']
 
 // ── Couleurs pour les locuteurs (meme palette que les segments video) ──
 const SPEAKER_COLORS = [
@@ -54,7 +61,7 @@ interface CloudWord {
 // ============================================================
 // COMPOSANT PRINCIPAL
 // ============================================================
-export default function SemanticAnalysis({ segments, ollamaModel, onClose }: SemanticAnalysisProps) {
+export default function SemanticAnalysis({ segments, ollamaModel, onClose, wordColors, onWordColorChange }: SemanticAnalysisProps) {
   // Onglet actif : nuage, tableau ou analyse IA
   const [tab, setTab] = useState<'cloud' | 'table' | 'analysis'>('cloud')
 
@@ -138,7 +145,13 @@ export default function SemanticAnalysis({ segments, ollamaModel, onClose }: Sem
         <AnimatePresence mode="wait">
           {tab === 'cloud' && (
             <motion.div key="cloud" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <WordCloudView data={cloudData} frequencies={frequencies} speakers={speakers} />
+              <WordCloudView
+                data={cloudData}
+                frequencies={frequencies}
+                speakers={speakers}
+                wordColors={wordColors}
+                onWordColorChange={onWordColorChange}
+              />
             </motion.div>
           )}
           {tab === 'table' && (
@@ -167,14 +180,20 @@ export default function SemanticAnalysis({ segments, ollamaModel, onClose }: Sem
 function WordCloudView({
   data,
   frequencies,
-  speakers
+  speakers,
+  wordColors,
+  onWordColorChange,
 }: {
   data: { text: string; value: number }[]
   frequencies: WordFrequency[]
   speakers: string[]
+  wordColors?: Record<string, string>
+  onWordColorChange?: (word: string, color: string | null) => void
 }) {
   const [words, setWords] = useState<CloudWord[]>([])
   const [hoveredWord, setHoveredWord] = useState<string | null>(null)
+  // Mot dont la palette de couleurs est ouverte (clic sur mot du nuage)
+  const [pickerWord, setPickerWord] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Construire une map de couleur par mot (basee sur le speaker dominant)
@@ -253,28 +272,66 @@ function WordCloudView({
         </div>
       )}
 
+      {/* Astuce : clic sur un mot pour lui assigner une couleur custom (appliquee
+          aussi a toutes ses occurrences dans la transcription affichee a cote). */}
+      <p className="text-[10px] text-muted-foreground mb-2">Clique sur un mot pour changer sa couleur — elle s'applique aussi dans la transcription.</p>
+
       {/* SVG du nuage de mots */}
       <svg
         viewBox="-350 -200 700 400"
         className="w-full h-[400px] bg-background/50 rounded-lg border border-border"
       >
-        {words.map((word, i) => (
-          <text
-            key={`${word.text}-${i}`}
-            textAnchor="middle"
-            transform={`translate(${word.x},${word.y}) rotate(${word.rotate})`}
-            fontSize={word.size}
-            fill={word.color}
-            opacity={hoveredWord && hoveredWord !== word.text ? 0.3 : 1}
-            className="cursor-pointer transition-opacity duration-150 select-none"
-            style={{ fontWeight: word.size > 30 ? 700 : 500 }}
-            onMouseEnter={() => setHoveredWord(word.text)}
-            onMouseLeave={() => setHoveredWord(null)}
-          >
-            {word.text}
-          </text>
-        ))}
+        {words.map((word, i) => {
+          // Couleur custom si l'utilisateur en a defini une, sinon couleur du speaker
+          const customColor = wordColors?.[word.text]
+          const fill = customColor || word.color
+          return (
+            <text
+              key={`${word.text}-${i}`}
+              textAnchor="middle"
+              transform={`translate(${word.x},${word.y}) rotate(${word.rotate})`}
+              fontSize={word.size}
+              fill={fill}
+              opacity={hoveredWord && hoveredWord !== word.text ? 0.3 : 1}
+              className="cursor-pointer transition-opacity duration-150 select-none"
+              style={{ fontWeight: word.size > 30 ? 700 : 500 }}
+              onMouseEnter={() => setHoveredWord(word.text)}
+              onMouseLeave={() => setHoveredWord(null)}
+              onClick={() => setPickerWord(pickerWord === word.text ? null : word.text)}
+            >
+              {word.text}
+            </text>
+          )
+        })}
       </svg>
+
+      {/* Palette de couleurs (popover) ouverte au clic sur un mot */}
+      {pickerWord && (
+        <div className="absolute left-1/2 -translate-x-1/2 top-12 z-10 bg-card border border-border rounded-lg p-3 shadow-xl">
+          <div className="text-[11px] text-muted-foreground mb-2">
+            Couleur pour <span className="font-bold text-foreground">« {pickerWord} »</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {COLOR_PALETTE.map(c => (
+              <button
+                key={c}
+                onClick={() => { onWordColorChange?.(pickerWord, c); setPickerWord(null) }}
+                className="w-6 h-6 rounded-full border-2 border-transparent hover:border-foreground/30 transition-colors"
+                style={{ backgroundColor: c }}
+                title={c}
+              />
+            ))}
+            {/* Reset = retour a la couleur du speaker */}
+            <button
+              onClick={() => { onWordColorChange?.(pickerWord, null); setPickerWord(null) }}
+              className="w-6 h-6 rounded-full border border-border bg-secondary text-[10px] font-bold text-muted-foreground hover:text-foreground"
+              title="Couleur par defaut"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tooltip au survol */}
       {hoveredFreq && (
