@@ -36,14 +36,25 @@ import api from '@/api'
  * C'est ce que le backend renvoie quand on appelle /api/admin/system.
  */
 interface SystemHealth {
-  // État des services externes : Ollama (IA) et FFmpeg (traitement vidéo)
   services: { ollama: boolean; ffmpeg: boolean }
-  // Verrou IA : indique si un utilisateur utilise actuellement le modèle IA (null si libre)
   aiLock: any
-  // Informations sur l'espace disque du serveur (en octets)
   disk: { total: number; used: number; free: number }
-  // Compteurs globaux : nombre de projets et d'utilisateurs
   counts: { projects: number; users: number }
+  /** Taches actives dans la file (transcription, linguistic, analysis) */
+  tasks?: {
+    running: number
+    pending: number
+    list: Array<{
+      id: string
+      type: string
+      status: string
+      progress: number
+      progress_message: string | null
+      username: string | null
+      created_at: string
+      started_at: string | null
+    }>
+  }
 }
 
 /**
@@ -264,7 +275,8 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
   // Rafraîchissement automatique de la santé du système toutes les 30 secondes.
   // Le clearInterval dans le return nettoie le timer quand le composant est démonté.
   useEffect(() => {
-    const interval = setInterval(fetchSystem, 30000)
+    // Refresh stats toutes les 5s (au lieu de 30s) — utile quand des taches sont en cours
+    const interval = setInterval(fetchSystem, 5000)
     return () => clearInterval(interval)
   }, [fetchSystem])
 
@@ -340,13 +352,47 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
               alert={diskPercent > 80} // Alerte visuelle si le disque est rempli à plus de 80%
             />
             <StatCard
-              label="IA"
-              value={system.aiLock ? 'Occupée' : 'Libre'}
-              subtitle={system.aiLock ? `Par ${system.aiLock.username}` : undefined}
-              icon={system.aiLock ? Lock : Cpu}
-              alert={!!system.aiLock} // Alerte si l'IA est verrouillée par un utilisateur
+              label="Taches actives"
+              value={system.tasks ? `${system.tasks.running} en cours` : (system.aiLock ? 'Occupee' : 'Libre')}
+              subtitle={system.tasks ? `${system.tasks.pending} en file d'attente` : (system.aiLock ? `Par ${system.aiLock.username}` : undefined)}
+              icon={(system.tasks?.running || 0) > 0 ? Lock : Cpu}
+              alert={(system.tasks?.running || 0) > 0 || !!system.aiLock}
             />
           </div>
+
+          {/* Liste des taches actives (visible des qu'il y en a une) */}
+          {system.tasks && (system.tasks.running > 0 || system.tasks.pending > 0) && (
+            <div className="bg-card border border-border rounded-xl p-5">
+              <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-primary" />
+                File d'attente ({system.tasks.running + system.tasks.pending})
+              </h3>
+              <div className="space-y-2">
+                {system.tasks.list.map(t => (
+                  <div key={t.id} className="flex items-center gap-3 px-3 py-2 bg-secondary/30 rounded-lg">
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                      t.status === 'running' ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-500/20 text-zinc-400'
+                    }`}>{t.status}</span>
+                    <span className="text-xs font-semibold text-foreground">{t.type}</span>
+                    <span className="text-[10px] text-muted-foreground">{t.username || '?'}</span>
+                    <div className="flex-1 min-w-0">
+                      {t.status === 'running' && (
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1 bg-secondary rounded-full overflow-hidden">
+                            <div className="h-full bg-primary transition-all" style={{ width: `${t.progress || 0}%` }} />
+                          </div>
+                          <span className="text-[10px] font-mono text-muted-foreground shrink-0">{t.progress || 0}%</span>
+                        </div>
+                      )}
+                      {t.progress_message && (
+                        <p className="text-[10px] text-muted-foreground truncate mt-0.5">{t.progress_message}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Section services : affiche si Ollama et FFmpeg sont actifs ou non */}
           <div className="bg-card border border-border rounded-xl p-5">

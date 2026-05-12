@@ -671,7 +671,7 @@ app.get('/api/admin/projects', requireAuth, requireAdmin, (_req, res) => {
   res.json(projectService.getAllProjects())
 })
 
-// Admin: system health (disk, services, AI lock)
+// Admin: system health (disk, services, AI lock, queue tasks)
 app.get('/api/admin/system', requireAuth, requireAdmin, async (_req, res) => {
   const ollamaOk = await ollamaService.checkOllama()
   const ffmpegOk = await ffmpegService.checkFFmpeg()
@@ -687,11 +687,25 @@ app.get('/api/admin/system', requireAuth, requireAdmin, async (_req, res) => {
   const projectCount = (db.prepare('SELECT COUNT(*) as cnt FROM projects WHERE deleted_at IS NULL').get() as any).cnt
   const userCount = (db.prepare('SELECT COUNT(*) as cnt FROM users').get() as any).cnt
 
+  // ── Taches actives dans la file d'attente (transcription, linguistic, analysis)
+  // Sert au dashboard pour afficher en temps reel ce qui tourne (et plus jamais
+  // "IA libre" quand Whisper est en plein milieu d'une transcription).
+  const activeTasks = db.prepare(`
+    SELECT q.id, q.type, q.status, q.progress, q.progress_message, q.created_at, q.started_at,
+           u.username
+    FROM task_queue q LEFT JOIN users u ON q.user_id = u.id
+    WHERE q.status IN ('pending', 'running')
+    ORDER BY q.status DESC, q.created_at ASC
+  `).all() as any[]
+  const runningCount = activeTasks.filter((t: any) => t.status === 'running').length
+  const pendingCount = activeTasks.filter((t: any) => t.status === 'pending').length
+
   res.json({
     services: { ollama: ollamaOk, ffmpeg: ffmpegOk },
     aiLock: lock,
     disk: diskInfo,
-    counts: { projects: projectCount, users: userCount }
+    counts: { projects: projectCount, users: userCount },
+    tasks: { running: runningCount, pending: pendingCount, list: activeTasks },
   })
 })
 
