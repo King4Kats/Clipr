@@ -478,6 +478,9 @@ const api = {
   onQueueTaskFailed: (cb: (data: any) => void) => onWsEvent('queue:task-failed', cb),
 
   // ── Événements WebSocket : Transcription standalone ──
+  // Support messaging
+  onSupportMessage: (cb: (data: any) => void) => onWsEvent('support:message', cb),
+
   onTranscriptionProgress: (cb: (data: any) => void) => onWsEvent('transcription:progress', cb),
   onTranscriptionSegment: (cb: (data: any) => void) => onWsEvent('transcription:segment', cb),
   onTranscriptionComplete: (cb: (data: any) => void) => onWsEvent('transcription:complete', cb),

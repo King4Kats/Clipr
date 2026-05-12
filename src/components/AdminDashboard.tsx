@@ -195,24 +195,16 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
     finally { setSupportSending(false) }
   }
 
-  // WS : ecoute des nouveaux messages support pour rafraichir liste + thread
+  // WS : ecoute des nouveaux messages support via la WS partagee (auto-reconnect)
   useEffect(() => {
     if (!token) return
-    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${wsProto}//${location.host}/ws`)
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', token }))
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data)
-        if (msg.type === 'support:message') {
-          fetchSupportConvs()
-          if (supportSelectedUserId && msg.message?.user_id === supportSelectedUserId) {
-            fetchSupportThread(supportSelectedUserId)
-          }
-        }
-      } catch {}
-    }
-    return () => ws.close()
+    const unsub = api.onSupportMessage((data: any) => {
+      fetchSupportConvs()
+      if (supportSelectedUserId && data.message?.user_id === supportSelectedUserId) {
+        fetchSupportThread(supportSelectedUserId)
+      }
+    })
+    return unsub
   }, [token, supportSelectedUserId, fetchSupportConvs, fetchSupportThread])
 
   // Auto-scroll bas du thread

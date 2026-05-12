@@ -11,6 +11,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MessageCircle, X, Send, Loader2, Paperclip, AlertCircle } from 'lucide-react'
 import { useAuthStore } from '@/store/useAuthStore'
+import api from '@/api'
 
 interface SupportMessage {
   id: string
@@ -20,8 +21,6 @@ interface SupportMessage {
   attachment_path: string | null
   created_at: string
 }
-
-const STORAGE_KEY = 'clipr-auth-token'
 
 export default function SupportChat() {
   const { isAuthenticated, token } = useAuthStore()
@@ -49,22 +48,14 @@ export default function SupportChat() {
 
   useEffect(() => { refresh() }, [refresh])
 
-  // Sync temps reel : ecoute le WS pour push de nouveaux messages
+  // Sync temps reel via la WS partagee (api.ts) : auto-reconnect + auth gere centralement
   useEffect(() => {
     if (!isAuthenticated) return
-    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${wsProto}//${location.host}/ws`)
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', token: localStorage.getItem(STORAGE_KEY) }))
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data)
-        if (msg.type === 'support:message' && msg.message) {
-          // On rafraichit la liste (plus simple que de merger localement)
-          refresh()
-        }
-      } catch {}
-    }
-    return () => ws.close()
+    const unsub = api.onSupportMessage(() => {
+      // Rafraichir la liste (plus simple que de merger localement)
+      refresh()
+    })
+    return unsub
   }, [isAuthenticated, refresh])
 
   // Marque comme lu a l'ouverture du panneau
