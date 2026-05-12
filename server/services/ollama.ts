@@ -568,7 +568,9 @@ Regles :
           { role: 'user', content: userPrompt }
         ],
         stream: false,
-        options: { temperature: 0.2, num_ctx: 32768 }
+        // num_ctx 12288 = environ 3000 tokens d'entree (transcript echantillonne ~24k chars)
+        // + 8000 de marge. 32k provoquait OOM/crash sur Qwen2.5:14b sur GPU 8-12 Go.
+        options: { temperature: 0.2, num_ctx: 12288 }
       })
 
       const parsed = JSON.parse(response)

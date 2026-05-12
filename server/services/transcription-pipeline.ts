@@ -222,6 +222,8 @@ export async function runTranscriptionPipeline(task: QueueTask, broadcastFn: Bro
 
       // La diarisation analyse l'audio pour détecter les changements de locuteur
       // et associer chaque segment à un locuteur (SPEAKER_0, SPEAKER_1, etc.)
+      // Nombre de locuteurs force par l'utilisateur (0 = auto-detection)
+      const forcedNumSpeakers = typeof config.numSpeakers === 'number' ? config.numSpeakers : 0
       const diarized = await diarizationService.diarize(
         audioPath,
         finalSegments,
@@ -232,7 +234,8 @@ export async function runTranscriptionPipeline(task: QueueTask, broadcastFn: Bro
             progress: percent,
             message: 'Identification des locuteurs...'
           })
-        }
+        },
+        forcedNumSpeakers,
       )
 
       // On copie les labels de locuteur (speaker) dans nos segments originaux

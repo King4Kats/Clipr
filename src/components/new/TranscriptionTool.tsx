@@ -114,6 +114,9 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   const [whisperModel, setWhisperModel] = useState<string>('large-v3')
   const [language, setLanguage] = useState<string>('fr')
   const [whisperPrompt, setWhisperPrompt] = useState<string>('')
+  // Nombre de locuteurs attendu (0 = auto-detection). Aide la diarisation quand
+  // l'auto-detect se trompe (typiquement, sous-detection sur dialogues courts).
+  const [numSpeakers, setNumSpeakers] = useState<number>(0)
 
   // Processing state
   const [status, setStatus] = useState<ToolStatus>('idle')
@@ -401,7 +404,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
 
     try {
       const files = uploaded.map(i => ({ filePath: i.filePath!, filename: i.filename }))
-      const result = await api.startTranscriptionBatch(files, { whisperModel, language, whisperPrompt })
+      const result = await api.startTranscriptionBatch(files, { whisperModel, language, whisperPrompt, numSpeakers })
       setBatchItems(prev => prev.map(item => {
         const taskInfo = result.tasks.find((t: any) => t.filename === item.filename)
         if (taskInfo) return { ...item, taskId: taskInfo.taskId, status: 'queued' as const }
@@ -471,7 +474,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
       const result = await api.startTranscription(uploadedFile.path, uploadedFile.name, {
         whisperModel,
         language,
-        whisperPrompt
+        whisperPrompt,
+        numSpeakers,
       })
       setTaskId(result.taskId)
       setQueuePosition(result.position)
@@ -1191,6 +1195,25 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
                 <SelectContent className="bg-card border-border">
                   <SelectItem value="fr" className="text-xs cursor-pointer">Français</SelectItem>
                   <SelectItem value="en" className="text-xs cursor-pointer">Anglais</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Nombre de locuteurs (force le clustering de la diarisation) */}
+            <div className="space-y-2">
+              <span className="text-[9px] font-bold text-muted-foreground uppercase flex items-center gap-1.5">
+                Locuteurs
+                <InfoTip text="Nombre d'intervenants attendu. Laisser sur Auto si tu ne sais pas, sinon force la valeur si la detection automatique se trompe (ex: 2 locuteurs detectes sur 3 reels)." />
+              </span>
+              <Select value={String(numSpeakers)} onValueChange={v => setNumSpeakers(parseInt(v))} disabled={isProcessing}>
+                <SelectTrigger className="w-full h-9 bg-secondary/10 text-xs text-foreground border-border">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border">
+                  <SelectItem value="0" className="text-xs cursor-pointer">Auto</SelectItem>
+                  {[1,2,3,4,5,6,7,8,9,10].map(n => (
+                    <SelectItem key={n} value={String(n)} className="text-xs cursor-pointer">{n} locuteur{n > 1 ? 's' : ''}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
