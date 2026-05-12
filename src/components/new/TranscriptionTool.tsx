@@ -122,6 +122,9 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   const [progress, setProgress] = useState<number>(0)
   const [progressMessage, setProgressMessage] = useState<string>('')
   const [errorMessage, setErrorMessage] = useState<string>('')
+  // Avertissement non bloquant : la transcription a reussi mais une etape secondaire
+  // a echoue (ex: diarisation impossible) — affiche un bandeau orange.
+  const [warningMessage, setWarningMessage] = useState<string>('')
 
   // Result
   const [transcriptionId, setTranscriptionId] = useState<string | null>(null)
@@ -231,6 +234,10 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
 
     // Refresh segments when diarization completes (speakers added post-save)
     const unsubDiarization = api.onDiarizationComplete((data: any) => {
+      // Si la diarisation a echoue, on remonte une alerte non bloquante a l'UI
+      if (data.error) {
+        setWarningMessage(`Identification des locuteurs impossible : ${data.error}. La transcription est sauvegardee sans speakers.`)
+      }
       if (data.transcriptionId) {
         api.getTranscription(data.transcriptionId).then((result: any) => {
           if (result.segments) setSegments(result.segments)
@@ -483,6 +490,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
     setProgress(0)
     setProgressMessage('')
     setErrorMessage('')
+    setWarningMessage('')
     setTranscriptionId(null)
     setSegments([])
     setLiveSegments([])
@@ -1031,6 +1039,20 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
               <p className="text-sm font-semibold text-destructive mb-1">Erreur</p>
               <p className="text-xs text-muted-foreground mb-4">{errorMessage}</p>
               <Button variant="destructive" size="sm" onClick={handleReset}>Réessayer</Button>
+            </motion.div>
+          )}
+
+          {/* Bandeau d'avertissement non bloquant (ex: diarisation echouee) */}
+          {warningMessage && (
+            <motion.div
+              initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }}
+              className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-400"
+            >
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="flex-1 leading-relaxed">{warningMessage}</span>
+              <button onClick={() => setWarningMessage('')} className="p-0.5 hover:bg-amber-500/20 rounded">
+                <X className="w-3 h-3" />
+              </button>
             </motion.div>
           )}
 

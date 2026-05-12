@@ -115,21 +115,27 @@ export function diarize(
 
     // Tableau pour accumuler les segments diarisés reçus via stdout
     const diarizedSegments: TranscriptSegment[] = []
+    // On capture les dernieres lignes pertinentes de stderr pour pouvoir
+    // remonter une raison d'echec lisible dans l'UI si le processus plante.
+    const stderrTail: string[] = []
+    const STDERR_TAIL_LIMIT = 8
 
     // Lecture de stderr : progression et messages de log du script Python
     proc.stderr?.on('data', (data) => {
       const text = data.toString()
       for (const line of text.split('\n')) {
         if (line.startsWith('PROGRESS:')) {
-          // Message de progression envoyé par le script Python
           const p = parseInt(line.replace('PROGRESS:', '').trim())
           if (!isNaN(p)) onProgress(p)
         } else if (line.startsWith('ERROR:')) {
           logger.error('[Diarize]', line.replace('ERROR:', '').trim())
+          stderrTail.push(line.trim())
         } else if (line.trim() && !line.includes('UserWarning') && !line.includes('FutureWarning')) {
-          // On filtre les warnings Python inoffensifs (UserWarning, FutureWarning)
           logger.info('[Diarize]', line.trim())
+          stderrTail.push(line.trim())
         }
+        // Garde uniquement les N dernieres lignes pour limiter la taille du message d'erreur
+        if (stderrTail.length > STDERR_TAIL_LIMIT) stderrTail.shift()
       }
     })
 
@@ -150,6 +156,17 @@ export function diarize(
       const { execSync } = require('child_process')
       try { execSync('sleep 2') } catch {}
 
+      // Helper : extrait une raison lisible des dernieres lignes de stderr Python
+      const extractReason = (): string => {
+        // Cherche une LibsndfileError typique (format audio non supporte)
+        const sf = stderrTail.find(l => l.includes('LibsndfileError') || l.includes('Format not recognised'))
+        if (sf) return 'Format audio non supporte par le module de diarisation (essayer .wav ou .flac)'
+        // Sinon, derniere ligne non vide qui ressemble a une exception
+        const exc = [...stderrTail].reverse().find(l => /Error|Exception|Traceback/i.test(l))
+        if (exc) return exc.slice(0, 200)
+        return stderrTail.slice(-2).join(' | ').slice(0, 200) || 'Echec du script Python'
+      }
+
       if (code === 0) {
         // Succès : on utilise les segments reçus en streaming si disponibles
         if (diarizedSegments.length > 0) {
@@ -163,25 +180,25 @@ export function diarize(
             try { unlinkSync(outputPath) } catch {}
             resolve(data)
           } else {
-            logger.warn('Diarization output not found, returning original segments')
-            resolve(segments)
+            // Code 0 mais pas de sortie : on rejette pour que le pipeline notifie l'UI
+            reject(new Error(`Diarisation : sortie vide (${extractReason()})`))
           }
-        } catch (err) {
-          logger.error('Failed to read diarization output:', err)
-          resolve(segments) // Dégradation gracieuse
+        } catch (err: any) {
+          reject(new Error(`Diarisation : lecture sortie impossible (${err.message})`))
         }
       } else {
-        // Échec du script Python : on retourne les segments originaux sans locuteur
-        // On ne rejette PAS la promesse pour ne pas faire échouer toute la transcription
-        logger.error(`Diarization failed (code ${code}), returning original segments`)
-        resolve(segments)
+        // Échec : on rejette avec une raison lisible — le pipeline catch et broadcast
+        // l'erreur via 'transcription:diarization-complete' (champ error)
+        const reason = extractReason()
+        logger.error(`Diarization failed (code ${code}): ${reason}`)
+        reject(new Error(`Diarisation echouee : ${reason}`))
       }
     })
 
     // Erreur de lancement du processus (ex: python3 introuvable)
     proc.on('error', (err) => {
       logger.error('Diarization process error:', err)
-      resolve(segments) // Dégradation gracieuse : on retourne les segments sans locuteur
+      reject(new Error(`Impossible de lancer la diarisation : ${err.message}`))
     })
   })
 }
