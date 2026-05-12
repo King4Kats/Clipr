@@ -101,8 +101,25 @@ def main():
     print("STATUS: Loading audio...", file=sys.stderr)
     print("PROGRESS: 5", file=sys.stderr)
 
-    # Lecture du fichier audio en float32 (valeurs entre -1 et 1)
-    audio_data, sample_rate = sf.read(args.audio_path, dtype='float32')
+    # Lecture du fichier audio en float32 (valeurs entre -1 et 1).
+    # libsndfile ne sait pas decoder m4a/aac/mp3 (formats compresses) → fallback ffmpeg
+    # qui convertit a la volee vers un wav temporaire que soundfile peut lire.
+    try:
+        audio_data, sample_rate = sf.read(args.audio_path, dtype='float32')
+    except Exception:
+        import subprocess, tempfile, os as _os
+        print("STATUS: Decoding via ffmpeg (m4a/mp3/aac)...", file=sys.stderr)
+        tmp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
+        try:
+            # ffmpeg -i in -ac 1 -ar 16000 -f wav out (mono 16kHz pour le modele)
+            subprocess.run(
+                ['ffmpeg', '-y', '-i', args.audio_path, '-ac', '1', '-ar', '16000', '-f', 'wav', tmp_wav],
+                check=True, capture_output=True
+            )
+            audio_data, sample_rate = sf.read(tmp_wav, dtype='float32')
+        finally:
+            try: _os.unlink(tmp_wav)
+            except Exception: pass
 
     # Si l'audio est stereo (2 canaux), on le convertit en mono
     # en faisant la moyenne des deux canaux
