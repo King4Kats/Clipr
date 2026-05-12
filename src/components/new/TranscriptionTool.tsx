@@ -2089,35 +2089,42 @@ function colorizeAndHighlight(
   wordColors: Record<string, string> | undefined,
   searchWord: string | null
 ): React.ReactNode {
-  const colorWords = wordColors ? Object.keys(wordColors).filter(w => w.length > 0) : []
-  // Si rien a faire, retour direct
-  if (colorWords.length === 0 && !searchWord) return text
+  // Filtre mots vides et trim — protege contre une regex (|word) qui split a l'infini
+  const colorWords = wordColors
+    ? Object.keys(wordColors).map(w => w.trim()).filter(w => w.length > 0)
+    : []
+  const trimmedSearch = searchWord ? searchWord.trim() : ''
+  if (colorWords.length === 0 && !trimmedSearch) return text
 
-  // Construit une regex qui matche soit un mot colore soit le searchWord (insensible a la casse)
-  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const allWords = [...colorWords, ...(searchWord ? [searchWord] : [])]
-    .map(escape)
-    .sort((a, b) => b.length - a.length) // mots longs d'abord pour eviter les sous-matches
-  const regex = new RegExp(`(${allWords.join('|')})`, 'gi')
-  const parts = text.split(regex)
+  try {
+    const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const allWords = Array.from(new Set([...colorWords, ...(trimmedSearch ? [trimmedSearch] : [])]))
+      .map(escape)
+      .sort((a, b) => b.length - a.length)
+    if (allWords.length === 0) return text
+    const regex = new RegExp(`(${allWords.join('|')})`, 'gi')
+    const parts = text.split(regex)
 
-  return parts.map((part, i) => {
-    if (!part) return null
-    const lower = part.toLowerCase()
-    // Couleur custom prioritaire
-    const customColor = wordColors && Object.entries(wordColors).find(([w]) => w.toLowerCase() === lower)?.[1]
-    const isSearch = searchWord && lower === searchWord.toLowerCase()
-    if (customColor && isSearch) {
-      return <mark key={i} className="bg-primary/30 rounded px-0.5" style={{ color: customColor }}>{part}</mark>
-    }
-    if (customColor) {
-      return <span key={i} style={{ color: customColor, fontWeight: 600 }}>{part}</span>
-    }
-    if (isSearch) {
-      return <mark key={i} className="bg-primary/30 text-foreground rounded px-0.5">{part}</mark>
-    }
-    return part
-  })
+    return parts.map((part, i) => {
+      if (!part) return null
+      const lower = part.toLowerCase()
+      const customColor = wordColors && Object.entries(wordColors).find(([w]) => w.trim().toLowerCase() === lower)?.[1]
+      const isSearch = trimmedSearch && lower === trimmedSearch.toLowerCase()
+      if (customColor && isSearch) {
+        return <mark key={i} className="bg-primary/30 rounded px-0.5" style={{ color: customColor }}>{part}</mark>
+      }
+      if (customColor) {
+        return <span key={i} style={{ color: customColor, fontWeight: 600 }}>{part}</span>
+      }
+      if (isSearch) {
+        return <mark key={i} className="bg-primary/30 text-foreground rounded px-0.5">{part}</mark>
+      }
+      return part
+    })
+  } catch {
+    // En cas de regex invalide ou autre, on retourne le texte brut sans planter le rendu
+    return text
+  }
 }
 
 export default TranscriptionTool
