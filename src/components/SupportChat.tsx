@@ -215,10 +215,24 @@ export default function SupportChat() {
   )
 }
 
+/**
+ * SQLite datetime('now') renvoie "YYYY-MM-DD HH:mm:ss" en UTC mais sans suffixe Z.
+ * new Date(s) interpreterait alors la chaine en heure locale, decalant la valeur.
+ * Helper qui ajoute 'Z' (ou remplace l'espace par 'T' + 'Z') pour forcer UTC.
+ */
+function toUtcIso(s: string): string {
+  if (!s) return s
+  if (s.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(s)) return s
+  return s.replace(' ', 'T') + 'Z'
+}
+
 /** Bulle individuelle message (alignee a droite si user, gauche si admin). */
 function MessageBubble({ message, token }: { message: SupportMessage; token: string }) {
   const isUser = message.sender_role === 'user'
-  const time = new Date(message.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  // SQLite datetime('now') renvoie "YYYY-MM-DD HH:mm:ss" sans suffixe Z, donc JS l'interprete
+  // en heure locale par defaut. On force l'interpretation UTC en ajoutant Z (ou en
+  // remplacant l'espace par T pour les formats deja ISO).
+  const time = new Date(toUtcIso(message.created_at)).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div className={`max-w-[80%] rounded-lg px-3 py-2 text-xs ${

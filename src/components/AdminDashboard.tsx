@@ -541,7 +541,7 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
                     {c.has_attachment ? '📎 ' : ''}{c.last_message || '(image)'}
                   </div>
                   <div className="text-[9px] text-muted-foreground/60 font-mono mt-0.5">
-                    {c.last_at ? new Date(c.last_at).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+                    {c.last_at ? new Date(toUtcIso(c.last_at)).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }) : ''}
                   </div>
                 </button>
               ))}
@@ -567,7 +567,7 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
                 <div ref={supportScrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
                   {supportThread.map(m => {
                     const isAdmin = m.sender_role === 'admin'
-                    const time = new Date(m.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+                    const time = new Date(toUtcIso(m.created_at)).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })
                     return (
                       <div key={m.id} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'}`}>
                         <div className={`max-w-[75%] rounded-lg px-3 py-2 text-xs ${
@@ -722,4 +722,15 @@ function ServiceStatus({ name, ok }: { name: string; ok: boolean }) {
       </div>
     </div>
   )
+}
+
+/**
+ * SQLite datetime('now') renvoie "YYYY-MM-DD HH:mm:ss" en UTC mais sans suffixe Z.
+ * Sans Z, JavaScript interpreterait la chaine en heure locale, decalant la valeur.
+ * Ce helper la marque comme UTC.
+ */
+function toUtcIso(s: string): string {
+  if (!s) return s
+  if (s.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(s)) return s
+  return s.replace(' ', 'T') + 'Z'
 }
