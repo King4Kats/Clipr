@@ -139,6 +139,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   // Map mot → couleur custom (choisie via le color picker du nuage)
   // Persistee dans le projet pour retrouver les surlignages a la prochaine ouverture.
   const [wordColors, setWordColors] = useState<Record<string, string>>(initialProject?.data?.wordColors || {})
+  // Map speaker → couleur override (palette par defaut sinon)
+  const [speakerColors, setSpeakerColors] = useState<Record<string, string>>(initialProject?.data?.speakerColors || {})
 
   // Sauvegarder wordColors dans le projet quand ca change (si on a un projet ouvert)
   const persistWordColors = useCallback((next: Record<string, string>) => {
@@ -163,6 +165,15 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
     if (!initialProject?.id) return
     api.loadProjectById(initialProject.id).then((project: any) => {
       if (project?.data) api.saveProject({ id: initialProject.id, ...project.data, forcedWords: next }).catch(() => {})
+    }).catch(() => {})
+  }, [initialProject?.id])
+
+  // Persiste les couleurs de speaker dans le projet
+  const persistSpeakerColors = useCallback((next: Record<string, string>) => {
+    setSpeakerColors(next)
+    if (!initialProject?.id) return
+    api.loadProjectById(initialProject.id).then((project: any) => {
+      if (project?.data) api.saveProject({ id: initialProject.id, ...project.data, speakerColors: next }).catch(() => {})
     }).catch(() => {})
   }, [initialProject?.id])
   // Recherche dans le transcript de la vue post-transcribe simple
@@ -675,6 +686,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         initialForced={initialProject?.data?.forcedWords}
         onExcludedWordsChange={persistExcludedWords}
         onForcedWordsChange={persistForcedWords}
+        speakerColors={speakerColors}
+        onSpeakerColorsChange={persistSpeakerColors}
       />
     )
   }
@@ -778,6 +791,8 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         initialForced={initialProject?.data?.forcedWords}
         onExcludedWordsChange={persistExcludedWords}
         onForcedWordsChange={persistForcedWords}
+        speakerColors={speakerColors}
+        onSpeakerColorsChange={persistSpeakerColors}
       />
     )
   }
@@ -1316,6 +1331,8 @@ function TranscriptionResult({
   initialForced,
   onExcludedWordsChange,
   onForcedWordsChange,
+  speakerColors,
+  onSpeakerColorsChange,
 }: {
   segments: TranscriptSegment[]
   transcriptionId: string | null
@@ -1337,6 +1354,10 @@ function TranscriptionResult({
   onExcludedWordsChange?: (next: string[]) => void
   /** Callback de persistence pour les mots forces */
   onForcedWordsChange?: (next: string[]) => void
+  /** Couleurs overridees par speaker (controlees + persistees par le parent) */
+  speakerColors?: Record<string, string>
+  /** Callback quand l'utilisateur change la couleur d'un speaker */
+  onSpeakerColorsChange?: (next: Record<string, string>) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -1621,7 +1642,8 @@ function TranscriptionResult({
                       {showSpeaker && (
                         <div className="mt-3 mb-1 first:mt-0">
                           <span
-                            className="text-[10px] font-bold uppercase tracking-wider text-primary cursor-pointer hover:underline"
+                            className="text-[10px] font-bold uppercase tracking-wider cursor-pointer hover:underline"
+                            style={{ color: speakerColors?.[seg.speaker!] || (SPEAKER_COLORS[speakers.indexOf(seg.speaker!) % SPEAKER_COLORS.length] || '#3b82f6') }}
                             title="Cliquer pour renommer ce locuteur"
                             onClick={(e) => {
                               e.stopPropagation()
@@ -1676,6 +1698,13 @@ function TranscriptionResult({
                   onWordInclude={includeWord}
                   onWordForce={forceWord}
                   onWordUnforce={unforceWord}
+                  speakerColors={speakerColors}
+                  onSpeakerColorChange={(speaker, color) => {
+                    const next = { ...(speakerColors || {}) }
+                    if (color === null) delete next[speaker]
+                    else next[speaker] = color
+                    onSpeakerColorsChange?.(next)
+                  }}
                 />
               </div>
             </div>
@@ -1745,6 +1774,7 @@ function WordCloudPanel({
   wordColors, onWordColorChange,
   excludedWords, forcedWords,
   onWordExclude, onWordInclude, onWordForce, onWordUnforce,
+  speakerColors, onSpeakerColorChange,
 }: {
   data: { text: string; value: number }[]
   frequencies: WordFreqType[]
@@ -1759,17 +1789,28 @@ function WordCloudPanel({
   onWordInclude?: (word: string) => void
   onWordForce?: (word: string) => void
   onWordUnforce?: (word: string) => void
+  speakerColors?: Record<string, string>
+  onSpeakerColorChange?: (speaker: string, color: string | null) => void
 }) {
   const [words, setWords] = useState<any[]>([])
   const [hoveredWord, setHoveredWord] = useState<string | null>(null)
   const [pickerWord, setPickerWord] = useState<string | null>(null)
+  // Speaker dont la palette de couleur est ouverte (clic sur sa pastille de legende)
+  const [pickerSpeaker, setPickerSpeaker] = useState<string | null>(null)
   // Affichage du mini panneau de gestion des mots (exclus / forces)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [forceInput, setForceInput] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 500, h: 300 })
 
-  // Couleur par mot selon le speaker dominant
+  // Helper : couleur d'un speaker (override custom > palette par defaut)
+  const getSpeakerColor = useCallback((speaker: string) => {
+    if (speakerColors?.[speaker]) return speakerColors[speaker]
+    const idx = speakers.indexOf(speaker)
+    return SPEAKER_COLORS[idx >= 0 ? idx % SPEAKER_COLORS.length : 0]
+  }, [speakerColors, speakers])
+
+  // Couleur par mot selon le speaker dominant (utilise les overrides custom)
   const wordColorMap = useMemo(() => {
     const map = new Map<string, string>()
     for (const freq of frequencies) {
@@ -1777,11 +1818,10 @@ function WordCloudPanel({
       for (const [speaker, count] of Object.entries(freq.speakers)) {
         if (count > maxCount) { maxCount = count; maxSpeaker = speaker }
       }
-      const idx = speakers.indexOf(maxSpeaker)
-      map.set(freq.word, SPEAKER_COLORS[idx >= 0 ? idx % SPEAKER_COLORS.length : 0])
+      map.set(freq.word, getSpeakerColor(maxSpeaker))
     }
     return map
-  }, [frequencies, speakers])
+  }, [frequencies, getSpeakerColor])
 
   // Mesurer le conteneur
   useEffect(() => {
@@ -1823,12 +1863,41 @@ function WordCloudPanel({
     <div ref={containerRef} className="relative w-full h-full">
       {speakers.length > 0 && (
         <div className="absolute top-1 left-2 flex items-center gap-2 z-10">
-          {speakers.map((s, i) => (
-            <div key={s} className="flex items-center gap-1 text-[8px] text-muted-foreground">
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: SPEAKER_COLORS[i % SPEAKER_COLORS.length] }} />
+          {speakers.map(s => (
+            <button
+              key={s}
+              onClick={() => setPickerSpeaker(pickerSpeaker === s ? null : s)}
+              className="flex items-center gap-1 text-[8px] text-muted-foreground hover:text-foreground transition-colors"
+              title={`Changer la couleur de ${s}`}
+            >
+              <div className="w-2.5 h-2.5 rounded-full ring-1 ring-border" style={{ backgroundColor: getSpeakerColor(s) }} />
               {s}
-            </div>
+            </button>
           ))}
+        </div>
+      )}
+
+      {/* Palette de couleurs ouverte au clic sur une pastille de speaker */}
+      {pickerSpeaker && onSpeakerColorChange && (
+        <div className="absolute top-6 left-2 z-30 bg-card border border-border rounded-lg p-2 shadow-xl">
+          <div className="text-[10px] text-muted-foreground mb-1.5 px-1">
+            Couleur de <span className="font-bold text-foreground">{pickerSpeaker}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {WORD_PALETTE.map(c => (
+              <button
+                key={c}
+                onClick={() => { onSpeakerColorChange(pickerSpeaker, c); setPickerSpeaker(null) }}
+                className="w-5 h-5 rounded-full border-2 border-transparent hover:border-foreground/30 transition-colors"
+                style={{ backgroundColor: c }}
+              />
+            ))}
+            <button
+              onClick={() => { onSpeakerColorChange(pickerSpeaker, null); setPickerSpeaker(null) }}
+              className="w-5 h-5 rounded-full border border-border bg-secondary text-[9px] font-bold text-muted-foreground hover:text-foreground"
+              title="Couleur par defaut"
+            >✕</button>
+          </div>
         </div>
       )}
       <svg ref={(el) => { if (svgRef) svgRef.current = el }} viewBox={`${-size.w/2} ${-size.h/2} ${size.w} ${size.h}`} className="w-full h-full">
