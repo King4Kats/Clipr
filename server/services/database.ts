@@ -372,4 +372,25 @@ function initSchema() {
   if (!hasCol('approval_token')) db.exec('ALTER TABLE users ADD COLUMN approval_token TEXT')
   if (!hasCol('approved_at')) db.exec('ALTER TABLE users ADD COLUMN approved_at TEXT')
   if (!hasCol('approved_by')) db.exec('ALTER TABLE users ADD COLUMN approved_by TEXT')
+
+  // ── Table support_messages : messagerie utilisateur ↔ admins ──
+  // Chaque utilisateur a UN fil de discussion (identifie par user_id).
+  // Les messages sont stockes plat avec sender_role pour distinguer.
+  // attachment_path = nom de fichier (image) stocke dans /data/support-attachments/
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS support_messages (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      sender_role TEXT NOT NULL CHECK(sender_role IN ('user', 'admin')),
+      sender_id TEXT,
+      content TEXT NOT NULL DEFAULT '',
+      attachment_path TEXT,
+      read_by_user INTEGER NOT NULL DEFAULT 0,
+      read_by_admin INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_support_user ON support_messages(user_id);
+    CREATE INDEX IF NOT EXISTS idx_support_created ON support_messages(created_at);
+  `)
 }

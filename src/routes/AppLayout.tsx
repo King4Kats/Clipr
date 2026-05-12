@@ -20,6 +20,7 @@ import api from '@/api'
 import Header from '@/components/new/Header'
 import SetupWizard from '@/components/SetupWizard'
 import ShareDialog from '@/components/ShareDialog'
+import SupportChat from '@/components/SupportChat'
 
 import { AnimatePresence } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
@@ -157,6 +158,9 @@ export default function AppLayout() {
           />
         )}
       </AnimatePresence>
+
+      {/* Bouton flottant + panneau de support (visible uniquement si connecte) */}
+      <SupportChat />
     </div>
   )
 }

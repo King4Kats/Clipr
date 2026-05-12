@@ -15,7 +15,7 @@
 // --- Imports ---
 // useState : état local, useEffect : effets de bord (appels API au montage),
 // useCallback : mémorise les fonctions pour éviter des re-rendus inutiles
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 // Store Zustand contenant le token d'authentification JWT
 import { useAuthStore } from '@/store/useAuthStore'
 // Bibliothèque d'animation pour les transitions fluides entre onglets
@@ -23,7 +23,8 @@ import { motion } from 'framer-motion'
 // Icônes SVG utilisées dans l'interface (chaque icône correspond à un élément visuel)
 import {
   Users, FolderKanban, HardDrive, Activity, RefreshCw,
-  CheckCircle, XCircle, Lock, ScrollText, ArrowLeft, Cpu, Trash2, ExternalLink, UserCheck
+  CheckCircle, XCircle, Lock, ScrollText, ArrowLeft, Cpu, Trash2, ExternalLink, UserCheck,
+  MessageCircle, Send, Paperclip, X, Loader2
 } from 'lucide-react'
 // Composant bouton réutilisable du design system de l'application
 import { Button } from '@/components/ui/button'
@@ -70,8 +71,8 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
   // Récupération du token JWT pour authentifier les requêtes API admin
   const { token } = useAuthStore()
 
-  // Onglet actif : vue d'ensemble, projets, utilisateurs, inscriptions en attente, logs
-  const [tab, setTab] = useState<'overview' | 'projects' | 'users' | 'pending' | 'logs'>('overview')
+  // Onglet actif : vue d'ensemble, projets, utilisateurs, inscriptions, support, logs
+  const [tab, setTab] = useState<'overview' | 'projects' | 'users' | 'pending' | 'support' | 'logs'>('overview')
 
   // Données récupérées depuis le backend
   const [system, setSystem] = useState<SystemHealth | null>(null) // Santé du système
@@ -79,6 +80,16 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
   const [users, setUsers] = useState<any[]>([])                    // Liste de tous les utilisateurs
   const [pendingUsers, setPendingUsers] = useState<any[]>([])      // Inscriptions en attente de validation
   const [regSettings, setRegSettings] = useState<{ open: boolean; mailerConfigured: boolean; adminEmail: string | null } | null>(null)
+  // Support : conversations + thread selectionne + composer
+  const [supportConvs, setSupportConvs] = useState<any[]>([])
+  const [supportTotalUnread, setSupportTotalUnread] = useState(0)
+  const [supportSelectedUserId, setSupportSelectedUserId] = useState<string | null>(null)
+  const [supportThread, setSupportThread] = useState<any[]>([])
+  const [supportContent, setSupportContent] = useState('')
+  const [supportFile, setSupportFile] = useState<File | null>(null)
+  const [supportSending, setSupportSending] = useState(false)
+  const supportFileRef = useRef<HTMLInputElement>(null)
+  const supportScrollRef = useRef<HTMLDivElement>(null)
   const [logs, setLogs] = useState<string[]>([])                   // Lignes de log du serveur
   const [logTotal, setLogTotal] = useState(0)                      // Nombre total de lignes de log
   const [loading, setLoading] = useState(false)                    // Indicateur de chargement global
@@ -134,6 +145,81 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
     } catch {}
   }, [token])
 
+  /** Liste des conversations support + total non-lus admin. */
+  const fetchSupportConvs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/support/conversations', { headers })
+      if (res.ok) {
+        const data = await res.json()
+        setSupportConvs(data.conversations || [])
+        setSupportTotalUnread(data.totalUnread || 0)
+      }
+    } catch {}
+  }, [token])
+
+  /** Charge le fil d'un user et marque comme lu cote admin. */
+  const fetchSupportThread = useCallback(async (userId: string) => {
+    setSupportSelectedUserId(userId)
+    try {
+      const res = await fetch(`/api/admin/support/conversations/${userId}`, { headers })
+      if (res.ok) {
+        const data = await res.json()
+        setSupportThread(data.messages || [])
+        // Mark read
+        await fetch(`/api/admin/support/conversations/${userId}/mark-read`, { method: 'POST', headers })
+        await fetchSupportConvs()
+      }
+    } catch {}
+  }, [token, fetchSupportConvs])
+
+  /** Envoyer un message admin dans le fil selectionne. */
+  const sendSupportMessage = async () => {
+    if (!supportSelectedUserId || supportSending) return
+    const trimmed = supportContent.trim()
+    if (!trimmed && !supportFile) return
+    setSupportSending(true)
+    try {
+      const form = new FormData()
+      form.append('content', trimmed)
+      if (supportFile) form.append('attachment', supportFile)
+      const res = await fetch(`/api/admin/support/conversations/${supportSelectedUserId}/messages`, {
+        method: 'POST', headers, body: form,
+      })
+      if (res.ok) {
+        setSupportContent('')
+        setSupportFile(null)
+        if (supportFileRef.current) supportFileRef.current.value = ''
+        await fetchSupportThread(supportSelectedUserId)
+      }
+    } catch {}
+    finally { setSupportSending(false) }
+  }
+
+  // WS : ecoute des nouveaux messages support pour rafraichir liste + thread
+  useEffect(() => {
+    if (!token) return
+    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${wsProto}//${location.host}/ws`)
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', token }))
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data)
+        if (msg.type === 'support:message') {
+          fetchSupportConvs()
+          if (supportSelectedUserId && msg.message?.user_id === supportSelectedUserId) {
+            fetchSupportThread(supportSelectedUserId)
+          }
+        }
+      } catch {}
+    }
+    return () => ws.close()
+  }, [token, supportSelectedUserId, fetchSupportConvs, fetchSupportThread])
+
+  // Auto-scroll bas du thread
+  useEffect(() => {
+    if (supportScrollRef.current) supportScrollRef.current.scrollTop = supportScrollRef.current.scrollHeight
+  }, [supportThread])
+
   /** Approuve ou rejette une inscription en attente. */
   const decideUser = async (id: string, action: 'approve' | 'reject') => {
     try {
@@ -176,7 +262,7 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
    */
   const refreshAll = async () => {
     setLoading(true)
-    await Promise.all([fetchSystem(), fetchProjects(), fetchUsers(), fetchPending(), fetchRegSettings(), fetchLogs()])
+    await Promise.all([fetchSystem(), fetchProjects(), fetchUsers(), fetchPending(), fetchRegSettings(), fetchSupportConvs(), fetchLogs()])
     setLoading(false)
   }
 
@@ -230,6 +316,7 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
           { id: 'projects' as const, label: 'Projets', icon: FolderKanban },
           { id: 'users' as const, label: 'Utilisateurs', icon: Users },
           { id: 'pending' as const, label: `Inscriptions${pendingUsers.length ? ` (${pendingUsers.length})` : ''}`, icon: UserCheck },
+          { id: 'support' as const, label: `Support${supportTotalUnread ? ` (${supportTotalUnread})` : ''}`, icon: MessageCircle },
           { id: 'logs' as const, label: 'Logs', icon: ScrollText },
         ].map(t => (
           <button
@@ -426,6 +513,133 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
                 )}
               </tbody>
             </table>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ===== ONGLET : SUPPORT (chat avec utilisateurs) ===== */}
+      {tab === 'support' && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 md:grid-cols-3 gap-4 h-[600px]">
+          {/* Colonne gauche : liste des conversations */}
+          <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+            <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Conversations</span>
+              <span className="text-[10px] text-muted-foreground">{supportConvs.length}</span>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {supportConvs.length === 0 ? (
+                <div className="text-center text-xs text-muted-foreground py-10 px-4">Aucune conversation</div>
+              ) : supportConvs.map(c => (
+                <button
+                  key={c.user_id}
+                  onClick={() => fetchSupportThread(c.user_id)}
+                  className={`w-full text-left px-3 py-2 border-b border-border/50 hover:bg-secondary/40 transition-colors ${
+                    supportSelectedUserId === c.user_id ? 'bg-primary/10' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-foreground truncate">{c.username}</span>
+                    {c.unread_admin > 0 && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-destructive text-destructive-foreground">
+                        {c.unread_admin}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground truncate mt-0.5">
+                    {c.has_attachment ? '📎 ' : ''}{c.last_message || '(image)'}
+                  </div>
+                  <div className="text-[9px] text-muted-foreground/60 font-mono mt-0.5">
+                    {c.last_at ? new Date(c.last_at).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Colonne droite : thread + composer */}
+          <div className="md:col-span-2 bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+            {!supportSelectedUserId ? (
+              <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
+                Selectionne une conversation pour repondre
+              </div>
+            ) : (
+              <>
+                <div className="px-3 py-2 border-b border-border bg-secondary/20">
+                  <span className="text-xs font-bold text-foreground">
+                    {supportConvs.find(c => c.user_id === supportSelectedUserId)?.username || 'Conversation'}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground ml-2">
+                    {supportConvs.find(c => c.user_id === supportSelectedUserId)?.email}
+                  </span>
+                </div>
+                <div ref={supportScrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+                  {supportThread.map(m => {
+                    const isAdmin = m.sender_role === 'admin'
+                    const time = new Date(m.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+                    return (
+                      <div key={m.id} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[75%] rounded-lg px-3 py-2 text-xs ${
+                          isAdmin ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground'
+                        }`}>
+                          {m.attachment_path && (
+                            <img
+                              src={`/api/support/attachments/${m.attachment_path}?t=${token}`}
+                              alt="piece jointe"
+                              className="rounded mb-1.5 max-w-full max-h-[240px] cursor-pointer"
+                              onClick={() => window.open(`/api/support/attachments/${m.attachment_path}?t=${token}`, '_blank')}
+                            />
+                          )}
+                          {m.content && <div className="whitespace-pre-wrap break-words">{m.content}</div>}
+                          <div className={`text-[9px] mt-1 ${isAdmin ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>{time}</div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="p-3 border-t border-border space-y-2 bg-secondary/10">
+                  {supportFile && (
+                    <div className="flex items-center gap-2 px-2 py-1 bg-secondary rounded text-[11px]">
+                      <Paperclip className="w-3 h-3 text-muted-foreground" />
+                      <span className="flex-1 truncate text-foreground">{supportFile.name}</span>
+                      <button onClick={() => { setSupportFile(null); if (supportFileRef.current) supportFileRef.current.value = '' }} className="hover:text-destructive">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex items-end gap-2">
+                    <input
+                      ref={supportFileRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      onChange={e => e.target.files?.[0] && setSupportFile(e.target.files[0])}
+                    />
+                    <button
+                      onClick={() => supportFileRef.current?.click()}
+                      className="p-2 rounded-lg bg-secondary hover:bg-secondary/70 text-muted-foreground hover:text-foreground"
+                      title="Joindre une image"
+                    >
+                      <Paperclip className="w-4 h-4" />
+                    </button>
+                    <textarea
+                      value={supportContent}
+                      onChange={e => setSupportContent(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendSupportMessage() } }}
+                      placeholder="Repondre... (Ctrl+Enter pour envoyer)"
+                      rows={2}
+                      className="flex-1 resize-none px-2.5 py-1.5 bg-background border border-border rounded-lg text-xs outline-none focus:ring-1 focus:ring-primary/50"
+                    />
+                    <button
+                      onClick={sendSupportMessage}
+                      disabled={supportSending || (!supportContent.trim() && !supportFile)}
+                      className="p-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+                    >
+                      {supportSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </motion.div>
       )}

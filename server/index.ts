@@ -37,6 +37,7 @@ import * as authService from './services/auth.js'
 import * as settingsService from './services/settings.js'
 import * as mailer from './services/mailer.js'
 import { extractText, createTextTranscription } from './services/text-import.js'
+import * as supportService from './services/support.js'
 import * as aiLockService from './services/ai-lock.js'
 import * as sharingService from './services/sharing.js'
 import * as taskQueueService from './services/task-queue.js'
@@ -127,13 +128,14 @@ interface WsClient {
   ws: WebSocket
   projectId: string | null  // Le projet qu'il écoute (null = aucun)
   userId: string | null      // L'utilisateur authentifié (null = pas encore auth)
+  role: string | null        // Le role JWT (admin/user) — utilise pour broadcastToAdmins
 }
 
 // Ensemble de tous les clients WebSocket connectés
 const clients = new Set<WsClient>()
 
 wss.on('connection', (ws) => {
-  const client: WsClient = { ws, projectId: null, userId: null }
+  const client: WsClient = { ws, projectId: null, userId: null, role: null }
   clients.add(client)
 
   ws.on('message', (raw) => {
@@ -144,6 +146,7 @@ wss.on('connection', (ws) => {
         try {
           const payload = authService.verifyToken(msg.token)
           client.userId = payload.userId
+          client.role = payload.role
         } catch {
           ws.send(JSON.stringify({ type: 'auth:error', message: 'Token invalide' }))
         }
@@ -193,6 +196,16 @@ function broadcastToUser(userId: string, type: string, data: any) {
   const msg = JSON.stringify({ type, ...data })
   clients.forEach(c => {
     if (c.ws.readyState === WebSocket.OPEN && c.userId === userId) {
+      c.ws.send(msg)
+    }
+  })
+}
+
+/** Diffuse un message a tous les admins connectes (pour les notifs de support). */
+function broadcastToAdmins(type: string, data: any) {
+  const msg = JSON.stringify({ type, ...data })
+  clients.forEach(c => {
+    if (c.ws.readyState === WebSocket.OPEN && c.role === 'admin') {
       c.ws.send(msg)
     }
   })
@@ -276,6 +289,28 @@ const textUpload = multer({
     const ext = extname(file.originalname).toLowerCase()
     if (ALLOWED_TEXT_EXTS.includes(ext)) cb(null, true)
     else cb(new Error('Format non supporte. Accepte : .txt, .docx, .pdf'))
+  },
+})
+
+// Upload pieces jointes du support (images uniquement, max 5 MB)
+const SUPPORT_DIR = join(DATA_DIR, 'support-attachments')
+if (!existsSync(SUPPORT_DIR)) mkdirSync(SUPPORT_DIR, { recursive: true })
+const ALLOWED_IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif']
+const supportStorage = multer.diskStorage({
+  destination: SUPPORT_DIR,
+  filename: (_req, file, cb) => {
+    // Nom unique : timestamp_random.ext
+    const ext = extname(file.originalname).toLowerCase() || '.png'
+    cb(null, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`)
+  },
+})
+const supportUpload = multer({
+  storage: supportStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  fileFilter: (_req, file, cb) => {
+    const ext = extname(file.originalname).toLowerCase()
+    if (ALLOWED_IMAGE_EXTS.includes(ext) && file.mimetype.startsWith('image/')) cb(null, true)
+    else cb(new Error('Image uniquement (png, jpg, webp, gif), 5 MB max'))
   },
 })
 
@@ -481,6 +516,145 @@ app.put('/api/admin/settings/registration', requireAuth, requireAdmin, (req, res
   settingsService.setBool('registration_open', open)
   logger.info(`Inscriptions ${open ? 'ouvertes' : 'fermees'} par admin ${req.user!.username}`)
   res.json({ open })
+})
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── SUPPORT MESSAGING : utilisateur ↔ admins ──
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Liste tous les emails admin (pour notifier sur nouveau message support). */
+function listAdminEmails(): string[] {
+  const db = getDb()
+  const rows = db.prepare("SELECT email FROM users WHERE role = 'admin'").all() as { email: string }[]
+  return rows.map(r => r.email)
+}
+
+// User : recuperer son propre fil de discussion
+app.get('/api/support/messages', requireAuth, (req, res) => {
+  const messages = supportService.getThreadByUser(req.user!.userId)
+  const unread = supportService.unreadForUser(req.user!.userId)
+  res.json({ messages, unread })
+})
+
+// User : envoyer un message (texte +/- image)
+app.post('/api/support/messages', requireAuth, supportUpload.single('attachment'), (req, res) => {
+  try {
+    const content = (req.body?.content || '').toString().trim()
+    if (!content && !req.file) return res.status(400).json({ error: 'Message vide' })
+    if (content.length > 5000) return res.status(400).json({ error: 'Message trop long (max 5000)' })
+
+    const message = supportService.createMessage({
+      userId: req.user!.userId,
+      senderRole: 'user',
+      senderId: req.user!.userId,
+      content,
+      attachmentPath: req.file ? req.file.filename : null,
+    })
+
+    // Push WS au user lui-meme (autres onglets) et a tous les admins connectes
+    broadcastToUser(req.user!.userId, 'support:message', { message })
+    broadcastToAdmins('support:message', { message, fromUsername: req.user!.username })
+
+    // Notif email aux admins (asynchrone)
+    const adminEmails = listAdminEmails()
+    if (adminEmails.length > 0 && mailer.isMailerConfigured()) {
+      const linkUrl = mailer.publicUrl('/admin')
+      const preview = content.slice(0, 200) + (content.length > 200 ? '...' : '')
+      const text = [
+        `Nouveau message support de ${req.user!.username} :`,
+        '',
+        preview,
+        req.file ? '(piece jointe : image)' : '',
+        '',
+        `Repondre depuis le dashboard admin : ${linkUrl}`,
+      ].filter(Boolean).join('\n')
+      const html = `
+        <div style="font-family:system-ui,sans-serif;max-width:520px;margin:auto;padding:20px;border:1px solid #ddd;border-radius:8px">
+          <h2 style="margin-top:0">Nouveau message support</h2>
+          <p>De <strong>${req.user!.username}</strong> :</p>
+          <blockquote style="border-left:3px solid #ddd;padding-left:12px;color:#444">${preview.replace(/\n/g, '<br>')}</blockquote>
+          ${req.file ? '<p style="color:#666;font-size:13px">(piece jointe : image)</p>' : ''}
+          <p><a href="${linkUrl}" style="display:inline-block;padding:10px 16px;background:#3b82f6;color:#fff;text-decoration:none;border-radius:6px">Ouvrir le dashboard</a></p>
+        </div>`
+      // Envoie un seul mail avec tous les admins en BCC pour eviter le bruit
+      Promise.all(adminEmails.map(to =>
+        mailer.sendMail({ to, subject: `[Clipr Support] ${req.user!.username}`, text, html })
+      )).catch(() => {})
+    }
+
+    res.json({ message })
+  } catch (err: any) { res.status(400).json({ error: err.message }) }
+})
+
+// User : marquer ses messages admin comme lus
+app.post('/api/support/mark-read', requireAuth, (req, res) => {
+  supportService.markReadByUser(req.user!.userId)
+  res.json({ ok: true })
+})
+
+// Admin : liste de toutes les conversations
+app.get('/api/admin/support/conversations', requireAuth, requireAdmin, (_req, res) => {
+  res.json({
+    conversations: supportService.listConversationsForAdmin(),
+    totalUnread: supportService.totalUnreadForAdmins(),
+  })
+})
+
+// Admin : recuperer un fil
+app.get('/api/admin/support/conversations/:userId', requireAuth, requireAdmin, (req, res) => {
+  const messages = supportService.getThreadByUser(req.params.userId)
+  res.json({ messages })
+})
+
+// Admin : poster un message dans un fil
+app.post('/api/admin/support/conversations/:userId/messages', requireAuth, requireAdmin, supportUpload.single('attachment'), (req, res) => {
+  try {
+    const content = (req.body?.content || '').toString().trim()
+    if (!content && !req.file) return res.status(400).json({ error: 'Message vide' })
+    const message = supportService.createMessage({
+      userId: req.params.userId,
+      senderRole: 'admin',
+      senderId: req.user!.userId,
+      content,
+      attachmentPath: req.file ? req.file.filename : null,
+    })
+    // Push WS au destinataire + autres admins
+    broadcastToUser(req.params.userId, 'support:message', { message })
+    broadcastToAdmins('support:message', { message })
+    res.json({ message })
+  } catch (err: any) { res.status(400).json({ error: err.message }) }
+})
+
+// Admin : marquer un fil comme lu cote admin
+app.post('/api/admin/support/conversations/:userId/mark-read', requireAuth, requireAdmin, (req, res) => {
+  supportService.markReadByAdmin(req.params.userId)
+  res.json({ ok: true })
+})
+
+// Servir les pieces jointes : auth via Bearer header OU ?t=<token> (pour <img src>)
+app.get('/api/support/attachments/:filename', (req, res) => {
+  const token = req.headers.authorization?.slice(7) || (req.query.t as string)
+  if (!token) return res.status(401).end()
+  let userId: string, role: string
+  try {
+    const payload = authService.verifyToken(token)
+    userId = payload.userId; role = payload.role
+  } catch { return res.status(401).end() }
+
+  const filename = req.params.filename
+  // Securite : pas de path traversal
+  if (!/^[\w.-]+$/.test(filename)) return res.status(400).end()
+
+  // Verifier que ce fichier est cite par un message du user OU que c'est un admin
+  if (role !== 'admin') {
+    const db = getDb()
+    const found = db.prepare('SELECT 1 FROM support_messages WHERE user_id = ? AND attachment_path = ? LIMIT 1')
+      .get(userId, filename)
+    if (!found) return res.status(403).end()
+  }
+  const filePath = join(SUPPORT_DIR, filename)
+  if (!existsSync(filePath)) return res.status(404).end()
+  res.sendFile(filePath)
 })
 
 // Endpoint public : indique au front si les inscriptions sont ouvertes
