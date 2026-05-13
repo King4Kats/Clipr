@@ -370,6 +370,21 @@ const api = {
   assistantDeleteConversation: (id: string) =>
     del(`/api/assistant/conversations/${id}`),
   /**
+   * Upload un fichier (.txt/.docx/.pdf) et retourne son texte extrait.
+   * Le client peut ensuite l'inserer dans son prompt.
+   */
+  assistantExtractFile: async (file: File): Promise<{ filename: string; text: string }> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${API_BASE}/api/assistant/extract`, {
+      method: 'POST',
+      body: form,
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`)
+    return res.json()
+  },
+  /**
    * Envoie un message a l'assistant et stream la reponse via SSE.
    * onToken : appele a chaque token recu (texte incremental)
    * onDone : appele a la fin avec le texte complet et le message sauvegarde

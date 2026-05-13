@@ -1212,6 +1212,22 @@ app.post('/api/assistant/conversations/:id/messages', requireAuth, async (req, r
   )
 })
 
+// Extrait le texte d'un fichier .txt/.docx/.pdf uploade et le retourne brut.
+// Sert au chatbot pour permettre a l'utilisateur d'attacher un document.
+app.post('/api/assistant/extract', requireAuth, textUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Fichier manquant' })
+    const text = await extractText(req.file.buffer, req.file.originalname)
+    if (!text || text.trim().length < 1) {
+      return res.status(400).json({ error: 'Extraction echouee ou fichier vide' })
+    }
+    res.json({ filename: req.file.originalname, text })
+  } catch (err: any) {
+    logger.error(`[Assistant] extract: ${err.message}`)
+    res.status(400).json({ error: err.message })
+  }
+})
+
 // Project list (active projects, max 6) — auth-protected
 app.get('/api/project/history', requireAuth, (req, res) => {
   res.json(projectService.getProjectHistory(req.user!.userId))

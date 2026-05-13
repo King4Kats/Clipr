@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   Plus, Trash2, Pencil, Check, X, Send, Bot, User as UserIcon,
-  Loader2, MessageSquare, Square,
+  Loader2, MessageSquare, Square, Paperclip, FileText,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import api from '@/api'
@@ -52,6 +52,12 @@ export default function AssistantTool() {
   const streamCtrl = useRef<{ abort: () => void } | null>(null)
   // Pour scroll auto en bas de la liste de messages
   const bottomRef = useRef<HTMLDivElement>(null)
+  // Pour ouvrir le selecteur de fichier
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  // Fichiers attaches au prochain message (texte deja extrait cote serveur)
+  const [attachments, setAttachments] = useState<{ name: string; text: string }[]>([])
+  // Indicateur d'upload en cours
+  const [uploading, setUploading] = useState(false)
 
   // ── Chargement initial : recupere la liste des conversations ──
   useEffect(() => {
@@ -145,10 +151,45 @@ export default function AssistantTool() {
     setRenamingId(null)
   }
 
+  /** Upload un ou plusieurs fichiers : extrait le texte cote serveur et l'ajoute aux attachments. */
+  const handleFilesUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    setUploading(true)
+    try {
+      for (const file of Array.from(files)) {
+        try {
+          const res = await api.assistantExtractFile(file)
+          setAttachments((a) => [...a, { name: res.filename, text: res.text }])
+        } catch (err: any) {
+          alert(`Echec d'extraction pour ${file.name} : ${err.message || 'erreur inconnue'}`)
+        }
+      }
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  /** Retire un fichier attache. */
+  const handleRemoveAttachment = (index: number) => {
+    setAttachments((a) => a.filter((_, i) => i !== index))
+  }
+
   /** Envoie le message saisi et stream la reponse IA. */
   const handleSend = async () => {
     const text = input.trim()
-    if (!text || streaming !== null) return
+    // On peut envoyer si on a soit du texte saisi, soit des fichiers attaches (ou les deux)
+    if ((!text && attachments.length === 0) || streaming !== null) return
+
+    // Concatene les fichiers attaches avant le prompt utilisateur
+    let finalContent = ''
+    if (attachments.length > 0) {
+      finalContent = attachments
+        .map((a) => `### Fichier : ${a.name}\n\n${a.text}`)
+        .join('\n\n---\n\n')
+      finalContent += '\n\n---\n\n'
+    }
+    finalContent += text || 'Analyse ce/ces document(s).'
 
     // Cree une conversation si aucune n'est active
     let convId = activeId
@@ -165,15 +206,16 @@ export default function AssistantTool() {
     }
 
     // Ajoute le message user dans l'UI immediatement
-    const userMsg: Msg = { id: 'tmp-' + Date.now(), role: 'user', content: text }
+    const userMsg: Msg = { id: 'tmp-' + Date.now(), role: 'user', content: finalContent }
     setMessages((ms) => [...ms, userMsg])
     setInput('')
+    setAttachments([])
     setStreaming('')
 
     // Lance le stream SSE
     streamCtrl.current = api.assistantSendMessage(
       convId,
-      text,
+      finalContent,
       // onToken : ajoute le morceau au texte en cours
       (chunk) => setStreaming((s) => (s ?? '') + chunk),
       // onDone : remplace le streaming par le vrai message en DB
@@ -330,27 +372,72 @@ export default function AssistantTool() {
 
         {/* Zone de saisie */}
         <div className="border-t border-border p-4 bg-card/30">
-          <div className="max-w-3xl mx-auto flex gap-2 items-end">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Pose ta question ou colle ton texte ici... (Shift+Entree pour saut de ligne)"
-              rows={Math.min(8, Math.max(1, input.split('\n').length))}
-              disabled={streaming !== null}
-              className="flex-1 resize-none bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/50 disabled:opacity-60"
-            />
-            {streaming !== null ? (
-              <Button onClick={handleStop} variant="secondary" size="sm" className="h-9 gap-2 bg-destructive/10 hover:bg-destructive/20 text-destructive">
-                <Square className="w-3.5 h-3.5" fill="currentColor" />
-                <span>Stop</span>
-              </Button>
-            ) : (
-              <Button onClick={handleSend} size="sm" className="h-9 gap-2" disabled={!input.trim()}>
-                <Send className="w-4 h-4" />
-                <span>Envoyer</span>
-              </Button>
+          <div className="max-w-3xl mx-auto">
+            {/* Chips des fichiers attaches au prochain message */}
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {attachments.map((a, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-1.5 bg-sky-500/10 border border-sky-500/30 rounded-lg px-2 py-1 text-xs text-sky-300"
+                  >
+                    <FileText className="w-3 h-3" />
+                    <span className="truncate max-w-[180px]">{a.name}</span>
+                    <span className="text-[10px] opacity-60">{(a.text.length / 1000).toFixed(0)}k chars</span>
+                    <button
+                      onClick={() => handleRemoveAttachment(i)}
+                      className="p-0.5 hover:bg-sky-500/20 rounded"
+                      title="Retirer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
+
+            <div className="flex gap-2 items-end">
+              {/* Input file cache + bouton attache */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".txt,.docx,.pdf,.md"
+                onChange={(e) => handleFilesUpload(e.target.files)}
+                className="hidden"
+              />
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                variant="ghost"
+                size="sm"
+                className="h-9 w-9 p-0 shrink-0"
+                disabled={streaming !== null || uploading}
+                title="Joindre un fichier (.txt, .docx, .pdf, .md)"
+              >
+                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+              </Button>
+
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={attachments.length > 0 ? "Que veux-tu faire avec ce(s) document(s) ? (laisse vide = analyse generale)" : "Pose ta question ou colle ton texte ici... (Shift+Entree pour saut de ligne)"}
+                rows={Math.min(8, Math.max(1, input.split('\n').length))}
+                disabled={streaming !== null}
+                className="flex-1 resize-none bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/50 disabled:opacity-60"
+              />
+              {streaming !== null ? (
+                <Button onClick={handleStop} variant="secondary" size="sm" className="h-9 gap-2 bg-destructive/10 hover:bg-destructive/20 text-destructive">
+                  <Square className="w-3.5 h-3.5" fill="currentColor" />
+                  <span>Stop</span>
+                </Button>
+              ) : (
+                <Button onClick={handleSend} size="sm" className="h-9 gap-2" disabled={!input.trim() && attachments.length === 0}>
+                  <Send className="w-4 h-4" />
+                  <span>Envoyer</span>
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </section>
