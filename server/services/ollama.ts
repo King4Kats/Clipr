@@ -167,7 +167,14 @@ export function chatStream(
   onDone: (full: string) => void,
   onError: (err: Error) => void,
 ): { abort: () => void } {
-  const postData = JSON.stringify({ model, messages, stream: true })
+  // Options Ollama :
+  // - num_ctx 16384 : fenetre contexte assez large pour ingerer 9 sources HAL/OpenAlex
+  //   (chaque source ~1500 chars => ~13k chars de prompt + reponse)
+  // - num_predict 4096 : autorise des reponses longues (dossier bibliographique)
+  const postData = JSON.stringify({
+    model, messages, stream: true,
+    options: { num_ctx: 16384, num_predict: 4096 },
+  })
   const req = http.request({
     hostname: OLLAMA_HOST, port: OLLAMA_PORT, path: '/api/chat', method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
