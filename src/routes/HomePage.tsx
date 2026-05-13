@@ -18,7 +18,7 @@ import api from '@/api'
 import { motion } from 'framer-motion'
 import {
   Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check,
-  Share2, Users, Mic, BookOpen, Scissors, Bot
+  Share2, Users, Mic, BookOpen, Scissors, Bot, MoreVertical
 } from 'lucide-react'
 import logo from '@/assets/Clipr.svg'
 
@@ -37,6 +37,16 @@ export default function HomePage() {
   const [editingName, setEditingName] = useState('')
   const [sharedProjects, setSharedProjects] = useState<any[]>([])
   const [showNewProjectChoice, setShowNewProjectChoice] = useState(false)
+  // ID du projet dont le menu "..." est ouvert (un seul a la fois)
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+
+  // Ferme le menu si on clique en dehors
+  useEffect(() => {
+    if (!openMenuId) return
+    const handler = () => setOpenMenuId(null)
+    document.addEventListener('click', handler)
+    return () => document.removeEventListener('click', handler)
+  }, [openMenuId])
 
   // Detecte le type reel d'un projet (robuste meme si toolType est absent)
   const getProjectType = (project: any): 'transcription' | 'linguistic' | 'ai' | 'manual' => {
@@ -206,6 +216,19 @@ export default function HomePage() {
                         ? `${project.data?.transcriptionItems?.length || 0} fichier${(project.data?.transcriptionItems?.length || 0) > 1 ? 's' : ''}`
                         : `${project.data?.segments?.length || 0} segments`}
                     </p>
+                    {/* Tag de partage si le projet est partage avec d'autres */}
+                    {project.shares && project.shares.length > 0 && (
+                      <div
+                        className="mt-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 text-[9px] font-semibold"
+                        title={project.shares.map((s: any) => `${s.username} (${s.role === 'editor' ? 'Editeur' : 'Lecteur'})`).join(', ')}
+                      >
+                        <Users className="w-2.5 h-2.5" />
+                        <span>
+                          Partage avec {project.shares.slice(0, 2).map((s: any) => s.username).join(', ')}
+                          {project.shares.length > 2 ? ` +${project.shares.length - 2}` : ''}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -222,34 +245,59 @@ export default function HomePage() {
                   </div>
                 )}
 
-                {/* Actions : share, rename & delete */}
+                {/* Menu "..." : Partager / Renommer / Supprimer (toujours visible, plus discoverable) */}
                 {editingId !== project.id && (
-                  <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute top-2 right-2">
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        // Dispatch share event to AppLayout
-                        window.dispatchEvent(new CustomEvent('clipr:share', { detail: { projectId: project.id, projectName: project.name || project.data?.projectName || '' } }))
+                        setOpenMenuId(openMenuId === project.id ? null : project.id)
                       }}
-                      className="p-1.5 rounded-md bg-secondary/80 hover:bg-primary/20 text-muted-foreground hover:text-primary transition-colors"
-                      title="Partager"
+                      className={`p-1.5 rounded-md bg-secondary/80 hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors ${
+                        openMenuId === project.id ? 'bg-secondary text-foreground' : ''
+                      }`}
+                      title="Options"
                     >
-                      <Share2 className="w-3 h-3" />
+                      <MoreVertical className="w-3.5 h-3.5" />
                     </button>
-                    <button
-                      onClick={(e) => handleStartRename(e, project.id, project.name || project.data?.projectName || '')}
-                      className="p-1.5 rounded-md bg-secondary/80 hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-                      title="Renommer"
-                    >
-                      <Pencil className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={(e) => handleDelete(e, project.id)}
-                      className="p-1.5 rounded-md bg-secondary/80 hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                      title="Supprimer"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                    {openMenuId === project.id && (
+                      <div
+                        className="absolute right-0 top-full mt-1 w-44 bg-card border border-border rounded-lg shadow-lg overflow-hidden z-10"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setOpenMenuId(null)
+                            window.dispatchEvent(new CustomEvent('clipr:share', { detail: { projectId: project.id, projectName: project.name || project.data?.projectName || '' } }))
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-primary/10 hover:text-primary transition-colors text-left"
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                          <span>Partager</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            setOpenMenuId(null)
+                            handleStartRename(e, project.id, project.name || project.data?.projectName || '')
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-secondary transition-colors text-left"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          <span>Renommer</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            setOpenMenuId(null)
+                            handleDelete(e, project.id)
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-destructive hover:bg-destructive/10 transition-colors text-left border-t border-border"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Supprimer</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </motion.div>

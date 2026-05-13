@@ -136,6 +136,24 @@ export function getProjectHistory(userId?: string): ProjectRecord[] {
     ).all(MAX_PROJECTS_PER_USER)
   }
 
+  // Récupère en une seule requête tous les partages des projets de l'user.
+  // Permet d'afficher "Partagé avec X, Y" directement sur la liste sans N+1.
+  const projectIds = rows.map((r) => r.id)
+  const sharesByProject: Record<string, { username: string; role: string }[]> = {}
+  if (projectIds.length > 0) {
+    const placeholders = projectIds.map(() => '?').join(',')
+    const sharesRows = db.prepare(
+      `SELECT ps.project_id, u.username, ps.role
+       FROM project_shares ps
+       JOIN users u ON u.id = ps.user_id
+       WHERE ps.project_id IN (${placeholders})`
+    ).all(...projectIds) as { project_id: string; username: string; role: string }[]
+    for (const s of sharesRows) {
+      if (!sharesByProject[s.project_id]) sharesByProject[s.project_id] = []
+      sharesByProject[s.project_id].push({ username: s.username, role: s.role })
+    }
+  }
+
   // On parse les données JSON et on corrige les problèmes d'encodage
   return rows.map(row => {
     const data = JSON.parse(row.data)
@@ -149,7 +167,12 @@ export function getProjectHistory(userId?: string): ProjectRecord[] {
     // Correction mojibake sur le nom du projet dans les données
     if (data.projectName) data.projectName = fixMojibake(data.projectName)
     // Correction mojibake sur le nom du projet dans les métadonnées
-    return { ...row, name: fixMojibake(row.name), data }
+    return {
+      ...row,
+      name: fixMojibake(row.name),
+      data,
+      shares: sharesByProject[row.id] || [],
+    }
   })
 }
 
