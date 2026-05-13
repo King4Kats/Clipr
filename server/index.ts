@@ -1383,9 +1383,10 @@ app.get('/api/project/shared', requireAuth, (req, res) => {
 })
 
 // Search users for sharing autocomplete
+// Empty q : retourne tous les users (max 10) pour pre-remplir le dropdown
+// 1+ char : recherche LIKE %q% sur username et email
 app.get('/api/users/search', requireAuth, (req, res) => {
   const q = (req.query.q as string) || ''
-  if (q.length < 2) return res.json([])
   res.json(sharingService.searchUsers(q, req.user!.userId))
 })
 

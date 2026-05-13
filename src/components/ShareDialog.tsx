@@ -56,6 +56,12 @@ export default function ShareDialog({ projectId, projectName, onClose }: ShareDi
   const [error, setError] = useState('')
   // Indicateur de chargement pendant un ajout de partage
   const [loading, setLoading] = useState(false)
+  // Indique si une recherche a ete tentee (pour afficher "aucun resultat")
+  const [hasSearched, setHasSearched] = useState(false)
+  // Suggestions affichees au focus initial (tous les users hors deja partages)
+  const [suggestions, setSuggestions] = useState<any[]>([])
+  // Le champ recherche est-il actif (focus) ?
+  const [searchFocused, setSearchFocused] = useState(false)
 
   /**
    * Charge la liste des partages existants pour ce projet depuis l'API.
@@ -69,6 +75,18 @@ export default function ShareDialog({ projectId, projectName, onClose }: ShareDi
   // Au montage du composant (ou si le projectId change), on charge les partages
   useEffect(() => { loadShares() }, [projectId])
 
+  // Au montage, on charge aussi tous les users (via recherche vide a 1 char "a")
+  // pour avoir des suggestions des qu'on ouvre le dialog.
+  // En realite on fait une recherche avec un wildcard implicite en envoyant
+  // une lettre frequente, mais c'est sale. Plutot, on charge tous les users
+  // via une recherche sur "" (le backend renverra 10 users max).
+  useEffect(() => {
+    api.searchUsers('').then((users) => {
+      const sharedIds = new Set(shares.map((s) => s.user_id))
+      setSuggestions(users.filter((u: any) => !sharedIds.has(u.id)))
+    }).catch(() => { setSuggestions([]) })
+  }, [shares])
+
   /**
    * Effet de recherche avec debounce :
    * - On attend 300ms après la dernière frappe avant de lancer la recherche
@@ -79,15 +97,20 @@ export default function ShareDialog({ projectId, projectName, onClose }: ShareDi
    * l'utilisateur tape une nouvelle lettre avant les 300ms.
    */
   useEffect(() => {
-    // Pas assez de caractères : on réinitialise les résultats
-    if (searchQuery.length < 2) { setSearchResults([]); return }
+    if (searchQuery.length < 1) { setSearchResults([]); setHasSearched(false); return }
     const timer = setTimeout(async () => {
-      const results = await api.searchUsers(searchQuery)
-      // On crée un Set des IDs déjà partagés pour un filtrage rapide (O(1) par vérification)
-      const sharedIds = new Set(shares.map(s => s.user_id))
-      // On ne montre que les utilisateurs qui n'ont pas encore accès au projet
-      setSearchResults(results.filter(r => !sharedIds.has(r.id)))
-    }, 300) // Délai de 300ms (debounce)
+      try {
+        const results = await api.searchUsers(searchQuery)
+        const sharedIds = new Set(shares.map(s => s.user_id))
+        setSearchResults(results.filter(r => !sharedIds.has(r.id)))
+        setHasSearched(true)
+      } catch (e: any) {
+        console.error('Erreur recherche utilisateurs:', e)
+        setError('Erreur de recherche : ' + (e.message || 'inconnue'))
+        setSearchResults([])
+        setHasSearched(true)
+      }
+    }, 250)
     return () => clearTimeout(timer)
   }, [searchQuery, shares])
 
@@ -157,6 +180,8 @@ export default function ShareDialog({ projectId, projectName, onClose }: ShareDi
               <input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setTimeout(() => setSearchFocused(false), 200)}
                 placeholder="Chercher un utilisateur..."
                 className="w-full pl-8 pr-3 py-2 bg-secondary/50 border border-border rounded-lg text-xs text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-1 focus:ring-primary"
               />
@@ -172,26 +197,49 @@ export default function ShareDialog({ projectId, projectName, onClose }: ShareDi
             </select>
           </div>
 
-          {/* Liste des résultats de recherche.
-              Chaque résultat est un bouton cliquable qui ajoute l'utilisateur au partage. */}
-          {searchResults.length > 0 && (
-            <div className="border border-border rounded-lg overflow-hidden">
-              {searchResults.map(user => (
-                <button
-                  key={user.id}
-                  onClick={() => handleShare(user.username)}
-                  disabled={loading}
-                  className="w-full flex items-center justify-between p-2.5 hover:bg-secondary/50 text-xs transition-colors border-b border-border/50 last:border-0"
-                >
-                  <div>
-                    <span className="font-semibold text-foreground">{user.username}</span>
-                    <span className="text-muted-foreground ml-2">{user.email}</span>
+          {/*
+            Dropdown :
+            - Si l'utilisateur a tape >=1 char : on affiche les resultats filtres
+              (ou "aucun resultat" si recherche faite mais vide)
+            - Sinon, si le champ a le focus : on affiche les suggestions (tous les users)
+          */}
+          {(() => {
+            const showSearchResults = searchQuery.length >= 1
+            const list = showSearchResults ? searchResults : (searchFocused ? suggestions : [])
+            if (list.length === 0 && showSearchResults && hasSearched) {
+              return (
+                <div className="border border-border rounded-lg p-3 text-center">
+                  <p className="text-xs text-muted-foreground">
+                    Aucun utilisateur trouve pour "<span className="font-semibold text-foreground">{searchQuery}</span>"
+                  </p>
+                </div>
+              )
+            }
+            if (list.length === 0) return null
+            return (
+              <div className="border border-border rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                {!showSearchResults && (
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground bg-secondary/30 px-2.5 py-1.5">
+                    Utilisateurs disponibles
                   </div>
-                  <UserPlus className="w-3.5 h-3.5 text-primary" />
-                </button>
-              ))}
-            </div>
-          )}
+                )}
+                {list.map((user) => (
+                  <button
+                    key={user.id}
+                    onMouseDown={(e) => { e.preventDefault(); handleShare(user.username) }}
+                    disabled={loading}
+                    className="w-full flex items-center justify-between p-2.5 hover:bg-secondary/50 text-xs transition-colors border-b border-border/50 last:border-0 text-left"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-foreground truncate">{user.username}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{user.email}</div>
+                    </div>
+                    <UserPlus className="w-3.5 h-3.5 text-primary shrink-0 ml-2" />
+                  </button>
+                ))}
+              </div>
+            )
+          })()}
 
           {/* Message d'erreur éventuel */}
           {error && <p className="text-xs text-destructive">{error}</p>}
