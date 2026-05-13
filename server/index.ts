@@ -731,7 +731,9 @@ app.delete('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
  */
 app.post('/api/admin/users/:id/reset-password', requireAuth, requireAdmin, (req, res) => {
   try {
-    const newPwd = passwordResetService.adminResetUserPassword(req.params.id)
+    // Si l'admin fournit un mdp custom, on l'utilise. Sinon on en genere un.
+    const custom = (req.body?.newPassword || '').toString()
+    const newPwd = passwordResetService.adminResetUserPassword(req.params.id, custom)
     res.json({ ok: true, newPassword: newPwd })
   } catch (err: any) { res.status(400).json({ error: err.message }) }
 })

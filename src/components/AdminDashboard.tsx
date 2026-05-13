@@ -101,6 +101,18 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
   const [supportSending, setSupportSending] = useState(false)
   const supportFileRef = useRef<HTMLInputElement>(null)
   const supportScrollRef = useRef<HTMLDivElement>(null)
+
+  // Modal de reset mot de passe utilisateur
+  const [resetPwd, setResetPwd] = useState<{
+    open: boolean
+    userId: string
+    username: string
+    customPwd: string
+    generated: string | null
+    loading: boolean
+    error: string | null
+    copied: boolean
+  } | null>(null)
   const [logs, setLogs] = useState<string[]>([])                   // Lignes de log du serveur
   const [logTotal, setLogTotal] = useState(0)                      // Nombre total de lignes de log
   const [loading, setLoading] = useState(false)                    // Indicateur de chargement global
@@ -242,16 +254,28 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
     } catch (e: any) { alert(e.message) }
   }
 
-  /** Reinitialise le mdp d'un user, affiche le nouveau mdp a l'admin pour le transmettre. */
-  const resetUserPassword = async (id: string, username: string) => {
-    if (!confirm(`Reinitialiser le mot de passe de "${username}" ?\n\nUn nouveau mot de passe sera genere et affiche a l'ecran pour que tu le transmettes.`)) return
+  /** Ouvre la modal de reset mdp pour un user donne. */
+  const openResetPassword = (id: string, username: string) => {
+    setResetPwd({ open: true, userId: id, username, customPwd: '', generated: null, loading: false, error: null, copied: false })
+  }
+
+  /** Submit du reset : si custom fourni, l'utilise. Sinon backend genere. */
+  const submitResetPassword = async (mode: 'custom' | 'generate') => {
+    if (!resetPwd) return
+    setResetPwd({ ...resetPwd, loading: true, error: null })
     try {
-      const res = await fetch(`/api/admin/users/${id}/reset-password`, { method: 'POST', headers })
+      const body: any = mode === 'custom' ? { newPassword: resetPwd.customPwd } : {}
+      const res = await fetch(`/api/admin/users/${resetPwd.userId}/reset-password`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Erreur')
-      // Affichage simple via prompt (l'admin peut le copier-coller)
-      window.prompt(`Nouveau mot de passe pour "${username}" (copie-le et transmets-le) :`, data.newPassword)
-    } catch (e: any) { alert(e.message) }
+      setResetPwd({ ...resetPwd, loading: false, generated: data.newPassword, copied: false })
+    } catch (e: any) {
+      setResetPwd({ ...resetPwd, loading: false, error: e.message })
+    }
   }
 
   /** Bascule le flag d'ouverture des inscriptions. */
@@ -515,7 +539,7 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
                       <div className="inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button
                           variant="ghost" size="sm"
-                          onClick={() => resetUserPassword(u.id, u.username)}
+                          onClick={() => openResetPassword(u.id, u.username)}
                           className="h-7 text-[10px] gap-1 text-amber-400 hover:bg-amber-500/10"
                           title="Reinitialiser le mot de passe"
                         >
@@ -750,6 +774,108 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
             {logs.length === 0 && <span className="text-zinc-600">Aucun log</span>}
           </div>
         </motion.div>
+      )}
+
+      {/* Modal de reinitialisation du mot de passe utilisateur */}
+      {resetPwd?.open && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => !resetPwd.loading && setResetPwd(null)}
+        >
+          <div
+            className="bg-card border border-border rounded-xl p-6 w-full max-w-md space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h3 className="text-base font-bold text-foreground">Reinitialiser le mot de passe</h3>
+              <p className="text-xs text-muted-foreground mt-1">
+                Utilisateur : <span className="font-mono font-bold text-foreground">{resetPwd.username}</span>
+              </p>
+            </div>
+
+            {!resetPwd.generated ? (
+              <>
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Nouveau mot de passe (min 8 caracteres)
+                  </label>
+                  <input
+                    type="text"
+                    value={resetPwd.customPwd}
+                    onChange={(e) => setResetPwd({ ...resetPwd, customPwd: e.target.value, error: null })}
+                    placeholder="Tape un mdp ou laisse vide pour en generer un"
+                    className="mt-1 w-full px-3 py-2 bg-secondary/50 border border-border rounded-lg text-sm font-mono text-foreground outline-none focus:ring-2 focus:ring-primary/50"
+                    autoFocus
+                  />
+                </div>
+
+                {resetPwd.error && (
+                  <div className="text-xs text-destructive flex items-center gap-2 p-2 bg-destructive/10 rounded">
+                    <XCircle className="w-3.5 h-3.5 shrink-0" />
+                    {resetPwd.error}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="ghost" size="sm" onClick={() => setResetPwd(null)} disabled={resetPwd.loading}>
+                    Annuler
+                  </Button>
+                  <Button
+                    variant="outline" size="sm"
+                    onClick={() => submitResetPassword('generate')}
+                    disabled={resetPwd.loading}
+                  >
+                    Generer aleatoire
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => submitResetPassword('custom')}
+                    disabled={resetPwd.loading || resetPwd.customPwd.length < 8}
+                  >
+                    {resetPwd.loading ? 'En cours...' : 'Appliquer'}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <p className="text-xs text-green-400 flex items-center gap-2 mb-2">
+                    <CheckCircle className="w-4 h-4" />
+                    Mot de passe applique avec succes
+                  </p>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Nouveau mot de passe (a transmettre)
+                  </label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={resetPwd.generated}
+                      className="flex-1 px-3 py-2 bg-secondary border border-border rounded-lg text-sm font-mono font-bold text-foreground select-all outline-none"
+                      onFocus={(e) => e.target.select()}
+                    />
+                    <Button
+                      variant="outline" size="sm"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(resetPwd.generated!)
+                          setResetPwd({ ...resetPwd, copied: true })
+                          setTimeout(() => setResetPwd(prev => prev ? { ...prev, copied: false } : prev), 2000)
+                        } catch {}
+                      }}
+                      className="shrink-0"
+                    >
+                      {resetPwd.copied ? <CheckCircle className="w-3.5 h-3.5 text-green-500" /> : 'Copier'}
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex justify-end pt-2">
+                  <Button size="sm" onClick={() => setResetPwd(null)}>Fermer</Button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )

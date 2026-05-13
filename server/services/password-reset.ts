@@ -94,16 +94,24 @@ export function verifyCodeAndResetPassword(email: string, code: string, newPassw
 
 /**
  * Action admin : reset direct du mdp d'un utilisateur (sans code).
- * Genere un nouveau mdp aleatoire et le retourne (a afficher a l'admin).
+ * Si customPassword fourni, l'utilise. Sinon en genere un aleatoire.
+ * Retourne le mdp en clair (pour que l'admin puisse le transmettre).
  */
-export function adminResetUserPassword(userId: string): string {
+export function adminResetUserPassword(userId: string, customPassword?: string): string {
   const db = getDb()
   const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(userId) as any
   if (!user) throw new Error('Utilisateur introuvable')
-  // Mdp temporaire de 12 caracteres (alphanum) facile a copier-coller
-  const charset = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  let newPwd = ''
-  for (let i = 0; i < 12; i++) newPwd += charset[randomInt(0, charset.length)]
+
+  let newPwd: string
+  if (customPassword && customPassword.length > 0) {
+    if (customPassword.length < 8) throw new Error('Mot de passe trop court (min 8 caracteres)')
+    newPwd = customPassword
+  } else {
+    // Mdp temporaire de 12 caracteres (alphanum) facile a copier-coller
+    const charset = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    newPwd = ''
+    for (let i = 0; i < 12; i++) newPwd += charset[randomInt(0, charset.length)]
+  }
   const hash = bcrypt.hashSync(newPwd, 10)
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, userId)
   // Invalide aussi tous les codes de reset en cours
