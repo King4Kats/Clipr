@@ -88,15 +88,16 @@ function getJson(url: string, timeoutMs = 15000): Promise<any> {
 
 async function searchWikipedia(query: string, maxResults: number): Promise<SearchResult[]> {
   const fetchLang = async (lang: string): Promise<SearchResult[]> => {
-    const openSearchUrl = `https://${lang}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=${maxResults}&format=json&origin=*`
-    const arr = await getJson(openSearchUrl)
-    if (!Array.isArray(arr) || arr.length < 4) return []
-    const titles: string[] = arr[1]
-    const urls: string[] = arr[3]
-    if (titles.length === 0) return []
+    // list=search : recherche full-text (gere les phrases naturelles, accents, etc.)
+    // Contrairement a opensearch qui est un prefix-match limite.
+    const searchUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=${maxResults}&format=json&srprop=snippet`
+    const searchData = await getJson(searchUrl)
+    const hits: { title: string; snippet: string }[] = searchData?.query?.search || []
+    if (hits.length === 0) return []
 
-    // Recupere l'extrait (intro plain text) des articles trouves
-    const extractsUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&explaintext=true&exsentences=10&titles=${encodeURIComponent(titles.join('|'))}&format=json&origin=*&redirects=1`
+    const titles = hits.map((h) => h.title)
+    // Recupere les extraits propres (sans markup HTML) des pages trouvees
+    const extractsUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&explaintext=true&exsentences=10&titles=${encodeURIComponent(titles.join('|'))}&format=json&redirects=1`
     const data = await getJson(extractsUrl)
     const pages = data?.query?.pages || {}
     const extractsByTitle: Record<string, string> = {}
@@ -108,12 +109,13 @@ async function searchWikipedia(query: string, maxResults: number): Promise<Searc
     for (const r of redirects) {
       if (extractsByTitle[r.to] && !extractsByTitle[r.from]) extractsByTitle[r.from] = extractsByTitle[r.to]
     }
-    return titles.map((title, i) => ({
+    return titles.map((title) => ({
       title: `${title} (Wikipedia ${lang.toUpperCase()})`,
-      url: urls[i] || `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(title)}`,
-      content: extractsByTitle[title] || '',
+      url: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`,
+      // Si pas d'extrait propre, on fallback sur le snippet (avec un peu de nettoyage HTML)
+      content: extractsByTitle[title] || (hits.find((h) => h.title === title)?.snippet || '').replace(/<[^>]+>/g, ''),
       source: 'Wikipedia',
-    })).filter((r) => r.content.trim().length > 0)
+    })).filter((r) => r.content.trim().length > 20)
   }
 
   try {
