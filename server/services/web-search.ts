@@ -211,10 +211,9 @@ async function searchHal(query: string, maxResults: number): Promise<SearchResul
  * @param query - Question/requete utilisateur
  * @param maxResults - Nombre total max de resultats (defaut 6)
  */
-export async function searchWeb(query: string, maxResults = 6): Promise<SearchResponse> {
+export async function searchWeb(query: string, maxResults = 9): Promise<SearchResponse> {
   // Nettoie la query : enleve les sauts de ligne, caracteres speciaux qui font
-  // planter certaines APIs (OpenAlex refuse | par exemple). On garde lettres,
-  // chiffres, accents, espaces et tirets/apostrophes basiques.
+  // planter certaines APIs (OpenAlex refuse | par exemple).
   const cleanQuery = query
     .replace(/[\r\n\t]+/g, ' ')
     .replace(/[|<>{}[\]\\^`"]/g, ' ')
@@ -225,23 +224,27 @@ export async function searchWeb(query: string, maxResults = 6): Promise<SearchRe
   if (!cleanQuery) return { query, results: [] }
 
   logger.info(`[WebSearch] Recherche multi-sources : "${cleanQuery}"`)
-  const perSource = Math.ceil(maxResults / 2)
 
+  // Repartition pondereee : on veut une majorite de sources academiques pour
+  // refleter ce que les universitaires ont publie sur le sujet.
+  // - Wikipedia : 2 articles (contexte general)
+  // - OpenAlex : 4 articles (corpus international, dont theses)
+  // - HAL : 4 articles (recherche francaise specifiquement)
   const [wikiRes, openAlexRes, halRes] = await Promise.all([
-    searchWikipedia(cleanQuery, perSource),
-    searchOpenAlex(cleanQuery, perSource),
-    searchHal(cleanQuery, perSource),
+    searchWikipedia(cleanQuery, 2),
+    searchOpenAlex(cleanQuery, 4),
+    searchHal(cleanQuery, 4),
   ])
 
   logger.info(`[WebSearch] Wikipedia=${wikiRes.length} OpenAlex=${openAlexRes.length} HAL=${halRes.length}`)
 
-  // Fusion : on alterne entre les sources pour avoir une diversite dans le top N.
-  const merged: SearchResult[] = []
-  const maxLen = Math.max(wikiRes.length, openAlexRes.length, halRes.length)
+  // Ordre : d'abord Wikipedia pour le contexte, puis alternance HAL/OpenAlex
+  // pour mettre la recherche francaise en avant.
+  const merged: SearchResult[] = [...wikiRes]
+  const maxLen = Math.max(halRes.length, openAlexRes.length)
   for (let i = 0; i < maxLen; i++) {
-    if (i < wikiRes.length) merged.push(wikiRes[i])
-    if (i < openAlexRes.length) merged.push(openAlexRes[i])
     if (i < halRes.length) merged.push(halRes[i])
+    if (i < openAlexRes.length) merged.push(openAlexRes[i])
   }
 
   return { query, results: merged.slice(0, maxResults) }
@@ -255,20 +258,45 @@ export function buildWebPrompt(userQuery: string, search: SearchResponse): strin
   if (search.results.length === 0) {
     return `${userQuery}\n\n(Aucun resultat trouve sur Wikipedia / OpenAlex / HAL pour cette recherche. Indique clairement que tu n'as pas pu sourcer.)`
   }
+
+  // Compte des sources par type pour aider Mistral a structurer
+  const counts = { Wikipedia: 0, OpenAlex: 0, HAL: 0 }
+  for (const r of search.results) {
+    if (r.source && counts.hasOwnProperty(r.source)) counts[r.source as keyof typeof counts]++
+  }
+
   const sourcesBlock = search.results
-    .map((r, i) => `[${i + 1}] ${r.title}\nURL: ${r.url}\nSource: ${r.source || 'web'}\nExtrait: ${r.content.slice(0, 1500)}`)
+    .map((r, i) => `[${i + 1}] ${r.title}\nURL: ${r.url}\nType: ${r.source || 'web'}\nExtrait: ${r.content.slice(0, 1500)}`)
     .join('\n\n')
 
   return `Question de l'utilisateur :
 ${userQuery}
 
-Voici des extraits issus de sources libres et officielles (Wikipedia CC BY-SA, OpenAlex articles scientifiques, HAL archive ouverte universites francaises). Reponds a la question en t'appuyant uniquement sur ces extraits et en citant chaque affirmation avec [1], [2], etc. correspondant aux numeros des sources ci-dessous. Si l'information n'est pas dans les extraits, dis-le clairement plutot que d'inventer.
+Tu vas faire un dossier de recherche style "bibliographie universitaire". Voici les ${search.results.length} sources trouvees :
+- ${counts.Wikipedia} article(s) Wikipedia (contexte general)
+- ${counts.HAL} document(s) HAL (archive ouverte des universites francaises : theses, articles, chapitres)
+- ${counts.OpenAlex} article(s) OpenAlex (corpus international de publications scientifiques)
 
 === SOURCES ===
 ${sourcesBlock}
 === FIN SOURCES ===
 
-Repond maintenant a la question en francais, structure ta reponse en paragraphes courts, et cite les sources [n] precisement.`
+Structure ta reponse en 3 sections en Markdown :
+
+## Presentation
+Bref resume du sujet en t'appuyant sur les sources Wikipedia [n]. 3-5 phrases.
+
+## Themes etudies par la recherche
+A partir des sources HAL et OpenAlex, identifie les principaux axes/themes que les universitaires ont travailles. Liste sous forme de puces, chaque item cite la ou les sources [n] qui l'evoquent.
+
+## Corpus universitaire
+Liste les references academiques trouvees (HAL + OpenAlex) avec : auteur(s), annee, titre, et lien cliquable. Format puce :
+- **[Auteur(s), Annee]** — *Titre* — [lien]
+
+Regles imperatives :
+1. Cite TOUJOURS [n] apres chaque affirmation issue d'une source.
+2. N'INVENTE rien. Si une info n'est pas dans les extraits, ecris "(non documente dans les sources)".
+3. Reponds en francais.`
 }
 
 export function isConfigured(): boolean {
