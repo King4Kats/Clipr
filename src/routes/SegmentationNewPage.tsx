@@ -8,7 +8,7 @@
  * Route : /segmentation/new
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '@/store/useStore'
 import UploadZone from '@/components/new/UploadZone'
@@ -16,9 +16,24 @@ import { Scissors } from 'lucide-react'
 
 export default function SegmentationNewPage() {
   const navigate = useNavigate()
-  const { videoFiles, activeProjectId } = useStore()
+  const { videoFiles, activeProjectId, createProject } = useStore()
+  // Garde-fou pour ne creer qu'UN seul projet meme si l'effect re-run
+  const creatingRef = useRef(false)
 
-  // Once files are uploaded and project created, redirect to project page
+  // Apres l'upload, on a videoFiles mais pas encore activeProjectId → on cree
+  // un projet, ce qui declenchera la nav vers /project/:id (effect ci-dessous).
+  useEffect(() => {
+    if (videoFiles.length > 0 && !activeProjectId && !creatingRef.current) {
+      creatingRef.current = true
+      const name = videoFiles[0].name?.replace(/\.[^.]+$/, '') || 'Nouveau projet'
+      createProject(name, 'ai').catch(err => {
+        console.error('createProject:', err)
+        creatingRef.current = false
+      })
+    }
+  }, [videoFiles.length, activeProjectId, createProject])
+
+  // Une fois le projet cree, redirige vers la page projet (etape choix manuel/IA)
   useEffect(() => {
     if (videoFiles.length > 0 && activeProjectId) {
       navigate('/project/' + activeProjectId, { replace: true })
