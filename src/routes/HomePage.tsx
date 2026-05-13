@@ -18,7 +18,7 @@ import api from '@/api'
 import { motion } from 'framer-motion'
 import {
   Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check,
-  Share2, Users, Mic, BookOpen, Scissors
+  Share2, Users, Mic, BookOpen, Scissors, Bot
 } from 'lucide-react'
 import logo from '@/assets/Clipr.svg'
 
@@ -405,6 +405,26 @@ export default function HomePage() {
                   <h3 className="text-sm font-bold text-foreground">Transcription linguistique</h3>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
                     Segmentation francais / langue vernaculaire + transcription IPA
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.15 }}
+              onClick={() => navigate('/assistant')}
+              className="group p-5 bg-card border-2 border-border hover:border-sky-500/50 rounded-xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center text-sky-400 group-hover:bg-sky-500 group-hover:text-white transition-colors">
+                  <Bot className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">Assistant</h3>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Chat IA pour extraire / analyser / resumer du texte (recettes, idees, etc.)
                   </p>
                 </div>
               </div>

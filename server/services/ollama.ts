@@ -149,6 +149,67 @@ export async function pullOllamaModel(modelName: string): Promise<boolean> {
 }
 
 /**
+ * Stream les tokens d'une conversation (Ollama /api/chat).
+ *
+ * Appelle onToken pour chaque morceau de texte généré, et onDone à la fin avec
+ * le texte complet. Permet d'envoyer du SSE au navigateur en temps réel.
+ *
+ * @param model - Modèle Ollama (ex: 'mistral-nemo:12b')
+ * @param messages - Historique de la conversation au format Ollama
+ * @param onToken - Callback appelé pour chaque token reçu (string incrémental)
+ * @param onDone - Callback final avec le texte complet
+ * @param onError - Callback si la requête échoue
+ */
+export function chatStream(
+  model: string,
+  messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
+  onToken: (chunk: string) => void,
+  onDone: (full: string) => void,
+  onError: (err: Error) => void,
+): { abort: () => void } {
+  const postData = JSON.stringify({ model, messages, stream: true })
+  const req = http.request({
+    hostname: OLLAMA_HOST, port: OLLAMA_PORT, path: '/api/chat', method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+    timeout: 1200000,
+  }, (res) => {
+    if (res.statusCode !== 200) {
+      let errBody = ''
+      res.on('data', (c) => { errBody += c })
+      res.on('end', () => onError(new Error(`Ollama HTTP ${res.statusCode}: ${errBody}`)))
+      return
+    }
+    let full = ''
+    let buffer = ''
+    res.on('data', (chunk) => {
+      buffer += chunk.toString()
+      // Chaque ligne complete est un objet JSON (NDJSON)
+      let nlIdx
+      while ((nlIdx = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nlIdx).trim()
+        buffer = buffer.slice(nlIdx + 1)
+        if (!line) continue
+        try {
+          const json = JSON.parse(line)
+          const piece = json.message?.content || ''
+          if (piece) { full += piece; onToken(piece) }
+          if (json.done) { onDone(full); return }
+        } catch (e) {
+          logger.error('Ollama stream parse error:', e)
+        }
+      }
+    })
+    res.on('end', () => { if (full) onDone(full) })
+    res.on('error', (err) => onError(err))
+  })
+  req.on('error', (err) => onError(err))
+  req.on('timeout', () => { req.destroy(); onError(new Error('Timeout Ollama')) })
+  req.write(postData)
+  req.end()
+  return { abort: () => req.destroy() }
+}
+
+/**
  * Découpe une transcription longue en morceaux (chunks) de taille gérable.
  *
  * Pourquoi ? Les modèles de langage ont une taille de contexte limitée (nombre de

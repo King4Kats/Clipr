@@ -358,6 +358,69 @@ const api = {
   semanticAnalyze: (segments: any[], model: string) =>
     post<{ semanticAnalysis: { themes: string[]; sentiment: { label: string; explanation: string }; insights: string[] } }>('/api/semantic/analyze', { segments, model }),
 
+  // ── Assistant : Chatbot LLM standalone (multi-conversations par user) ──
+  assistantListConversations: () =>
+    get<{ id: string; title: string; created_at: string; updated_at: string }[]>('/api/assistant/conversations'),
+  assistantCreateConversation: () =>
+    post<{ id: string; title: string; created_at: string; updated_at: string }>('/api/assistant/conversations'),
+  assistantGetConversation: (id: string) =>
+    get<{ conversation: { id: string; title: string }; messages: { id: string; role: 'user' | 'assistant'; content: string; created_at: string }[] }>(`/api/assistant/conversations/${id}`),
+  assistantRenameConversation: (id: string, title: string) =>
+    patch(`/api/assistant/conversations/${id}`, { title }),
+  assistantDeleteConversation: (id: string) =>
+    del(`/api/assistant/conversations/${id}`),
+  /**
+   * Envoie un message a l'assistant et stream la reponse via SSE.
+   * onToken : appele a chaque token recu (texte incremental)
+   * onDone : appele a la fin avec le texte complet et le message sauvegarde
+   * onError : appele en cas d'erreur
+   * Retourne un controleur avec .abort() pour annuler la generation.
+   */
+  assistantSendMessage: (
+    convId: string,
+    content: string,
+    onToken: (chunk: string) => void,
+    onDone: (full: string, message: any) => void,
+    onError: (err: string) => void,
+    model?: string,
+  ) => {
+    const ctrl = new AbortController()
+    fetch(`${API_BASE}/api/assistant/conversations/${convId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ content, model }),
+      signal: ctrl.signal,
+    }).then(async (res) => {
+      if (!res.ok || !res.body) { onError(`HTTP ${res.status}`); return }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let full = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        // SSE format : lignes "data: {...}" separees par \n\n
+        let sepIdx
+        while ((sepIdx = buffer.indexOf('\n\n')) >= 0) {
+          const event = buffer.slice(0, sepIdx)
+          buffer = buffer.slice(sepIdx + 2)
+          const line = event.split('\n').find((l) => l.startsWith('data: '))
+          if (!line) continue
+          try {
+            const data = JSON.parse(line.slice(6))
+            if (data.token) { full += data.token; onToken(data.token) }
+            if (data.done) { onDone(full, data.message); return }
+            if (data.error) { onError(data.error); return }
+          } catch {}
+        }
+      }
+    }).catch((err) => {
+      if (err.name !== 'AbortError') onError(err.message || 'Erreur reseau')
+    })
+    return { abort: () => ctrl.abort() }
+  },
+
   // ── Projets : CRUD et gestion de l'historique ──
   getProjectHistory: () => get<any[]>('/api/project/history'),
   createProject: (name: string, type: 'manual' | 'ai' = 'manual') =>

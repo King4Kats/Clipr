@@ -55,6 +55,7 @@ import {
   validateLinguisticTranscription, listAttestations, getAtlasStats
 } from './services/atlas-moderne.js'
 import { getDb } from './services/database.js'
+import * as assistantService from './services/assistant.js'
 import { requireAuth, requireAdmin, optionalAuth } from './middleware/auth.js'
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1107,6 +1108,108 @@ app.post('/api/semantic/analyze', requireAuth, async (req, res) => {
     logger.error('[Semantic] Analysis failed:', err.message)
     res.status(500).json({ error: err.message })
   }
+})
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── ASSISTANT : Chatbot LLM standalone (par user, multi-conversations) ──
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Liste des conversations de l'utilisateur (sidebar)
+app.get('/api/assistant/conversations', requireAuth, (req, res) => {
+  res.json(assistantService.listConversations(req.user!.userId))
+})
+
+// Cree une nouvelle conversation vide
+app.post('/api/assistant/conversations', requireAuth, (req, res) => {
+  const conv = assistantService.createConversation(req.user!.userId)
+  res.json(conv)
+})
+
+// Recupere une conversation + tous ses messages
+app.get('/api/assistant/conversations/:id', requireAuth, (req, res) => {
+  const data = assistantService.getConversation(req.user!.userId, req.params.id)
+  if (!data) return res.status(404).json({ error: 'Conversation introuvable' })
+  res.json(data)
+})
+
+// Renomme une conversation
+app.patch('/api/assistant/conversations/:id', requireAuth, (req, res) => {
+  const { title } = req.body
+  if (!title || typeof title !== 'string') return res.status(400).json({ error: 'title requis' })
+  const ok = assistantService.renameConversation(req.user!.userId, req.params.id, title.trim().slice(0, 200))
+  if (!ok) return res.status(404).json({ error: 'Conversation introuvable' })
+  res.json({ success: true })
+})
+
+// Supprime une conversation
+app.delete('/api/assistant/conversations/:id', requireAuth, (req, res) => {
+  const ok = assistantService.deleteConversation(req.user!.userId, req.params.id)
+  if (!ok) return res.status(404).json({ error: 'Conversation introuvable' })
+  res.json({ success: true })
+})
+
+// Envoie un message utilisateur et stream la reponse IA en SSE
+// Body : { content: string, model?: string }
+// SSE events : data: {"token": "..."}, data: {"done": true, "message": {...}}, data: {"error": "..."}
+app.post('/api/assistant/conversations/:id/messages', requireAuth, async (req, res) => {
+  const userId = req.user!.userId
+  const convId = req.params.id
+  const { content, model } = req.body
+  if (!content || typeof content !== 'string' || !content.trim()) {
+    return res.status(400).json({ error: 'content requis' })
+  }
+
+  // Verifie acces + recupere l'historique
+  const data = assistantService.getConversation(userId, convId)
+  if (!data) return res.status(404).json({ error: 'Conversation introuvable' })
+
+  // Sauvegarde le message user et auto-genere le titre si c'est le 1er
+  const userMsg = assistantService.addMessage(userId, convId, 'user', content.trim())
+  if (!userMsg) return res.status(403).json({ error: 'Acces refuse' })
+  if (data.messages.length === 0) {
+    assistantService.renameConversation(userId, convId, assistantService.generateTitle(content))
+  }
+
+  // Construit l'historique pour Ollama (system prompt + messages precedents + nouveau)
+  const systemPrompt = "Tu es un assistant IA utile et concis. Reponds en francais sauf si l'utilisateur ecrit dans une autre langue. Quand on te demande d'extraire ou de lister des elements (recettes, citations, etc.) d'un texte, presente-les sous forme structuree (titres, puces). Tu peux utiliser du Markdown."
+  const ollamaMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+    { role: 'system', content: systemPrompt },
+    ...data.messages.map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user', content: content.trim() },
+  ]
+
+  // En-tetes SSE
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-cache, no-transform')
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
+  res.flushHeaders?.()
+
+  const ollamaModel = (typeof model === 'string' && model) || 'mistral-nemo:12b'
+
+  let aborted = false
+  req.on('close', () => { aborted = true; ctrl.abort() })
+
+  const ctrl = ollamaService.chatStream(
+    ollamaModel,
+    ollamaMessages,
+    (chunk) => {
+      if (aborted) return
+      res.write(`data: ${JSON.stringify({ token: chunk })}\n\n`)
+    },
+    (full) => {
+      if (aborted) return
+      const saved = assistantService.addMessage(userId, convId, 'assistant', full)
+      res.write(`data: ${JSON.stringify({ done: true, message: saved })}\n\n`)
+      res.end()
+    },
+    (err) => {
+      logger.error('[Assistant] chatStream error:', err.message)
+      if (aborted) return
+      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`)
+      res.end()
+    },
+  )
 })
 
 // Project list (active projects, max 6) — auth-protected

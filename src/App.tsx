@@ -19,6 +19,7 @@ import TranscriptionPage from '@/routes/TranscriptionPage'
 import LinguisticPage from '@/routes/LinguisticPage'
 import AtlasPage from '@/routes/AtlasPage'
 import AdminPage from '@/routes/AdminPage'
+import AssistantPage from '@/routes/AssistantPage'
 
 function App() {
   const { checkAuth } = useAuthStore()
@@ -41,6 +42,7 @@ function App() {
           <Route path="segmentation/new" element={<SegmentationNewPage />} />
           <Route path="project/:projectId" element={<ProjectPage />} />
           <Route path="admin" element={<AdminPage />} />
+          <Route path="assistant" element={<AssistantPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>

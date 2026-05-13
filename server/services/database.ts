@@ -394,6 +394,32 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_support_created ON support_messages(created_at);
   `)
 
+  // ── Tables Assistant : chat IA standalone (par user, multi-conversations) ──
+  // assistant_conversations : un fil par conversation (titre = 1ere question tronquée)
+  // assistant_messages : messages chronologiques user/assistant dans le fil
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS assistant_conversations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT 'Nouvelle conversation',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_assistant_conv_user ON assistant_conversations(user_id);
+    CREATE INDEX IF NOT EXISTS idx_assistant_conv_updated ON assistant_conversations(updated_at);
+
+    CREATE TABLE IF NOT EXISTS assistant_messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (conversation_id) REFERENCES assistant_conversations(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_assistant_msg_conv ON assistant_messages(conversation_id);
+  `)
+
   // ── Table password_resets : codes a 6 chiffres pour reinitialisation mdp ──
   // On stocke le HASH du code (jamais en clair), date d'expiration (15 min),
   // et nombre de tentatives (max 5). Une ligne par demande active.
