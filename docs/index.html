@@ -159,8 +159,8 @@
     <h1>Clipr <span style="font-weight:300;font-size:0.85rem;color:var(--text-muted)">Documentation v2</span></h1>
   </div>
   <div class="header-right">
-    <button class="btn" id="btnUser" onclick="switchView('user')">Utilisateur</button>
-    <button class="btn active" id="btnDev" onclick="switchView('dev')">Developpeur</button>
+    <button class="btn active" id="btnUser" onclick="switchView('user')">Utilisateur</button>
+    <button class="btn" id="btnDev" onclick="switchView('dev')">Developpeur</button>
     <button class="btn" onclick="toggleTheme()" title="Changer le theme">
       <svg class="btn-icon" id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
@@ -168,7 +168,7 @@
 </header>
 <div class="layout">
 <nav class="sidebar" id="sidebar">
-  <div class="user-section" id="sidebarUser">
+  <div class="user-section visible" id="sidebarUser">
     <div class="sidebar-label">Premiers pas</div>
     <a href="#u-bienvenue">C'est quoi Clipr ?</a>
     <a href="#u-compte">Creer son compte</a>
@@ -188,8 +188,9 @@
     <a href="#u-linguistique">Transcription linguistique</a>
     <a href="#u-alf">Base ALF (Atlas Linguistique)</a>
     <a href="#u-diarisation">Identification locuteurs</a>
+    <a href="#u-assistant">Assistant (chat IA)</a>
   </div>
-  <div class="dev-section visible" id="sidebarDev">
+  <div class="dev-section" id="sidebarDev">
     <div class="sidebar-label">Demarrage</div>
     <a href="#d-overview">Vue d'ensemble</a>
     <a href="#d-install">Installation Docker</a>
@@ -216,6 +217,7 @@
     <a href="#d-transcription-api">Transcription</a>
     <a href="#d-linguistic-api">Linguistique</a>
     <a href="#d-alf-api">ALF (Atlas Linguistique)</a>
+    <a href="#d-assistant-api">Assistant (chat IA)</a>
     <div class="sidebar-label">Deploiement</div>
     <a href="#d-securite">Securite</a>
     <a href="#d-production">Mise en production</a>
@@ -224,7 +226,7 @@
 <main class="content">
 
 <!-- ======== UTILISATEUR ======== -->
-<div class="user-section" id="contentUser">
+<div class="user-section visible" id="contentUser">
 
 <section class="section" id="u-bienvenue">
   <h2 class="section-title">Bienvenue sur Clipr</h2>
@@ -596,10 +598,60 @@
   </div>
 </section>
 
+<section class="section" id="u-assistant">
+  <h2 class="section-title">Assistant (chat IA)</h2>
+  <div class="card">
+    <h3>Vue d'ensemble</h3>
+    <p>L'<strong>Assistant</strong> est un chat IA general-purpose qui tourne sur le LLM local (<strong>mistral-nemo:12b</strong> par defaut). Trois usages principaux :</p>
+    <ul>
+      <li><strong>Conversation libre</strong> : poser des questions, demander des resumes, extraire des elements d'un texte (recettes, citations, idees-cles...)</li>
+      <li><strong>Analyse de document</strong> : joindre un <code>.txt</code>, <code>.docx</code>, <code>.pdf</code> ou <code>.md</code> et demander a l'IA de l'analyser</li>
+      <li><strong>Recherche sourcee</strong> : activer le mode <strong>🌐 Web</strong> pour interroger Wikipedia + HAL + OpenAlex et obtenir une reponse avec citations <code>[1] [2]</code> et liens cliquables</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Multi-conversations + persistance</h3>
+    <p>Toutes les conversations sont sauvegardees par utilisateur (table <code>assistant_conversations</code>). La sidebar de gauche affiche l'historique trie par date :</p>
+    <ul>
+      <li><strong>+ Nouveau chat</strong> : creer un fil vierge</li>
+      <li><strong>Renommer</strong> : icone crayon au hover. Par defaut, le titre est genere depuis la 1ere question</li>
+      <li><strong>Supprimer</strong> : icone poubelle (avec confirmation)</li>
+    </ul>
+    <p>Le streaming des reponses se fait token-par-token (SSE) comme ChatGPT — bouton <strong>Stop</strong> dispo pour interrompre.</p>
+  </div>
+  <div class="card">
+    <h3>Joindre un fichier</h3>
+    <ol>
+      <li>Cliquez sur l'icone <strong>trombone</strong> a gauche du champ de saisie</li>
+      <li>Selectionnez un ou plusieurs fichiers (<code>.txt</code>, <code>.docx</code>, <code>.pdf</code>, <code>.md</code>)</li>
+      <li>Le texte est extrait cote serveur, et apparait en <strong>pills bleues</strong> au-dessus du champ avec le compteur de caracteres</li>
+      <li>Tapez votre question (ou laissez vide pour une analyse generale) puis Envoyer</li>
+    </ol>
+    <p>Exemple : joindre un long entretien et demander <em>"Liste les themes abordes par chaque intervenant."</em></p>
+  </div>
+  <div class="card">
+    <h3>Mode recherche web sourcee 🌐</h3>
+    <p>Cliquez sur le bouton <strong>Web</strong> (a cote du trombone). Il passe en bleu quand actif. Au prochain message, Clipr interroge en parallele :</p>
+    <ul>
+      <li><strong>Wikipedia</strong> (FR puis EN en fallback) — contexte general, CC BY-SA</li>
+      <li><strong>HAL</strong> — archive ouverte des universites francaises (theses, articles, chapitres)</li>
+      <li><strong>OpenAlex</strong> — corpus international de 250M+ publications scientifiques, CC0</li>
+    </ul>
+    <p>Les extraits sont injectes dans le prompt et l'IA repond en citant explicitement les sources <code>[1] [2]</code>. Les sources apparaissent en <strong>pills</strong> au-dessus de la reponse, avec favicon + titre + lien externe cliquable.</p>
+    <p>La reponse est structuree en trois sections :</p>
+    <ul>
+      <li><strong>Presentation</strong> — resume synthetique</li>
+      <li><strong>Themes etudies par la recherche</strong> — axes degages par les universitaires, avec citations</li>
+      <li><strong>Corpus universitaire</strong> — liste bibliographique des references academiques trouvees</li>
+    </ul>
+    <p>Aucune cle API requise. Aucun service proprietaire. Toutes les APIs interrogees sont libres et publiques.</p>
+  </div>
+</section>
+
 </div><!-- /contentUser -->
 
 <!-- ======== DEVELOPPEUR ======== -->
-<div class="dev-section visible" id="contentDev">
+<div class="dev-section" id="contentDev">
 
 <section class="section" id="d-overview">
   <h2 class="section-title">Vue d'ensemble</h2>
@@ -736,7 +788,7 @@ npm start            # Lance le serveur de production sur :3000</pre>
       <tr><td>Auth</td><td>JWT + bcrypt</td><td>Tokens 7 jours, rate limiting login</td></tr>
       <tr><td>Video</td><td>FFmpeg</td><td>Extraction audio, decoupe, concatenation, export</td></tr>
       <tr><td>Transcription</td><td>faster-whisper (Python)</td><td>Modele large-v3, initial_prompt configurable</td></tr>
-      <tr><td>Analyse IA</td><td>Ollama</td><td>mistral-small:22b par defaut, communication HTTP</td></tr>
+      <tr><td>Analyse IA</td><td>Ollama</td><td>mistral-nemo:12b par defaut, communication HTTP, streaming SSE pour l'Assistant</td></tr>
       <tr><td>Temps reel</td><td>WebSocket (ws)</td><td>Channels par projet, auth JWT</td></tr>
       <tr><td>Deploiement</td><td>Docker Compose</td><td>3 services : clipr, ollama, caddy</td></tr>
     </table>
@@ -764,7 +816,7 @@ npm start            # Lance le serveur de production sur :3000</pre>
 ┌─────────────────────────────────────────────────────────┐
 │  <span class="g">clipr-ollama</span> (ollama/ollama)                          │
 │  LLM : analyse IA, detection noms locuteurs             │
-│  Modele : qwen2.5:14b                                   │
+│  Modele : mistral-nemo:12b                              │
 │  GPU : partage avec clipr (sequentiel)                  │
 │  Volume ollama-data : modeles caches                    │
 └─────────────────────────────────────────────────────────┘
@@ -1191,7 +1243,7 @@ gc.collect()</pre>
       <tr><td>pyannote 3.1</td><td>Diarisation (identification locuteurs)</td><td>~2 GB</td><td>HuggingFace (token requis)</td></tr>
       <tr><td>SpeechBrain ECAPA-TDNN</td><td>Embeddings vocaux (fallback diarisation)</td><td>~80 MB</td><td>HuggingFace (public)</td></tr>
       <tr><td>Allosaurus</td><td>Transcription IPA phonetique</td><td>~100 MB</td><td>pip (universel)</td></tr>
-      <tr><td>Ollama (qwen2.5:14b)</td><td>Detection noms locuteurs</td><td>~9 GB</td><td>Ollama registry</td></tr>
+      <tr><td>Ollama (mistral-nemo:12b)</td><td>Analyse, Assistant, detection noms locuteurs</td><td>~7 GB (Q4_0)</td><td>Ollama registry</td></tr>
     </table>
   </div>
 </section>
@@ -1387,13 +1439,73 @@ getAlfStats() // { available, points, cartes, phrases, realisations }</pre>
   </div>
 </section>
 
+<section class="section" id="d-assistant-api">
+  <h2 class="section-title">API — Assistant (chat IA)</h2>
+  <div class="card">
+    <h3>Endpoints REST</h3>
+    <table>
+      <tr><th>Methode</th><th>Route</th><th>Description</th></tr>
+      <tr><td>GET</td><td><code>/api/assistant/conversations</code></td><td>Lister les conversations de l'utilisateur</td></tr>
+      <tr><td>POST</td><td><code>/api/assistant/conversations</code></td><td>Creer une conversation vide</td></tr>
+      <tr><td>GET</td><td><code>/api/assistant/conversations/:id</code></td><td>Recuperer une conversation + tous ses messages</td></tr>
+      <tr><td>PATCH</td><td><code>/api/assistant/conversations/:id</code></td><td>Renommer (body : <code>{title}</code>)</td></tr>
+      <tr><td>DELETE</td><td><code>/api/assistant/conversations/:id</code></td><td>Supprimer (CASCADE sur les messages)</td></tr>
+      <tr><td>POST</td><td><code>/api/assistant/conversations/:id/messages</code></td><td>Envoyer un message, stream SSE la reponse (body : <code>{content, webSearch?}</code>)</td></tr>
+      <tr><td>POST</td><td><code>/api/assistant/extract</code></td><td>Upload <code>.txt/.docx/.pdf/.md</code> → texte extrait JSON</td></tr>
+    </table>
+    <p>Toutes les routes necessitent <code>requireAuth</code>. Le streaming utilise Server-Sent Events (Content-Type <code>text/event-stream</code>).</p>
+  </div>
+  <div class="card">
+    <h3>Format des events SSE</h3>
+    <pre>data: {"status":"Recherche sur les sites de confiance..."}   <span class="muted"># mode Web only</span>
+data: {"sources":[{"title":"...","url":"...","source":"Wikipedia"}]}  <span class="muted"># mode Web only</span>
+data: {"token":"Bonj"}
+data: {"token":"our"}
+...
+data: {"done":true,"message":{"id":"...","role":"assistant","content":"..."}}
+data: {"error":"..."}  <span class="muted"># en cas d'echec</span></pre>
+    <p>Les sources web sont aussi serialisees en fin de <code>content</code> via un commentaire HTML cache (<code>&lt;!--sources:[...]--&gt;</code>) pour persistance au rechargement.</p>
+  </div>
+  <div class="card">
+    <h3>Recherche web sourcee</h3>
+    <p>Service : <code>server/services/web-search.ts</code>. Quand le toggle Web est actif, on interroge en parallele 3 APIs publiques avant d'envoyer le prompt a Mistral :</p>
+    <table>
+      <tr><th>Source</th><th>Endpoint</th><th>Licence</th><th>Resultats</th></tr>
+      <tr><td>Wikipedia</td><td><code>fr.wikipedia.org/w/api.php?action=query&amp;list=search</code></td><td>CC BY-SA</td><td>2 articles + extraits</td></tr>
+      <tr><td>HAL</td><td><code>api.archives-ouvertes.fr/search/</code></td><td>Libre</td><td>4 documents (CNRS + universites FR)</td></tr>
+      <tr><td>OpenAlex</td><td><code>api.openalex.org/works?search=</code></td><td>CC0</td><td>4 articles internationaux</td></tr>
+    </table>
+    <p>Pas de cle API. La fonction <code>normalizeQuery()</code> retire les prefixes naturels ("je cherche des infos sur..." → "..."). Le prompt construit demande a Mistral de structurer en 3 sections (Presentation / Themes etudies / Corpus universitaire) avec citations <code>[1] [2]</code>.</p>
+  </div>
+  <div class="card">
+    <h3>Schema SQLite</h3>
+    <pre>CREATE TABLE assistant_conversations (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT 'Nouvelle conversation',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE assistant_messages (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (conversation_id) REFERENCES assistant_conversations(id) ON DELETE CASCADE
+);</pre>
+  </div>
+</section>
+
 </div><!-- /contentDev -->
 
 </main>
 </div><!-- /layout -->
 
 <script>
-let currentView = 'dev';
+let currentView = 'user';
 function switchView(view) {
   currentView = view;
   document.querySelectorAll('.user-section, .dev-section').forEach(el => el.classList.remove('visible'));

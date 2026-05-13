@@ -30,9 +30,9 @@ C'est multi-utilisateurs, multi-projets, et concu pour qu'une equipe puisse part
 
 ---
 
-## Les 3 outils
+## Les 4 outils
 
-Clipr regroupe trois outils qui partagent la meme base (comptes, projets, partage, IA) mais qui repondent a des besoins differents.
+Clipr regroupe quatre outils qui partagent la meme base (comptes, projets, partage, IA) mais qui repondent a des besoins differents.
 
 ### 1. Transcription audio/video
 
@@ -52,7 +52,7 @@ Cas d'usage : journalistes, chercheurs, doc makers qui veulent fouiller dans des
 > Decouper automatiquement une video longue en extraits thematiques.
 
 - Pipeline complet : extraction audio → transcription → analyse semantique par LLM
-- Le LLM (par defaut **mistral-small:22b** via Ollama) decoupe le contenu en sequences avec **titres et timecodes**
+- Le LLM (par defaut **mistral-nemo:12b** via Ollama) decoupe le contenu en sequences avec **titres et timecodes**
 - **Consignes personnalisables** par projet : on peut dire au LLM ce qu'on cherche
 - Mode **manuel** disponible : ajout/edition des segments a la main dans une timeline
 - Export des extraits en MP4
@@ -75,6 +75,22 @@ Cas d'usage : creer des clips courts a partir d'une longue interview, monter un 
 - Constitution d'un **atlas moderne** alimente par chaque enregistrement valide
 
 Cas d'usage : chercheurs en linguistique, ethnologues, archivistes du patrimoine oral.
+
+### 4. Assistant (chat IA)
+
+> Un chat IA local avec memoire, upload de documents et recherche sourcee facon Perplexity, en restant 100% open-source.
+
+- **Chat multi-conversations** persistant par utilisateur (SQLite)
+- **Streaming token-par-token** (SSE) facon ChatGPT
+- **Upload de fichiers** : `.txt`, `.docx`, `.pdf`, `.md` injectes dans le contexte
+- **Mode recherche web sourcee** (toggle 🌐) qui interroge en parallele :
+  - **Wikipedia** (CC BY-SA, contexte general)
+  - **HAL** (archive ouverte des universites francaises, theses + articles)
+  - **OpenAlex** (corpus international de 250M+ publications scientifiques)
+- Reponses structurees en sections (presentation, themes etudies, corpus universitaire) avec citations cliquables `[1] [2]` et pills sources style Perplexity
+- Aucune cle API externe, aucune dependance proprietaire
+
+Cas d'usage : extraire des recettes d'un texte, resumer un document, faire un dossier de recherche bibliographique avec sources academiques.
 
 ---
 
@@ -149,7 +165,7 @@ Pourquoi separer **ollama** de **clipr** ? Parce que le LLM consomme beaucoup de
 |------|---------|
 | Image Docker Clipr | ~2 GB |
 | Modele Whisper large-v3 | ~3 GB (telecharge au premier usage) |
-| Modele mistral-small:22b | ~14 GB |
+| Modele mistral-nemo:12b | ~7 GB (Q4_0) |
 | Vos projets | depend des videos |
 
 ---
@@ -248,6 +264,18 @@ Toutes les routes (sauf `register`/`login`) demandent un header `Authorization: 
 | GET | `/api/ollama/models` | Lister les modeles installes |
 | POST | `/api/ollama/pull` | Telecharger un modele |
 
+### Assistant (chat IA)
+
+| Methode | Route | Description |
+|---------|-------|-------------|
+| GET | `/api/assistant/conversations` | Lister mes conversations |
+| POST | `/api/assistant/conversations` | Creer une conversation vide |
+| GET | `/api/assistant/conversations/:id` | Conversation + messages |
+| PATCH | `/api/assistant/conversations/:id` | Renommer `{title}` |
+| DELETE | `/api/assistant/conversations/:id` | Supprimer |
+| POST | `/api/assistant/conversations/:id/messages` | Envoyer un msg, stream SSE la reponse `{content, webSearch?}` |
+| POST | `/api/assistant/extract` | Upload `.txt/.docx/.pdf/.md` → texte extrait |
+
 ### Fichiers et exports
 
 | Methode | Route | Description |
@@ -321,8 +349,10 @@ Clipr/
       sharing.ts             # Partage de projets
       ai-lock.ts             # Verrou IA (un user a la fois)
       whisper.ts             # Transcription (lance Python)
-      ollama.ts              # Appel HTTP a Ollama
+      ollama.ts              # Appel HTTP a Ollama (+ streaming chat)
       ffmpeg.ts              # Operations video
+      assistant.ts           # CRUD conversations + messages (outil 4)
+      web-search.ts          # Recherche sourcee Wikipedia/HAL/OpenAlex
   src/                       # Frontend React (le site)
     api.ts                   # Client HTTP/WebSocket avec auth
     routes/                  # Pages React Router
@@ -330,6 +360,7 @@ Clipr/
       TranscriptionPage.tsx  # Outil 1
       SegmentationNewPage.tsx# Outil 2
       LinguisticPage.tsx     # Outil 3
+      AssistantPage.tsx      # Outil 4 (chat IA)
       AdminPage.tsx          # Dashboard admin
     store/
       useStore.ts            # Etat projet actif (Zustand)
