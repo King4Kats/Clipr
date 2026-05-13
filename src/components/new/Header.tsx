@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Settings, Save, Sun, Moon, BookOpen, Pencil, Check, X, Home, LogOut, User, Shield } from "lucide-react";
+import { Save, Sun, Moon, BookOpen, Pencil, Check, X, Home, LogOut, User, Shield } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useTheme } from "next-themes";
@@ -17,11 +17,10 @@ import QueueStatus from "@/components/new/QueueStatus";
 import logo from "@/assets/Clipr.svg";
 
 interface HeaderProps {
-  onOpenSetup?: () => void;
   onShare?: (projectId: string, projectName: string) => void;
 }
 
-const Header = ({ onOpenSetup, onShare }: HeaderProps) => {
+const Header = ({ onShare }: HeaderProps) => {
   const navigate = useNavigate();
   const { videoFiles, processingStep, reset, saveProject, activeProjectId, activeProjectName, renameProject } = useStore();
   const { user, logout } = useAuthStore();
@@ -171,16 +170,6 @@ const Header = ({ onOpenSetup, onShare }: HeaderProps) => {
             title="Documentation"
           >
             <BookOpen className="w-4 h-4 text-muted-foreground" />
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onOpenSetup}
-            className="w-8 h-8 p-0 rounded-lg hover:bg-secondary/80 transition-colors"
-            title="Configuration IA & Parametres"
-          >
-            <Settings className="w-4 h-4 text-muted-foreground" />
           </Button>
 
           {/* Admin button */}

@@ -18,7 +18,6 @@ import { useAuthStore } from '@/store/useAuthStore'
 import api from '@/api'
 
 import Header from '@/components/new/Header'
-import SetupWizard from '@/components/SetupWizard'
 import ShareDialog from '@/components/ShareDialog'
 import SupportChat from '@/components/SupportChat'
 
@@ -37,20 +36,15 @@ export default function AppLayout() {
     loadHistory,
   } = useStore()
 
-  const [showSetup, setShowSetup] = useState(false)
   const [setupChecked, setSetupChecked] = useState(false)
   const [sharingProjectId, setSharingProjectId] = useState<string | null>(null)
   const [sharingProjectName, setSharingProjectName] = useState('')
 
-  // Check first run setup
+  // Charge l'historique au montage. Le SetupWizard a ete supprime — les
+  // utilisateurs n'ont pas a voir les details techniques (Ollama, ffmpeg, etc.)
   useEffect(() => {
-    const checkFirstRun = async () => {
-      const setupComplete = localStorage.getItem('decoupeur-video-setup-complete')
-      if (!setupComplete) setShowSetup(true)
-      setSetupChecked(true)
-      await loadHistory()
-    }
-    checkFirstRun()
+    setSetupChecked(true)
+    loadHistory()
   }, [loadHistory])
 
   // Raccourcis clavier : Ctrl+Z (annuler) / Ctrl+Shift+Z (retablir)
@@ -120,11 +114,6 @@ export default function AppLayout() {
     return () => window.removeEventListener('clipr:share', handleShare)
   }, [])
 
-  const handleSetupComplete = () => {
-    localStorage.setItem('decoupeur-video-setup-complete', 'true')
-    setShowSetup(false)
-  }
-
   if (!setupChecked) {
     return (
       <div className="h-screen flex items-center justify-center bg-background">
@@ -135,12 +124,7 @@ export default function AppLayout() {
 
   return (
     <div className="min-h-screen bg-background font-sans selection:bg-primary/20">
-      <AnimatePresence>
-        {showSetup && <SetupWizard onComplete={handleSetupComplete} />}
-      </AnimatePresence>
-
       <Header
-        onOpenSetup={() => setShowSetup(true)}
         onShare={(projectId: string, projectName: string) => {
           setSharingProjectId(projectId)
           setSharingProjectName(projectName)
