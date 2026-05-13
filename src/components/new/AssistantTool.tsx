@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   Plus, Trash2, Pencil, Check, X, Send, Bot, User as UserIcon,
-  Loader2, MessageSquare, Square, Paperclip, FileText,
+  Loader2, MessageSquare, Square, Paperclip, FileText, Globe, ExternalLink,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import api from '@/api'
@@ -27,11 +27,32 @@ interface Conv {
   updated_at: string
 }
 
+interface Source {
+  title: string
+  url: string
+}
+
 interface Msg {
   id: string
   role: 'user' | 'assistant'
   content: string
   created_at?: string
+  sources?: Source[]
+}
+
+/**
+ * Extrait les sources stockees en fin de message (commentaire HTML cache),
+ * et retourne le texte sans cette balise + le tableau de sources.
+ */
+function parseSources(content: string): { text: string; sources?: Source[] } {
+  const m = content.match(/\n*<!--sources:(.+?)-->\s*$/s)
+  if (!m) return { text: content }
+  try {
+    const sources = JSON.parse(m[1]) as Source[]
+    return { text: content.slice(0, m.index).trimEnd(), sources }
+  } catch {
+    return { text: content }
+  }
 }
 
 export default function AssistantTool() {
@@ -58,6 +79,12 @@ export default function AssistantTool() {
   const [attachments, setAttachments] = useState<{ name: string; text: string }[]>([])
   // Indicateur d'upload en cours
   const [uploading, setUploading] = useState(false)
+  // Mode "recherche web" active pour le prochain message (Tavily + sites de confiance)
+  const [webSearch, setWebSearch] = useState(false)
+  // Sources du message en cours de streaming (affichees au-dessus)
+  const [streamingSources, setStreamingSources] = useState<Source[] | null>(null)
+  // Message de status pendant la recherche web
+  const [statusMsg, setStatusMsg] = useState<string | null>(null)
 
   // ── Chargement initial : recupere la liste des conversations ──
   useEffect(() => {
@@ -104,7 +131,14 @@ export default function AssistantTool() {
     setActiveId(id)
     try {
       const data = await api.assistantGetConversation(id)
-      setMessages(data.messages)
+      // On parse les sources eventuelles en fin de chaque message assistant
+      setMessages(
+        data.messages.map((m) => {
+          if (m.role !== 'assistant') return m
+          const parsed = parseSources(m.content)
+          return { ...m, content: parsed.text, sources: parsed.sources }
+        }),
+      )
     } catch (err) {
       console.error('Failed to load conversation:', err)
       setMessages([])
@@ -205,37 +239,54 @@ export default function AssistantTool() {
       }
     }
 
+    // Pour l'affichage du message user : on cache le texte des fichiers (juste les noms)
+    const userDisplayContent = attachments.length > 0
+      ? `${attachments.map((a) => `📎 ${a.name}`).join(', ')}${text ? `\n\n${text}` : ''}`
+      : text
+
     // Ajoute le message user dans l'UI immediatement
-    const userMsg: Msg = { id: 'tmp-' + Date.now(), role: 'user', content: finalContent }
+    const userMsg: Msg = { id: 'tmp-' + Date.now(), role: 'user', content: userDisplayContent }
     setMessages((ms) => [...ms, userMsg])
     setInput('')
     setAttachments([])
     setStreaming('')
+    setStreamingSources(null)
+    setStatusMsg(null)
+
+    const wasWebSearch = webSearch
+    // On laisse le toggle a l'etat actuel pour les messages suivants, l'user peut le couper s'il veut
 
     // Lance le stream SSE
     streamCtrl.current = api.assistantSendMessage(
       convId,
       finalContent,
-      // onToken : ajoute le morceau au texte en cours
-      (chunk) => setStreaming((s) => (s ?? '') + chunk),
-      // onDone : remplace le streaming par le vrai message en DB
-      (_full, savedMsg) => {
-        if (savedMsg) {
-          setMessages((ms) => [...ms, savedMsg])
-        }
-        setStreaming(null)
-        streamCtrl.current = null
-        refreshConversations() // remet a jour le titre auto + ordre
+      {
+        onToken: (chunk) => setStreaming((s) => (s ?? '') + chunk),
+        onSources: (sources) => setStreamingSources(sources),
+        onStatus: (msg) => setStatusMsg(msg),
+        onDone: (_full, savedMsg) => {
+          if (savedMsg) {
+            const parsed = parseSources(savedMsg.content)
+            setMessages((ms) => [...ms, { ...savedMsg, content: parsed.text, sources: parsed.sources }])
+          }
+          setStreaming(null)
+          setStreamingSources(null)
+          setStatusMsg(null)
+          streamCtrl.current = null
+          refreshConversations()
+        },
+        onError: (err) => {
+          setMessages((ms) => [
+            ...ms,
+            { id: 'err-' + Date.now(), role: 'assistant', content: `Erreur : ${err}` },
+          ])
+          setStreaming(null)
+          setStreamingSources(null)
+          setStatusMsg(null)
+          streamCtrl.current = null
+        },
       },
-      // onError : affiche l'erreur dans le chat
-      (err) => {
-        setMessages((ms) => [
-          ...ms,
-          { id: 'err-' + Date.now(), role: 'assistant', content: `Erreur : ${err}` },
-        ])
-        setStreaming(null)
-        streamCtrl.current = null
-      },
+      { webSearch: wasWebSearch },
     )
   }
 
@@ -360,10 +411,16 @@ export default function AssistantTool() {
           ) : (
             <div className="max-w-3xl mx-auto space-y-4">
               {messages.map((m) => (
-                <MessageBubble key={m.id} role={m.role} content={m.content} />
+                <MessageBubble key={m.id} role={m.role} content={m.content} sources={m.sources} />
               ))}
               {streaming !== null && (
-                <MessageBubble role="assistant" content={streaming + (streaming ? '▌' : '')} streaming />
+                <MessageBubble
+                  role="assistant"
+                  content={streaming + (streaming ? '▌' : '')}
+                  streaming
+                  sources={streamingSources || undefined}
+                  status={statusMsg || undefined}
+                />
               )}
               <div ref={bottomRef} />
             </div>
@@ -417,6 +474,20 @@ export default function AssistantTool() {
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
               </Button>
 
+              {/* Toggle recherche web : quand actif, le prochain message va chercher sur les
+                  sites de confiance (Wikipedia, officiels, academique) et l'IA cite ses sources */}
+              <Button
+                onClick={() => setWebSearch((w) => !w)}
+                variant={webSearch ? 'default' : 'ghost'}
+                size="sm"
+                className={`h-9 gap-1.5 shrink-0 ${webSearch ? 'bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40' : ''}`}
+                disabled={streaming !== null}
+                title="Recherche web sur sites de confiance (Wikipedia, officiels, academique)"
+              >
+                <Globe className="w-4 h-4" />
+                <span className="text-xs hidden sm:inline">Web</span>
+              </Button>
+
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -446,9 +517,17 @@ export default function AssistantTool() {
 }
 
 /**
- * Bulle d'un message (user ou assistant) avec rendu Markdown.
+ * Bulle d'un message (user ou assistant) avec rendu Markdown + sources web.
  */
-function MessageBubble({ role, content, streaming }: { role: 'user' | 'assistant'; content: string; streaming?: boolean }) {
+function MessageBubble({
+  role, content, streaming, sources, status,
+}: {
+  role: 'user' | 'assistant'
+  content: string
+  streaming?: boolean
+  sources?: Source[]
+  status?: string
+}) {
   const isUser = role === 'user'
   return (
     <motion.div
@@ -464,6 +543,40 @@ function MessageBubble({ role, content, streaming }: { role: 'user' | 'assistant
           isUser ? 'bg-primary text-primary-foreground' : 'bg-card border border-border text-foreground'
         }`}
       >
+        {/* Status pendant la recherche web ("Recherche sur les sites de confiance...") */}
+        {status && (
+          <div className="text-xs text-sky-300 italic mb-1.5 flex items-center gap-1.5">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            {status}
+          </div>
+        )}
+
+        {/* Sources web : affichees AU-DESSUS de la reponse (comme Perplexity) */}
+        {!isUser && sources && sources.length > 0 && (
+          <div className="mb-2 pb-2 border-b border-border/40">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+              <Globe className="w-3 h-3" />
+              Sources
+            </div>
+            <div className="space-y-1">
+              {sources.map((s, i) => (
+                <a
+                  key={i}
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-start gap-1.5 text-xs text-sky-400 hover:text-sky-300 hover:underline group"
+                  title={s.url}
+                >
+                  <span className="font-mono opacity-60 shrink-0">[{i + 1}]</span>
+                  <span className="line-clamp-2">{s.title || s.url}</span>
+                  <ExternalLink className="w-3 h-3 opacity-50 group-hover:opacity-100 shrink-0 mt-0.5" />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         {isUser ? (
           <div className="whitespace-pre-wrap break-words">{content}</div>
         ) : (

@@ -56,6 +56,7 @@ import {
 } from './services/atlas-moderne.js'
 import { getDb } from './services/database.js'
 import * as assistantService from './services/assistant.js'
+import * as webSearch from './services/web-search.js'
 import { requireAuth, requireAdmin, optionalAuth } from './middleware/auth.js'
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1148,13 +1149,15 @@ app.delete('/api/assistant/conversations/:id', requireAuth, (req, res) => {
   res.json({ success: true })
 })
 
-// Envoie un message utilisateur et stream la reponse IA en SSE
-// Body : { content: string, model?: string }
-// SSE events : data: {"token": "..."}, data: {"done": true, "message": {...}}, data: {"error": "..."}
+// Envoie un message utilisateur et stream la reponse IA en SSE.
+// Body : { content: string, model?: string, webSearch?: boolean }
+// Si webSearch=true, on fait d'abord une recherche Tavily (sites de confiance)
+// et on injecte les resultats dans le prompt, en demandant a l'IA de citer [n].
+// SSE events : data: {"token":"..."}, data: {"sources":[...]}, data: {"done":true,...}, data: {"error":"..."}
 app.post('/api/assistant/conversations/:id/messages', requireAuth, async (req, res) => {
   const userId = req.user!.userId
   const convId = req.params.id
-  const { content, model } = req.body
+  const { content, model, webSearch: useWebSearch } = req.body
   if (!content || typeof content !== 'string' || !content.trim()) {
     return res.status(400).json({ error: 'content requis' })
   }
@@ -1170,20 +1173,48 @@ app.post('/api/assistant/conversations/:id/messages', requireAuth, async (req, r
     assistantService.renameConversation(userId, convId, assistantService.generateTitle(content))
   }
 
-  // Construit l'historique pour Ollama (system prompt + messages precedents + nouveau)
-  const systemPrompt = "Tu es un assistant IA utile et concis. Reponds en francais sauf si l'utilisateur ecrit dans une autre langue. Quand on te demande d'extraire ou de lister des elements (recettes, citations, etc.) d'un texte, presente-les sous forme structuree (titres, puces). Tu peux utiliser du Markdown."
-  const ollamaMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
-    { role: 'system', content: systemPrompt },
-    ...data.messages.map((m) => ({ role: m.role, content: m.content })),
-    { role: 'user', content: content.trim() },
-  ]
-
-  // En-tetes SSE
+  // En-tetes SSE (envoyes tot, avant la recherche web qui peut prendre 2-3s)
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
   res.setHeader('Cache-Control', 'no-cache, no-transform')
   res.setHeader('Connection', 'keep-alive')
   res.setHeader('X-Accel-Buffering', 'no')
   res.flushHeaders?.()
+
+  // ── Mode recherche web : appel Tavily prealable ──
+  let promptContent = content.trim()
+  let webResults: { title: string; url: string }[] = []
+  if (useWebSearch) {
+    if (!webSearch.isConfigured()) {
+      res.write(`data: ${JSON.stringify({ error: "TAVILY_API_KEY non configure cote serveur. Demande a l'admin d'ajouter la cle dans la config Docker." })}\n\n`)
+      res.end()
+      return
+    }
+    res.write(`data: ${JSON.stringify({ status: 'Recherche sur les sites de confiance...' })}\n\n`)
+    try {
+      const search = await webSearch.searchWeb(content.trim(), 5)
+      promptContent = webSearch.buildWebPrompt(content.trim(), search)
+      webResults = search.results.map((r) => ({ title: r.title, url: r.url }))
+      // Envoie les sources au front (pour affichage des liens)
+      res.write(`data: ${JSON.stringify({ sources: webResults })}\n\n`)
+    } catch (err: any) {
+      logger.error('[Assistant] web search failed:', err.message)
+      res.write(`data: ${JSON.stringify({ error: 'Recherche web echouee : ' + err.message })}\n\n`)
+      res.end()
+      return
+    }
+  }
+
+  // Construit l'historique pour Ollama (system prompt + messages precedents + nouveau prompt enrichi)
+  const baseSystem = "Tu es un assistant IA utile et concis. Reponds en francais sauf si l'utilisateur ecrit dans une autre langue. Quand on te demande d'extraire ou de lister des elements (recettes, citations, etc.) d'un texte, presente-les sous forme structuree (titres, puces). Tu peux utiliser du Markdown."
+  const webSystem = " Quand des sources web te sont fournies, cite-les imperativement avec [1], [2], etc. correspondant aux numeros donnes, et ne dis rien qui ne soit pas dans les sources."
+  const systemPrompt = useWebSearch ? baseSystem + webSystem : baseSystem
+  const ollamaMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+    { role: 'system', content: systemPrompt },
+    // En mode web on n'envoie pas l'historique pour eviter de polluer le contexte
+    // avec d'anciens echanges non-sources. Pour les chats normaux on garde l'historique.
+    ...(useWebSearch ? [] : data.messages.map((m) => ({ role: m.role, content: m.content }))),
+    { role: 'user', content: promptContent },
+  ]
 
   const ollamaModel = (typeof model === 'string' && model) || 'mistral-nemo:12b'
 
@@ -1199,7 +1230,12 @@ app.post('/api/assistant/conversations/:id/messages', requireAuth, async (req, r
     },
     (full) => {
       if (aborted) return
-      const saved = assistantService.addMessage(userId, convId, 'assistant', full)
+      // On sauvegarde aussi les sources dans le contenu du message (en JSON cache en fin)
+      // pour que le rechargement de la conversation puisse les afficher.
+      const fullWithMeta = webResults.length > 0
+        ? full + '\n\n<!--sources:' + JSON.stringify(webResults) + '-->'
+        : full
+      const saved = assistantService.addMessage(userId, convId, 'assistant', fullWithMeta)
       res.write(`data: ${JSON.stringify({ done: true, message: saved })}\n\n`)
       res.end()
     },

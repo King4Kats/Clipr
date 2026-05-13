@@ -394,19 +394,23 @@ const api = {
   assistantSendMessage: (
     convId: string,
     content: string,
-    onToken: (chunk: string) => void,
-    onDone: (full: string, message: any) => void,
-    onError: (err: string) => void,
-    model?: string,
+    callbacks: {
+      onToken: (chunk: string) => void
+      onDone: (full: string, message: any) => void
+      onError: (err: string) => void
+      onSources?: (sources: { title: string; url: string }[]) => void
+      onStatus?: (msg: string) => void
+    },
+    options?: { model?: string; webSearch?: boolean },
   ) => {
     const ctrl = new AbortController()
     fetch(`${API_BASE}/api/assistant/conversations/${convId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify({ content, model }),
+      body: JSON.stringify({ content, model: options?.model, webSearch: options?.webSearch }),
       signal: ctrl.signal,
     }).then(async (res) => {
-      if (!res.ok || !res.body) { onError(`HTTP ${res.status}`); return }
+      if (!res.ok || !res.body) { callbacks.onError(`HTTP ${res.status}`); return }
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
@@ -424,14 +428,16 @@ const api = {
           if (!line) continue
           try {
             const data = JSON.parse(line.slice(6))
-            if (data.token) { full += data.token; onToken(data.token) }
-            if (data.done) { onDone(full, data.message); return }
-            if (data.error) { onError(data.error); return }
+            if (data.token) { full += data.token; callbacks.onToken(data.token) }
+            if (data.sources && callbacks.onSources) callbacks.onSources(data.sources)
+            if (data.status && callbacks.onStatus) callbacks.onStatus(data.status)
+            if (data.done) { callbacks.onDone(full, data.message); return }
+            if (data.error) { callbacks.onError(data.error); return }
           } catch {}
         }
       }
     }).catch((err) => {
-      if (err.name !== 'AbortError') onError(err.message || 'Erreur reseau')
+      if (err.name !== 'AbortError') callbacks.onError(err.message || 'Erreur reseau')
     })
     return { abort: () => ctrl.abort() }
   },

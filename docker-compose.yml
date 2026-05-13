@@ -24,6 +24,11 @@ services:
       - SMTP_FROM=${SMTP_FROM:-clipr@temonia.fr}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-clipr@temonia.fr}
       - PUBLIC_URL=${PUBLIC_URL:-https://clipr-temonia.flavienauvray.me}
+      # ─── Recherche web Assistant : Tavily (sites de confiance) ───
+      # Cle gratuite (1000 req/mois) a creer sur tavily.com
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      # Surcharge optionnelle de la whitelist des domaines (CSV)
+      - TRUSTED_WEB_DOMAINS=${TRUSTED_WEB_DOMAINS:-}
     deploy:
       resources:
         reservations:
