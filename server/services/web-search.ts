@@ -51,6 +51,19 @@ export interface SearchResponse {
   answer?: string
 }
 
+/**
+ * Normalise une query : retire les prefixes "je cherche des infos sur",
+ * "donne-moi", etc. pour que les moteurs de recherche full-text matchent mieux.
+ * Pas d'appel LLM ici — juste de la regex rapide.
+ */
+function normalizeQuery(query: string): string {
+  const cleaned = query
+    .replace(/^(je cherche (des )?infos? (sur )?|donne(-)?moi (des )?(infos?|informations?) (sur )?|trouve(-)?moi (des )?(infos? )?(sur )?|je veux (savoir|des infos?) (sur )?|qui est |c'est quoi |parle(-)?moi (de )?|info(s)? (sur )?|recherche (sur )?|search (for )?|find (me )?|tell me about |what is |who is |give me (info )?(on |about )?)/i, '')
+    .replace(/[?!.]+$/, '')
+    .trim()
+  return cleaned || query
+}
+
 /** Appel HTTP GET JSON simple. */
 function getJson(url: string, timeoutMs = 15000): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -223,7 +236,11 @@ export async function searchWeb(query: string, maxResults = 9): Promise<SearchRe
 
   if (!cleanQuery) return { query, results: [] }
 
-  logger.info(`[WebSearch] Recherche multi-sources : "${cleanQuery}"`)
+  // Retire les prefixes naturels du type "je cherche des infos sur X" → "X".
+  // Indispensable car les APIs full-text matchent litteralement les mots.
+  const searchQuery = normalizeQuery(cleanQuery)
+
+  logger.info(`[WebSearch] Recherche multi-sources : "${searchQuery}"${searchQuery !== cleanQuery ? ` (depuis: "${cleanQuery}")` : ''}`)
 
   // Repartition pondereee : on veut une majorite de sources academiques pour
   // refleter ce que les universitaires ont publie sur le sujet.
@@ -231,9 +248,9 @@ export async function searchWeb(query: string, maxResults = 9): Promise<SearchRe
   // - OpenAlex : 4 articles (corpus international, dont theses)
   // - HAL : 4 articles (recherche francaise specifiquement)
   const [wikiRes, openAlexRes, halRes] = await Promise.all([
-    searchWikipedia(cleanQuery, 2),
-    searchOpenAlex(cleanQuery, 4),
-    searchHal(cleanQuery, 4),
+    searchWikipedia(searchQuery, 2),
+    searchOpenAlex(searchQuery, 4),
+    searchHal(searchQuery, 4),
   ])
 
   logger.info(`[WebSearch] Wikipedia=${wikiRes.length} OpenAlex=${openAlexRes.length} HAL=${halRes.length}`)
