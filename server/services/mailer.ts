@@ -149,3 +149,32 @@ export async function notifyUserDecision(args: {
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 }
+
+/**
+ * Envoie le code 6 chiffres a l'utilisateur pour reinitialisation mdp.
+ */
+export async function sendPasswordResetCode(args: { to: string; username: string; code: string }): Promise<boolean> {
+  const text = [
+    `Bonjour ${args.username},`,
+    ``,
+    `Tu as demande la reinitialisation de ton mot de passe sur Clipr.`,
+    `Ton code de reinitialisation est :`,
+    ``,
+    `    ${args.code}`,
+    ``,
+    `Ce code est valable 15 minutes. Saisis-le sur la page de reinitialisation.`,
+    ``,
+    `Si tu n'as pas demande ce code, ignore cet email.`,
+  ].join('\n')
+  const html = `
+    <div style="font-family:system-ui,sans-serif;max-width:480px;margin:auto;padding:24px;border:1px solid #ddd;border-radius:8px">
+      <h2 style="margin-top:0">Reinitialisation de mot de passe</h2>
+      <p>Bonjour <strong>${escapeHtml(args.username)}</strong>,</p>
+      <p>Voici ton code de reinitialisation :</p>
+      <div style="font-family:monospace;font-size:32px;font-weight:bold;letter-spacing:8px;text-align:center;padding:16px;background:#f5f5f5;border-radius:8px;margin:20px 0">
+        ${args.code}
+      </div>
+      <p style="font-size:13px;color:#666">Valable 15 minutes. Si tu n'as pas demande ce code, ignore cet email.</p>
+    </div>`
+  return sendMail({ to: args.to, subject: '[Clipr] Code de reinitialisation', text, html })
+}

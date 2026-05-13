@@ -38,6 +38,7 @@ import * as settingsService from './services/settings.js'
 import * as mailer from './services/mailer.js'
 import { extractText, createTextTranscription } from './services/text-import.js'
 import * as supportService from './services/support.js'
+import * as passwordResetService from './services/password-reset.js'
 import * as aiLockService from './services/ai-lock.js'
 import * as sharingService from './services/sharing.js'
 import * as taskQueueService from './services/task-queue.js'
@@ -655,6 +656,84 @@ app.get('/api/support/attachments/:filename', (req, res) => {
   const filePath = join(SUPPORT_DIR, filename)
   if (!existsSync(filePath)) return res.status(404).end()
   res.sendFile(filePath)
+})
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── PASSWORD RESET (code 6 chiffres par email) ──
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Demande un code. Reponse identique que l'email existe ou non (anti-enumeration).
+ * Si email existe, on envoie le code par mail.
+ */
+app.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
+  try {
+    const email = (req.body?.email || '').toString().trim()
+    if (!email) return res.status(400).json({ error: 'Email requis' })
+    const result = passwordResetService.createResetCode(email)
+    if (result) {
+      // Envoi du code en background (n'attend pas la reponse SMTP)
+      mailer.sendPasswordResetCode({ to: result.email, username: result.username, code: result.code }).catch(() => {})
+    }
+    // Reponse generique meme si email inconnu (securite)
+    res.json({ ok: true, message: 'Si cet email est connu, un code a ete envoye.' })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+/**
+ * Soumet le code + nouveau mdp. Si valide, met a jour.
+ */
+app.post('/api/auth/reset-password', authLimiter, (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body || {}
+    if (!email || !code || !newPassword) return res.status(400).json({ error: 'email, code et newPassword requis' })
+    passwordResetService.verifyCodeAndResetPassword(email, code, newPassword)
+    res.json({ ok: true, message: 'Mot de passe mis a jour. Tu peux te connecter avec le nouveau mdp.' })
+  } catch (err: any) { res.status(400).json({ error: err.message }) }
+})
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── ADMIN USER MANAGEMENT ──
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Supprime un utilisateur. Empeche la suppression de soi-meme et du dernier admin.
+ */
+app.delete('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const targetId = req.params.id
+    const adminId = req.user!.userId
+    if (targetId === adminId) return res.status(400).json({ error: 'Tu ne peux pas te supprimer toi-meme' })
+
+    const db = getDb()
+    const target = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(targetId) as any
+    if (!target) return res.status(404).json({ error: 'Utilisateur introuvable' })
+
+    // Empeche la suppression du dernier admin
+    if (target.role === 'admin') {
+      const adminCount = (db.prepare("SELECT COUNT(*) as cnt FROM users WHERE role = 'admin'").get() as any).cnt
+      if (adminCount <= 1) return res.status(400).json({ error: 'Impossible de supprimer le dernier admin' })
+    }
+
+    // Suppression : on garde les projets/transcriptions (ils ont user_id qui pointera vers un user disparu).
+    // Pour propre, on pourrait soft-delete via une colonne, mais la c'est un hard delete.
+    db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(targetId)
+    db.prepare('DELETE FROM support_messages WHERE user_id = ?').run(targetId)
+    db.prepare('DELETE FROM users WHERE id = ?').run(targetId)
+    logger.info(`[Admin] User ${target.username} supprime par ${req.user!.username}`)
+    res.json({ ok: true })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+/**
+ * Reset le mot de passe d'un user. Renvoie le nouveau mdp en clair pour que
+ * l'admin puisse le communiquer.
+ */
+app.post('/api/admin/users/:id/reset-password', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const newPwd = passwordResetService.adminResetUserPassword(req.params.id)
+    res.json({ ok: true, newPassword: newPwd })
+  } catch (err: any) { res.status(400).json({ error: err.message }) }
 })
 
 // Endpoint public : indique au front si les inscriptions sont ouvertes

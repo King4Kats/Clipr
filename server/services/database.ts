@@ -393,4 +393,21 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_support_user ON support_messages(user_id);
     CREATE INDEX IF NOT EXISTS idx_support_created ON support_messages(created_at);
   `)
+
+  // ── Table password_resets : codes a 6 chiffres pour reinitialisation mdp ──
+  // On stocke le HASH du code (jamais en clair), date d'expiration (15 min),
+  // et nombre de tentatives (max 5). Une ligne par demande active.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
+  `)
 }

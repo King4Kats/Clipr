@@ -231,6 +231,29 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
     } catch {}
   }
 
+  /** Supprime un utilisateur (confirmation obligatoire). */
+  const deleteUser = async (id: string, username: string) => {
+    if (!confirm(`Supprimer definitivement l'utilisateur "${username}" ?\n\nSes projets et transcriptions resteront en base mais n'auront plus de proprietaire.`)) return
+    try {
+      const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE', headers })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Erreur')
+      await fetchUsers(); await fetchPending()
+    } catch (e: any) { alert(e.message) }
+  }
+
+  /** Reinitialise le mdp d'un user, affiche le nouveau mdp a l'admin pour le transmettre. */
+  const resetUserPassword = async (id: string, username: string) => {
+    if (!confirm(`Reinitialiser le mot de passe de "${username}" ?\n\nUn nouveau mot de passe sera genere et affiche a l'ecran pour que tu le transmettes.`)) return
+    try {
+      const res = await fetch(`/api/admin/users/${id}/reset-password`, { method: 'POST', headers })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Erreur')
+      // Affichage simple via prompt (l'admin peut le copier-coller)
+      window.prompt(`Nouveau mot de passe pour "${username}" (copie-le et transmets-le) :`, data.newPassword)
+    } catch (e: any) { alert(e.message) }
+  }
+
   /** Bascule le flag d'ouverture des inscriptions. */
   const toggleRegistration = async () => {
     if (!regSettings) return
@@ -472,22 +495,41 @@ export default function AdminDashboard({ onBack, onLoadProject }: { onBack: () =
                   <th className="text-left p-3 font-semibold text-muted-foreground">Email</th>
                   <th className="text-left p-3 font-semibold text-muted-foreground">Rôle</th>
                   <th className="text-left p-3 font-semibold text-muted-foreground">Inscrit le</th>
+                  <th className="text-right p-3 font-semibold text-muted-foreground">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {users.map((u: any) => (
-                  <tr key={u.id} className="border-b border-border/50 hover:bg-secondary/20">
+                  <tr key={u.id} className="border-b border-border/50 hover:bg-secondary/20 group">
                     <td className="p-3 font-medium text-foreground">{u.username}</td>
                     <td className="p-3 text-muted-foreground">{u.email}</td>
-                    {/* Badge pour le rôle : "admin" en couleur primaire, "user" en gris */}
                     <td className="p-3">
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
                         u.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-zinc-500/10 text-zinc-400'
                       }`}>{u.role}</span>
                     </td>
-                    {/* Date d'inscription formatée en français */}
                     <td className="p-3 text-muted-foreground">
                       {new Date(u.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td className="p-3 text-right">
+                      <div className="inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button
+                          variant="ghost" size="sm"
+                          onClick={() => resetUserPassword(u.id, u.username)}
+                          className="h-7 text-[10px] gap-1 text-amber-400 hover:bg-amber-500/10"
+                          title="Reinitialiser le mot de passe"
+                        >
+                          <RefreshCw className="w-3 h-3" /> Mdp
+                        </Button>
+                        <Button
+                          variant="ghost" size="sm"
+                          onClick={() => deleteUser(u.id, u.username)}
+                          className="h-7 text-[10px] gap-1 text-destructive hover:bg-destructive/10"
+                          title="Supprimer cet utilisateur"
+                        >
+                          <Trash2 className="w-3 h-3" /> Supprimer
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
