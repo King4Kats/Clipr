@@ -1,51 +1,35 @@
 /**
- * WEB-SEARCH.TS : Recherche web via SearXNG (meta-moteur open-source, GPL-3.0).
+ * WEB-SEARCH.TS : Recherche d'informations sourcees via l'API Wikipedia officielle.
  *
- * SearXNG agrege les resultats de DuckDuckGo, Brave, Wikipedia, Qwant, etc.
- * sans tracker l'utilisateur ni necessiter de cle API. C'est l'option ethique
- * et libre pour de la recherche web.
+ * Wikipedia est une source libre (CC BY-SA), ethique, et son API publique est
+ * gratuite/illimitee a usage raisonnable. Aucune cle, aucun service tiers, pas de
+ * tracking. C'est la solution la plus alignee avec un projet associatif open-source.
  *
- * Deux modes :
- * 1. SEARXNG_URL pointe vers une instance auto-hebergee (recommande, sans limite)
- *    → ajouter un container searxng dans docker-compose ou le faire tourner ailleurs
- * 2. SEARXNG_URL pointe vers une instance publique ethique (ex: searx.be, search.inetol.net)
- *    → fonctionne immediatement mais soumis aux limites/disponibilite de l'instance
+ * Pipeline :
+ *  1. opensearch → liste les pages Wikipedia matchant la requete (max 5)
+ *  2. query/extracts → recupere l'introduction (texte plat) de chaque page
+ *  3. Les extraits sont injectes dans le prompt Mistral local pour synthese
+ *     avec citations [1] [2] ...
  *
- * Les resultats sont ensuite injectes dans le prompt Mistral local, qui synthetise
- * une reponse en citant les sources [1] [2] ... — meme principe que Perplexity.
+ * Langue : FR par defaut, fallback EN si rien en FR (configurable via env).
  *
- * La whitelist des domaines de confiance est configurable via TRUSTED_WEB_DOMAINS.
- * On filtre cote serveur les URLs retournees par SearXNG (since SearXNG n'a pas
- * de parametre natif pour restreindre aux domaines).
+ * Extension future : ajouter des sources academiques (HAL, OpenAlex, etc.) ou
+ * officielles (legifrance, data.gouv) qui ont aussi des APIs publiques.
  */
 
-import http from 'node:http'
 import https from 'node:https'
 import { logger } from '../logger.js'
 
-// Liste d'instances SearXNG publiques ethiques en rotation. La 1ere joignable
-// est utilisee. Pour de la prod stable, deploie ton propre container et mets
-// SEARXNG_URL dans l'env, ca court-circuite la rotation.
-const SEARXNG_INSTANCES = [
-  'https://searx.tiekoetter.com',
-  'https://baresearch.org',
-  'https://priv.au',
-  'https://search.inetol.net',
-  'https://searx.work',
-  'https://searx.be',
-].map((u) => u.replace(/\/$/, ''))
+const WIKI_LANG_PRIMARY = process.env.WIKI_LANG || 'fr'
+const WIKI_LANG_FALLBACK = process.env.WIKI_LANG_FALLBACK || 'en'
 
-const SEARXNG_URL_OVERRIDE = (process.env.SEARXNG_URL || '').replace(/\/$/, '')
-
-// Liste par defaut : Wikipedia + officiels + sites academiques.
+// La liste de domaines de confiance reste documentee meme si on n'utilise que
+// Wikipedia pour l'instant : on pourra brancher d'autres sources plus tard.
 const DEFAULT_TRUSTED_DOMAINS = [
-  // Wikipedia & encyclopedies
   'wikipedia.org', 'fr.wikipedia.org', 'en.wikipedia.org',
-  // Officiels FR / UE
   'gouv.fr', 'service-public.fr', 'legifrance.gouv.fr',
   'europa.eu', 'eur-lex.europa.eu',
   'insee.fr', 'data.gouv.fr',
-  // Sciences / academiques
   'nature.com', 'science.org', 'sciencedirect.com',
   'hal.science', 'cairn.info', 'persee.fr',
   'pubmed.ncbi.nlm.nih.gov', 'arxiv.org',
@@ -72,69 +56,30 @@ export interface SearchResponse {
   answer?: string
 }
 
-/**
- * Verifie si une URL provient d'un des domaines de confiance.
- * Match exact OU sous-domaine (ex: 'wikipedia.org' match 'fr.wikipedia.org').
- */
-function isTrusted(url: string, trustedDomains: string[]): boolean {
-  try {
-    const host = new URL(url).hostname.toLowerCase()
-    return trustedDomains.some((d) => {
-      const dom = d.toLowerCase()
-      return host === dom || host.endsWith('.' + dom)
-    })
-  } catch {
-    return false
-  }
-}
-
-/**
- * Lance une requete sur UNE instance SearXNG. Renvoie les resultats bruts.
- */
-function searchOnInstance(instanceUrl: string, query: string): Promise<SearchResult[]> {
+/** Appel HTTP GET JSON simple. */
+function getJson(url: string, timeoutMs = 15000): Promise<any> {
   return new Promise((resolve, reject) => {
-    const params = new URLSearchParams({
-      q: query,
-      format: 'json',
-      language: 'fr',
-      safesearch: '1',
-    })
-    const url = new URL(`${instanceUrl}/search?${params.toString()}`)
-    const isHttps = url.protocol === 'https:'
-    const lib = isHttps ? https : http
-
-    const req = lib.request({
-      hostname: url.hostname,
-      port: url.port || (isHttps ? 443 : 80),
-      path: url.pathname + url.search,
+    const u = new URL(url)
+    const req = https.request({
+      hostname: u.hostname,
+      port: 443,
+      path: u.pathname + u.search,
       method: 'GET',
-      // User-Agent navigateur : certaines instances publiques bloquent les bots.
       headers: {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
+        // Wikipedia recommande un User-Agent identifiant l'app + contact.
+        'User-Agent': 'Clipr/1.0 (https://clipr.temonia.fr; contact: clipr@temonia.fr) Node.js',
+        'Accept': 'application/json',
       },
-      timeout: 15000,
+      timeout: timeoutMs,
     }, (res) => {
       let data = ''
       res.on('data', (c) => { data += c })
       res.on('end', () => {
-        try {
-          if (res.statusCode !== 200) {
-            reject(new Error(`HTTP ${res.statusCode}`))
-            return
-          }
-          const json = JSON.parse(data)
-          const results: SearchResult[] = (json.results || []).map((r: any) => ({
-            title: r.title || '',
-            url: r.url || '',
-            content: r.content || r.snippet || '',
-            score: r.score,
-          }))
-          resolve(results)
-        } catch (err: any) {
-          reject(new Error(`parse: ${err.message}`))
+        if (res.statusCode !== 200) {
+          reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`))
+          return
         }
+        try { resolve(JSON.parse(data)) } catch (err: any) { reject(new Error(`parse: ${err.message}`)) }
       })
     })
     req.on('error', (err) => reject(err))
@@ -144,37 +89,90 @@ function searchOnInstance(instanceUrl: string, query: string): Promise<SearchRes
 }
 
 /**
- * Lance une recherche web : essaie les instances SearXNG en sequence jusqu'a
- * une qui repond. SearXNG ne supporte pas un filtre 'include_domains' natif,
- * donc on injecte 'site:domain1 OR site:domain2' dans la query, ET on post-filtre
- * les resultats pour ne garder que les URLs des domaines trustees.
+ * Recherche openSearch Wikipedia : titre + description courte + URL.
+ * Renvoie max `limit` resultats pertinents.
+ */
+async function wikipediaOpenSearch(query: string, lang: string, limit: number): Promise<{ title: string; url: string; description: string }[]> {
+  const url = `https://${lang}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=${limit}&format=json&origin=*`
+  // L'API renvoie : [query, [titles], [descriptions], [urls]]
+  const data = await getJson(url)
+  if (!Array.isArray(data) || data.length < 4) return []
+  const titles = data[1] as string[]
+  const descriptions = data[2] as string[]
+  const urls = data[3] as string[]
+  return titles.map((title, i) => ({
+    title,
+    url: urls[i] || '',
+    description: descriptions[i] || '',
+  })).filter((r) => r.title && r.url)
+}
+
+/**
+ * Recupere l'extrait (intro, texte plat) d'une ou plusieurs pages Wikipedia.
+ * Limite a ~10 phrases pour rester dans la fenetre de contexte du LLM.
+ */
+async function wikipediaExtracts(titles: string[], lang: string): Promise<Record<string, string>> {
+  if (titles.length === 0) return {}
+  const titlesParam = encodeURIComponent(titles.join('|'))
+  const url = `https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&explaintext=true&exsentences=10&titles=${titlesParam}&format=json&origin=*&redirects=1`
+  const data = await getJson(url)
+  const pages = data?.query?.pages || {}
+  const result: Record<string, string> = {}
+  for (const pid of Object.keys(pages)) {
+    const page = pages[pid]
+    if (page.title && page.extract) result[page.title] = page.extract
+  }
+  // Tient compte des redirections (titre demande != titre canonique de la page).
+  // On essaie de mapper chaque titre demande au premier extrait dispo.
+  const redirects: { from: string; to: string }[] = data?.query?.redirects || []
+  for (const r of redirects) {
+    if (result[r.to] && !result[r.from]) result[r.from] = result[r.to]
+  }
+  return result
+}
+
+/**
+ * Recherche web : pour l'instant, Wikipedia FR (avec fallback EN si rien trouve).
  *
- * @param query - La question/requete utilisateur
- * @param maxResults - Nombre max de resultats apres filtrage (defaut 5)
+ * @param query - Question/requete utilisateur
+ * @param maxResults - Nombre max d'articles a renvoyer (defaut 5)
  */
 export async function searchWeb(query: string, maxResults = 5): Promise<SearchResponse> {
-  const trustedDomains = getTrustedDomains()
-  const siteOps = trustedDomains.map((d) => `site:${d}`).join(' OR ')
-  const enrichedQuery = `${query} (${siteOps})`
+  logger.info(`[WebSearch] Recherche Wikipedia : "${query}"`)
+  // 1) openSearch en FR
+  let hits = await wikipediaOpenSearch(query, WIKI_LANG_PRIMARY, maxResults).catch((e) => {
+    logger.warn(`[WebSearch] opensearch FR echec: ${e.message}`)
+    return [] as { title: string; url: string; description: string }[]
+  })
+  let lang = WIKI_LANG_PRIMARY
 
-  // Si SEARXNG_URL est defini (self-hosted), on l'utilise exclusivement.
-  // Sinon, on essaie les instances publiques en sequence.
-  const instances = SEARXNG_URL_OVERRIDE ? [SEARXNG_URL_OVERRIDE] : SEARXNG_INSTANCES
-
-  const errors: string[] = []
-  for (const instance of instances) {
-    try {
-      const allResults = await searchOnInstance(instance, enrichedQuery)
-      const filtered = allResults.filter((r) => r.url && isTrusted(r.url, trustedDomains))
-      const results = (filtered.length > 0 ? filtered : allResults).slice(0, maxResults)
-      logger.info(`[WebSearch] ${instance} → ${results.length} resultats`)
-      return { query, results }
-    } catch (err: any) {
-      errors.push(`${instance}: ${err.message}`)
-      logger.warn(`[WebSearch] ${instance} echec: ${err.message}`)
-    }
+  // 2) Fallback EN si FR vide
+  if (hits.length === 0) {
+    logger.info(`[WebSearch] Pas de resultat FR, fallback EN`)
+    hits = await wikipediaOpenSearch(query, WIKI_LANG_FALLBACK, maxResults).catch(() => [])
+    lang = WIKI_LANG_FALLBACK
   }
-  throw new Error(`Aucune instance SearXNG joignable. Essais : ${errors.join(' | ')}`)
+
+  if (hits.length === 0) {
+    return { query, results: [] }
+  }
+
+  // 3) Recupere les extraits des pages trouvees
+  const extracts = await wikipediaExtracts(hits.map((h) => h.title), lang).catch((e) => {
+    logger.warn(`[WebSearch] extracts echec: ${e.message}`)
+    return {} as Record<string, string>
+  })
+
+  // 4) Assemble en SearchResult[]. Si pas d'extrait pour une page, on utilise
+  //    la description de l'opensearch.
+  const results: SearchResult[] = hits.map((h) => ({
+    title: h.title,
+    url: h.url,
+    content: extracts[h.title] || h.description || '',
+  })).filter((r) => r.content.trim().length > 0)
+
+  logger.info(`[WebSearch] ${results.length} resultats Wikipedia (${lang})`)
+  return { query, results: results.slice(0, maxResults) }
 }
 
 /**
@@ -183,25 +181,24 @@ export async function searchWeb(query: string, maxResults = 5): Promise<SearchRe
  */
 export function buildWebPrompt(userQuery: string, search: SearchResponse): string {
   if (search.results.length === 0) {
-    return `${userQuery}\n\n(Aucun resultat trouve sur les sites de confiance pour cette recherche.)`
+    return `${userQuery}\n\n(Aucun resultat Wikipedia trouve pour cette recherche. Si tu connais la reponse, prefere indiquer que tu n'as pas pu sourcer.)`
   }
   const sourcesBlock = search.results
-    .map((r, i) => `[${i + 1}] ${r.title}\nURL: ${r.url}\nExtrait: ${r.content.slice(0, 600)}`)
+    .map((r, i) => `[${i + 1}] ${r.title}\nURL: ${r.url}\nExtrait: ${r.content.slice(0, 1500)}`)
     .join('\n\n')
 
   return `Question de l'utilisateur :
 ${userQuery}
 
-Voici des extraits issus de sites de confiance (Wikipedia, officiels, academique). Reponds a la question en t'appuyant uniquement sur ces sources et en citant chaque affirmation avec [1], [2], etc. correspondant aux numeros des sources ci-dessous. Si l'information n'est pas dans les extraits, dis-le clairement.
+Voici des extraits issus de l'API officielle Wikipedia (source libre CC BY-SA). Reponds a la question en t'appuyant uniquement sur ces extraits et en citant chaque affirmation avec [1], [2], etc. correspondant aux numeros des sources ci-dessous. Si l'information n'est pas dans les extraits, dis-le clairement plutot que d'inventer.
 
 === SOURCES ===
 ${sourcesBlock}
 === FIN SOURCES ===
 
-Repond maintenant a la question en francais, en citant les sources [n] et en restant factuel.`
+Repond maintenant a la question en francais, structure ta reponse en paragraphes courts, et cite les sources [n] precisement.`
 }
 
-/** Toujours configure (rotation d'instances publiques par defaut). */
 export function isConfigured(): boolean {
   return true
 }
