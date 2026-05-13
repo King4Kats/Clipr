@@ -253,7 +253,7 @@ export async function runTranscriptionPipeline(task: QueueTask, broadcastFn: Bro
         message: 'Detection des noms...'
       })
 
-      const ollamaModel = config.ollamaModel || 'qwen2.5:14b'
+      const ollamaModel = config.ollamaModel || 'mistral-nemo:12b'
       // On demande à Ollama d'analyser les premières minutes pour trouver les noms
       const nameMapping = await diarizationService.identifySpeakerNames(finalSegments, ollamaModel)
       // On remplace les SPEAKER_0/SPEAKER_1 par les vrais noms dans les segments

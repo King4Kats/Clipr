@@ -1100,7 +1100,7 @@ app.post('/api/semantic/analyze', requireAuth, async (req, res) => {
       })
       .join('\n')
 
-    const ollamaModel = model || 'qwen2.5:14b'
+    const ollamaModel = model || 'mistral-nemo:12b'
     const result = await ollamaService.semanticAnalysis(fullText, ollamaModel)
     res.json({ semanticAnalysis: result })
   } catch (err: any) {

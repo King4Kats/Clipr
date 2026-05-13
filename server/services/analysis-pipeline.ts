@@ -87,7 +87,7 @@ export async function runAnalysisPipeline(task: QueueTask, broadcastFn: Broadcas
   // Prompt optionnel pour guider Whisper (noms propres, vocabulaire spécifique, etc.)
   const whisperPrompt = config?.whisperPrompt || ''
   // Modèle Ollama (LLM) pour l'analyse sémantique
-  const ollamaModel = config?.ollamaModel || 'qwen2.5:14b'
+  const ollamaModel = config?.ollamaModel || 'mistral-nemo:12b'
   // Langue de la vidéo (par défaut : français)
   const language = config?.language || 'fr'
   // Contexte supplémentaire donné par l'utilisateur pour aider l'IA

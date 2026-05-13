@@ -435,7 +435,7 @@ const Timeline = () => {
           <div className="w-full max-w-4xl max-h-[85vh] overflow-auto m-4" onClick={e => e.stopPropagation()}>
             <SemanticAnalysis
               segments={transcript}
-              ollamaModel={config.ollamaModel || 'qwen2.5:14b'}
+              ollamaModel={config.ollamaModel || 'mistral-nemo:12b'}
               onClose={() => setShowSemanticAnalysis(false)}
             />
           </div>

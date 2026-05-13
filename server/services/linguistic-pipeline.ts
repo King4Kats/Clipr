@@ -597,7 +597,7 @@ export async function runLinguisticPipeline(task: QueueTask, broadcastFn: Broadc
       // Ollama validation sur les rescue candidates qui ont passe le meneur-pattern
       if (rescueTexts.length > 0) {
         try {
-          const ollamaModel = config.ollamaModel || 'qwen2.5:14b'
+          const ollamaModel = config.ollamaModel || 'mistral-nemo:12b'
           const rescueOllamaTexts = rescueTexts.map((r, i) => `${i+1}. "${r.text}"`).join('\n')
           // Contexte fourni par l'utilisateur (axes de focalisation) — aide Ollama a
           // accepter du vocabulaire specifique a un domaine (peche, vigne, cuisine, etc.)
@@ -810,7 +810,7 @@ Pour chaque numero, reponds UNIQUEMENT "FR" ou "FAUX". Format strict :
       // Ollama validation sur les candidats
       if (diarTexts.length > 0) {
         try {
-          const ollamaModel = config.ollamaModel || 'qwen2.5:14b'
+          const ollamaModel = config.ollamaModel || 'mistral-nemo:12b'
           const diarOllamaTexts = diarTexts.map((r, i) => `${i + 1}. "${r.text}"`).join('\n')
           const focusContextDiar: string = (config.focusContext || '').toString().trim()
           const focusHintDiar = focusContextDiar ? `\nCONTEXTE FOURNI PAR L'UTILISATEUR : ${focusContextDiar}\n` : ''

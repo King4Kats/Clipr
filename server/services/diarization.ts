@@ -311,12 +311,12 @@ export function vadDiarize(
  * le locuteur qui parle le plus = "Intervenant", celui qui parle le moins = "Intervieweur"
  *
  * @param segments - Les segments de transcription avec labels SPEAKER_0, SPEAKER_1, etc.
- * @param ollamaModel - Le modèle Ollama à utiliser (ex: "qwen2.5:14b")
+ * @param ollamaModel - Le modèle Ollama à utiliser (ex: "mistral-nemo:12b")
  * @returns Un dictionnaire de correspondance : { "SPEAKER_0": "Philippe", "SPEAKER_1": "Intervieweur" }
  */
 export async function identifySpeakerNames(
   segments: TranscriptSegment[],
-  ollamaModel: string = 'qwen2.5:14b'
+  ollamaModel: string = 'mistral-nemo:12b'
 ): Promise<Record<string, string>> {
   const defaultMapping: Record<string, string> = {}
 
@@ -427,7 +427,7 @@ export function applySpeakerNames(segments: TranscriptSegment[], mapping: Record
  * La communication se fait via HTTP (API REST) sur le port 11434.
  * Le timeout est fixé à 2 minutes (les modèles peuvent être lents).
  *
- * @param model - Le modèle à utiliser (ex: "qwen2.5:14b")
+ * @param model - Le modèle à utiliser (ex: "mistral-nemo:12b")
  * @param prompt - Le texte à envoyer au modèle
  * @returns Le texte généré par le modèle
  */

@@ -677,7 +677,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         onCopy={handleCopy}
         onReset={() => setShowSemanticAnalysis(false)}
         onSegmentsUpdate={setSelectedItemSegments}
-        ollamaModel="qwen2.5:14b"
+        ollamaModel="mistral-nemo:12b"
         projectId={initialProject?.id}
         savedSemanticResult={initialProject?.data?.semanticAnalysis}
         wordColors={wordColors}
@@ -784,7 +784,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         onCopy={handleCopy}
         onReset={() => setShowSemanticAnalysis(false)}
         onSegmentsUpdate={setSegments}
-        ollamaModel="qwen2.5:14b"
+        ollamaModel="mistral-nemo:12b"
         wordColors={wordColors}
         onWordColorsChange={persistWordColors}
         initialExcluded={initialProject?.data?.excludedWords}
