@@ -517,6 +517,50 @@ export default function AssistantTool() {
 }
 
 /**
+ * Pill source style Perplexity : numero + favicon + titre court + hostname.
+ * Cliquable, ouvre la source dans un nouvel onglet.
+ */
+function SourcePill({ index, source }: { index: number; source: Source }) {
+  let hostname = ''
+  try { hostname = new URL(source.url).hostname.replace(/^www\./, '') } catch {}
+  // Favicon via Google s2 (CDN tres rapide, fallback transparent si erreur)
+  const favicon = hostname ? `https://www.google.com/s2/favicons?domain=${hostname}&sz=32` : ''
+  return (
+    <a
+      href={source.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group flex items-center gap-2 px-2.5 py-2 bg-background/60 hover:bg-sky-500/10 border border-border hover:border-sky-500/50 rounded-lg transition-all min-w-0"
+      title={source.url}
+    >
+      {/* Badge numero */}
+      <span className="shrink-0 w-5 h-5 rounded-md bg-sky-500/15 text-sky-300 text-[10px] font-bold flex items-center justify-center">
+        {index}
+      </span>
+      {/* Favicon */}
+      {favicon && (
+        <img
+          src={favicon}
+          alt=""
+          className="w-4 h-4 shrink-0 rounded-sm opacity-80 group-hover:opacity-100"
+          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+        />
+      )}
+      {/* Texte */}
+      <div className="flex-1 min-w-0">
+        <div className="text-[11px] font-medium text-foreground truncate leading-tight">
+          {source.title || source.url}
+        </div>
+        <div className="text-[9px] text-muted-foreground truncate leading-tight">
+          {hostname}{source.source ? ` · ${source.source}` : ''}
+        </div>
+      </div>
+      <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-60 shrink-0 transition-opacity" />
+    </a>
+  )
+}
+
+/**
  * Bulle d'un message (user ou assistant) avec rendu Markdown + sources web.
  */
 function MessageBubble({
@@ -551,28 +595,15 @@ function MessageBubble({
           </div>
         )}
 
-        {/* Sources web : affichees AU-DESSUS de la reponse (comme Perplexity) */}
+        {/* Sources web : pills horizontales style Perplexity */}
         {!isUser && sources && sources.length > 0 && (
-          <div className="mb-2 pb-2 border-b border-border/40">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+          <div className="mb-3 pb-3 border-b border-border/40">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
               <Globe className="w-3 h-3" />
-              Sources
+              Sources <span className="opacity-60">· {sources.length}</span>
             </div>
-            <div className="space-y-1">
-              {sources.map((s, i) => (
-                <a
-                  key={i}
-                  href={s.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-start gap-1.5 text-xs text-sky-400 hover:text-sky-300 hover:underline group"
-                  title={s.url}
-                >
-                  <span className="font-mono opacity-60 shrink-0">[{i + 1}]</span>
-                  <span className="line-clamp-2">{s.title || s.url}</span>
-                  <ExternalLink className="w-3 h-3 opacity-50 group-hover:opacity-100 shrink-0 mt-0.5" />
-                </a>
-              ))}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {sources.map((s, i) => <SourcePill key={i} index={i + 1} source={s} />)}
             </div>
           </div>
         )}
