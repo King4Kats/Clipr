@@ -210,13 +210,25 @@ async function searchHal(query: string, maxResults: number): Promise<SearchResul
  * @param maxResults - Nombre total max de resultats (defaut 6)
  */
 export async function searchWeb(query: string, maxResults = 6): Promise<SearchResponse> {
-  logger.info(`[WebSearch] Recherche multi-sources : "${query}"`)
+  // Nettoie la query : enleve les sauts de ligne, caracteres speciaux qui font
+  // planter certaines APIs (OpenAlex refuse | par exemple). On garde lettres,
+  // chiffres, accents, espaces et tirets/apostrophes basiques.
+  const cleanQuery = query
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[|<>{}[\]\\^`"]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300)
+
+  if (!cleanQuery) return { query, results: [] }
+
+  logger.info(`[WebSearch] Recherche multi-sources : "${cleanQuery}"`)
   const perSource = Math.ceil(maxResults / 2)
 
   const [wikiRes, openAlexRes, halRes] = await Promise.all([
-    searchWikipedia(query, perSource),
-    searchOpenAlex(query, perSource),
-    searchHal(query, perSource),
+    searchWikipedia(cleanQuery, perSource),
+    searchOpenAlex(cleanQuery, perSource),
+    searchHal(cleanQuery, perSource),
   ])
 
   logger.info(`[WebSearch] Wikipedia=${wikiRes.length} OpenAlex=${openAlexRes.length} HAL=${halRes.length}`)
