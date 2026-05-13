@@ -1185,7 +1185,7 @@ app.post('/api/assistant/conversations/:id/messages', requireAuth, async (req, r
   let webResults: { title: string; url: string }[] = []
   if (useWebSearch) {
     if (!webSearch.isConfigured()) {
-      res.write(`data: ${JSON.stringify({ error: "TAVILY_API_KEY non configure cote serveur. Demande a l'admin d'ajouter la cle dans la config Docker." })}\n\n`)
+      res.write(`data: ${JSON.stringify({ error: "Recherche web non configuree cote serveur." })}\n\n`)
       res.end()
       return
     }
@@ -1219,7 +1219,9 @@ app.post('/api/assistant/conversations/:id/messages', requireAuth, async (req, r
   const ollamaModel = (typeof model === 'string' && model) || 'mistral-nemo:12b'
 
   let aborted = false
-  req.on('close', () => { aborted = true; ctrl.abort() })
+  // On ecoute la fermeture de la REPONSE (pas du request) : req.close peut
+  // se declencher des que le body est parse, ce qui couperait Ollama trop tot.
+  res.on('close', () => { aborted = true; ctrl?.abort() })
 
   const ctrl = ollamaService.chatStream(
     ollamaModel,
