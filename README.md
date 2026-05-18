@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/license-PolyForm--NC--1.0.0-orange?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker" alt="Docker">
   <img src="https://img.shields.io/badge/Node.js-20-339933?style=flat-square&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react" alt="React">
@@ -447,7 +447,14 @@ SQLite, fichier unique dans `DATA_DIR/clipr.db`. Pourquoi SQLite ? Parce que c'e
 
 ## Licence
 
-Ce projet est distribue sous licence **GPL-3.0**. Voir [LICENSE](LICENSE).
+Ce projet est distribue sous licence **PolyForm Noncommercial 1.0.0** (source-available, usage non-commercial uniquement). Voir [LICENSE](LICENSE).
+
+Concretement :
+- Usage personnel, recherche, education, organismes a but non lucratif (associations, etablissements publics, ONG) : libre.
+- Modifications, forks et redistribution autorises tant qu'ils restent non-commerciaux.
+- **Toute utilisation commerciale** (vente du logiciel, SaaS payant, integration dans un produit/service payant) **est interdite** sans accord ecrit prealable des detenteurs du copyright.
+
+Pour une licence commerciale, contactez les mainteneurs.
 
 ---
 
