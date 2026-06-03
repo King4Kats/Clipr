@@ -1088,26 +1088,52 @@ app.post('/api/ollama/analyze', requireAuth, async (req, res) => {
 // ── Analyse semantique (themes, sentiment, insights) ──
 // Envoie la transcription au LLM pour extraire les themes principaux,
 // le sentiment general et les points cles du contenu.
+//
+// Cloudflare Tunnel coupe les connexions HTTP inactives au bout de ~100s.
+// Or sur GPU Mistral-nemo:12b avec num_ctx 12k peut mettre 2-3 min a repondre
+// pour un long transcript. Solution : on envoie un caractere espace toutes
+// les 20s pour maintenir le tunnel ouvert (JSON parser ignore le whitespace
+// en debut de reponse). La reponse finale est ecrite des qu'Ollama termine.
 app.post('/api/semantic/analyze', requireAuth, async (req, res) => {
-  try {
-    const { segments, model } = req.body
-    if (!segments || !Array.isArray(segments) || segments.length === 0) {
-      return res.status(400).json({ error: 'segments requis (tableau non vide)' })
-    }
-    // Construction du texte complet avec speakers pour l'analyse
-    const fullText = segments
-      .map((s: any) => {
-        const speaker = s.speaker ? `[${s.speaker}] ` : ''
-        return `${speaker}${s.text}`
-      })
-      .join('\n')
+  const { segments, model } = req.body
+  if (!segments || !Array.isArray(segments) || segments.length === 0) {
+    return res.status(400).json({ error: 'segments requis (tableau non vide)' })
+  }
 
-    const ollamaModel = model || 'mistral-nemo:12b'
+  const fullText = segments
+    .map((s: any) => `${s.speaker ? `[${s.speaker}] ` : ''}${s.text}`)
+    .join('\n')
+
+  const ollamaModel = model || 'mistral-nemo:12b'
+
+  // Envoie les en-tetes + un caractere immediatement pour activer le streaming
+  // cote tunnel/proxy (TTFB rapide, evite buffering complet de la reponse).
+  res.setHeader('Content-Type', 'application/json; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-cache, no-transform')
+  res.setHeader('X-Accel-Buffering', 'no')  // desactive le buffering proxy
+  res.flushHeaders?.()
+  res.write(' ')  // un espace initial, le JSON valide commence n'importe ou apres
+
+  // Heartbeat : un espace toutes les 20s pour garder Cloudflare Tunnel ouvert
+  const heartbeat = setInterval(() => {
+    try { res.write(' ') } catch { /* socket ferme, on ignore */ }
+  }, 20000)
+
+  let aborted = false
+  res.on('close', () => { aborted = true })
+
+  try {
     const result = await ollamaService.semanticAnalysis(fullText, ollamaModel)
-    res.json({ semanticAnalysis: result })
+    clearInterval(heartbeat)
+    if (aborted) return
+    res.write(JSON.stringify({ semanticAnalysis: result }))
+    res.end()
   } catch (err: any) {
+    clearInterval(heartbeat)
     logger.error('[Semantic] Analysis failed:', err.message)
-    res.status(500).json({ error: err.message })
+    if (aborted) return
+    res.write(JSON.stringify({ error: err.message }))
+    res.end()
   }
 })
 

@@ -374,8 +374,21 @@ const api = {
     post('/api/ollama/analyze', { transcript, context, model }),
 
   // ── Analyse semantique : themes, sentiment, insights via Ollama ──
-  semanticAnalyze: (segments: any[], model: string) =>
-    post<{ semanticAnalysis: { themes: string[]; sentiment: { label: string; explanation: string }; insights: string[] } }>('/api/semantic/analyze', { segments, model }),
+  // Le backend envoie des espaces blancs en heartbeat pour garder Cloudflare
+  // Tunnel ouvert (sinon timeout 100s sur les requetes Mistral longues).
+  // JSON.parse ignore les whitespace en debut de payload, donc res.json() marche.
+  // En cas d'echec serveur, la reponse contient { error } au lieu de { semanticAnalysis }.
+  semanticAnalyze: async (segments: any[], model: string): Promise<{ semanticAnalysis: { themes: string[]; sentiment: { label: string; explanation: string }; insights: string[] } }> => {
+    const res = await fetch(`${API_BASE}/api/semantic/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ segments, model }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    if (data.error) throw new Error(data.error)
+    return data
+  },
 
   // ── Assistant : Chatbot LLM standalone (multi-conversations par user) ──
   assistantListConversations: () =>
