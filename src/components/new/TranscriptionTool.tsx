@@ -26,7 +26,7 @@ import { motion, AnimatePresence } from "framer-motion"  // Animations fluides
 import {
   Mic, ArrowLeft, Upload, Loader2, Copy, Download, Trash2,
   CheckCircle2, AlertCircle, Clock, HelpCircle, FileText, Music, Files, Pencil, X, Check, Brain,
-  RotateCcw, Cloud, Search, ChevronDown, Trash, Settings
+  RotateCcw, Cloud, Search, ChevronDown, Trash, Settings, Users
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -693,8 +693,28 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   }
 
   if (initialProject && selectedItem) {
+    // Liste deduplique des locuteurs detectes dans la transcription, avec compteur
+    // d'occurrences pour afficher le plus actif en premier
+    const speakerStats = (() => {
+      const counts = new Map<string, number>()
+      for (const seg of selectedItemSegments) {
+        if (seg.speaker) counts.set(seg.speaker, (counts.get(seg.speaker) || 0) + 1)
+      }
+      return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([name, n]) => ({ name, n }))
+    })()
+
+    const renameSpeakerInline = async (oldName: string, newName: string) => {
+      const tid = selectedItem?.transcriptionId
+      const trimmed = (newName || '').trim()
+      if (!tid || !trimmed || trimmed === oldName) return
+      try {
+        const result = await api.renameSpeaker(tid, oldName, trimmed)
+        if (result.segments) setSelectedItemSegments(result.segments)
+      } catch (e) { console.error('renameSpeaker:', e) }
+    }
+
     return (
-      <div className="max-w-4xl mx-auto w-full pt-8">
+      <div className="max-w-6xl mx-auto w-full pt-8">
         <div className="flex items-center gap-4 mb-8">
           <button onClick={() => { setSelectedItem(null); setSelectedItemSegments([]) }} className="p-2 rounded-lg hover:bg-secondary transition-colors">
             <ArrowLeft className="w-5 h-5 text-muted-foreground" />
@@ -733,39 +753,74 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
             <Loader2 className="w-8 h-8 text-primary animate-spin" />
           </div>
         ) : (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="max-h-[600px] overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
-              {selectedItemSegments.map((seg, i) => {
-                const prevSpeaker = i > 0 ? selectedItemSegments[i - 1].speaker : null
-                const showSpeaker = seg.speaker && seg.speaker !== prevSpeaker
-                return (
-                  <div key={i}>
-                    {showSpeaker && (
-                      <div className="mt-3 mb-1 first:mt-0">
-                        <span
-                          className="text-[10px] font-bold uppercase tracking-wider text-primary cursor-pointer hover:underline"
-                          title="Cliquer pour renommer ce locuteur"
-                          onClick={() => {
-                            const tid = selectedItem?.transcriptionId
-                            const newName = prompt(`Renommer "${seg.speaker}" en :`, seg.speaker || '')
-                            if (newName && newName !== seg.speaker && tid) {
-                              api.renameSpeaker(tid, seg.speaker!, newName).then((result) => {
-                                if (result.segments) setSelectedItemSegments(result.segments)
-                              }).catch(() => {})
-                            }
-                          }}
-                        >{seg.speaker}</span>
-                      </div>
-                    )}
-                    <div className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
-                      <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
-                        {fmtTime(seg.start)}
-                      </span>
-                      <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
-                    </div>
+          <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-4">
+            {/* ═══════════════ Panneau gauche : liste des locuteurs ═══════════════ */}
+            <aside className="md:sticky md:top-4 self-start">
+              <div className="bg-card border border-border rounded-xl overflow-hidden">
+                <div className="px-3 py-2 border-b border-border bg-secondary/30">
+                  <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Users className="w-3 h-3" />
+                    Locuteurs <span className="text-foreground/60">· {speakerStats.length}</span>
+                  </h3>
+                </div>
+                {speakerStats.length === 0 ? (
+                  <div className="p-3 text-[10px] text-muted-foreground text-center">
+                    Pas de locuteurs detectes.<br />La diarisation est peut-etre encore en cours.
                   </div>
-                )
-              })}
+                ) : (
+                  <div className="p-2 space-y-1">
+                    {speakerStats.map(({ name, n }) => (
+                      <SpeakerRow
+                        key={name}
+                        name={name}
+                        count={n}
+                        total={selectedItemSegments.length}
+                        onRename={(newName) => renameSpeakerInline(name, newName)}
+                      />
+                    ))}
+                  </div>
+                )}
+                <div className="px-3 py-2 border-t border-border bg-secondary/20">
+                  <p className="text-[9px] text-muted-foreground leading-snug">
+                    Clic sur un locuteur pour le renommer (Prenom Nom, role...). Le changement s'applique a tous les segments + exports .txt/.srt/.pdf.
+                  </p>
+                </div>
+              </div>
+            </aside>
+
+            {/* ═══════════════ Transcription ═══════════════ */}
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
+              <div className="max-h-[600px] overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
+                {selectedItemSegments.map((seg, i) => {
+                  const prevSpeaker = i > 0 ? selectedItemSegments[i - 1].speaker : null
+                  const showSpeaker = seg.speaker && seg.speaker !== prevSpeaker
+                  return (
+                    <div key={i}>
+                      {showSpeaker && (
+                        <div className="mt-3 mb-1 first:mt-0">
+                          <span
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-primary/10 text-primary cursor-pointer hover:bg-primary/20 transition-colors"
+                            title="Cliquer pour renommer ce locuteur"
+                            onClick={() => {
+                              const newName = prompt(`Renommer "${seg.speaker}" en (ex: Marie Dupont) :`, seg.speaker || '')
+                              if (newName) renameSpeakerInline(seg.speaker!, newName)
+                            }}
+                          >
+                            <Users className="w-2.5 h-2.5" />
+                            {seg.speaker}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex gap-3 hover:bg-secondary/30 rounded-lg p-1.5 -mx-1.5 transition-colors">
+                        <span className="text-[10px] font-mono text-muted-foreground shrink-0 mt-0.5 w-16 text-right">
+                          {fmtTime(seg.start)}
+                        </span>
+                        <p className="text-xs text-foreground leading-relaxed">{seg.text}</p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           </div>
         )}
@@ -2239,6 +2294,64 @@ function colorizeAndHighlight(
     // En cas de regex invalide ou autre, on retourne le texte brut sans planter le rendu
     return text
   }
+}
+
+/**
+ * Ligne d'un locuteur dans le panneau lateral. Affiche le nom (cliquable pour
+ * renommer), le compteur d'occurrences, et la barre de progression visuelle.
+ */
+function SpeakerRow({ name, count, total, onRename }: { name: string; count: number; total: number; onRename: (newName: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name)
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0
+
+  const commit = () => {
+    const t = draft.trim()
+    if (t && t !== name) onRename(t)
+    setEditing(false)
+  }
+
+  return (
+    <div className="group p-2 rounded-lg hover:bg-secondary/40 transition-colors">
+      {editing ? (
+        <div className="flex items-center gap-1">
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commit()
+              if (e.key === 'Escape') { setDraft(name); setEditing(false) }
+            }}
+            placeholder="ex: Marie Dupont"
+            className="flex-1 min-w-0 bg-background border border-primary/40 rounded px-1.5 py-0.5 text-xs text-foreground outline-none focus:border-primary"
+          />
+          <button onClick={commit} className="p-0.5 text-emerald-400 hover:bg-emerald-500/10 rounded" title="Valider">
+            <Check className="w-3 h-3" />
+          </button>
+          <button onClick={() => { setDraft(name); setEditing(false) }} className="p-0.5 text-destructive hover:bg-destructive/10 rounded" title="Annuler">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => { setDraft(name); setEditing(true) }}
+          className="w-full text-left flex items-center justify-between gap-2"
+          title="Cliquer pour renommer"
+        >
+          <span className="text-xs font-semibold text-foreground truncate">{name}</span>
+          <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0 transition-opacity" />
+        </button>
+      )}
+      <div className="mt-1 flex items-center gap-1.5">
+        <div className="flex-1 h-1 bg-secondary rounded-full overflow-hidden">
+          <div className="h-full bg-primary/50 rounded-full" style={{ width: `${pct}%` }} />
+        </div>
+        <span className="text-[9px] font-mono text-muted-foreground tabular-nums">{pct}%</span>
+      </div>
+      <p className="text-[9px] text-muted-foreground mt-0.5">{count} segments</p>
+    </div>
+  )
 }
 
 export default TranscriptionTool
