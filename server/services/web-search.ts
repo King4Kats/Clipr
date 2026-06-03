@@ -20,7 +20,7 @@ const WIKI_LANG_PRIMARY = process.env.WIKI_LANG || 'fr'
 const WIKI_LANG_FALLBACK = process.env.WIKI_LANG_FALLBACK || 'en'
 
 // User-Agent commun a toutes les requetes (politesse + identification cote API).
-const USER_AGENT = 'Clipr/1.0 (https://clipr.temonia.fr; contact: clipr@temonia.fr) Node.js'
+const USER_AGENT = 'Clipr/1.0 (https://clipr-temonia.flavienauvray.me; contact: clipr@temonia.fr) Node.js'
 
 // Liste de domaines de confiance (juste documentaire — on appelle les APIs
 // officielles directement, pas besoin de filtrer par domaine).

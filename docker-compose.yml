@@ -67,9 +67,10 @@ services:
     depends_on:
       - clipr
 
-  # Caddy : reverse proxy HTTPS pour exposer Clipr directement via clipr.temonia.fr
-  # Auto Let's Encrypt (HTTP-01 challenge sur port 80), WebSocket transparent.
-  # Necessite port forwarding 80/443 du routeur vers cette machine.
+  # Caddy : reverse proxy HTTPS (fallback / acces direct LAN).
+  # En prod 06/2026, le trafic public passe par Cloudflare Tunnel
+  # (clipr-temonia.flavienauvray.me) → cloudflared → clipr:3000 directement,
+  # Caddy n'est plus sur le chemin critique mais on le garde pour acces local.
   caddy:
     image: caddy:latest
     container_name: clipr-caddy
