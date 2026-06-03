@@ -211,39 +211,54 @@ const CHUNK_SIZE = 90 * 1024 * 1024 // 90MB — under Cloudflare Tunnel's 100MB 
 /**
  * Upload un gros fichier en le découpant en morceaux (chunks).
  * Chaque morceau est envoyé séparément, puis le serveur les rassemble.
- * En cas d'échec, chaque chunk est réessayé jusqu'à 3 fois.
+ *
+ * Robustesse :
+ *  - 5 tentatives par chunk avec backoff exponentiel (1s, 2s, 4s, 8s, 16s)
+ *    pour resister aux blips reseau / Cloudflare Tunnel
+ *  - Messages d'erreur explicites avec numero du chunk + total + taille
+ *  - Si un chunk echoue definitivement, le serveur nettoie les chunks orphelins
+ *    apres 2h (voir cron de nettoyage cote backend)
  */
 async function uploadFileChunked(file: File, onProgress?: (pct: number) => void): Promise<any> {
   // Identifiant unique pour cet upload (permet au serveur de regrouper les chunks)
   const uploadId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
+  const fileSizeMB = Math.round(file.size / 1024 / 1024)
+  const MAX_ATTEMPTS = 5
 
-  // Envoyer chaque chunk un par un
   for (let i = 0; i < totalChunks; i++) {
-    // Découper le fichier : prendre les octets de i*CHUNK_SIZE à (i+1)*CHUNK_SIZE
     const blob = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
-    const form = new FormData()
-    form.append('chunk', blob)
-    form.append('uploadId', uploadId)
-    form.append('chunkIndex', String(i))
-    form.append('totalChunks', String(totalChunks))
-    form.append('fileName', file.name)
 
-    // Système de retry : 3 tentatives par chunk avec 1s de pause entre chaque
     let lastErr: Error | null = null
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       try {
+        // FormData reconstruit a chaque tentative (le body peut etre lu une seule fois)
+        const form = new FormData()
+        form.append('chunk', blob)
+        form.append('uploadId', uploadId)
+        form.append('chunkIndex', String(i))
+        form.append('totalChunks', String(totalChunks))
+        form.append('fileName', file.name)
+
         const res = await fetch(`${API_BASE}/api/upload/chunk`, { method: 'POST', body: form, headers: getAuthHeaders() })
-        if (!res.ok) throw new Error(`Chunk ${i} echoue: ${res.status}`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
         lastErr = null
         break
       } catch (err: any) {
         lastErr = err
-        if (attempt < 2) await new Promise(r => setTimeout(r, 1000))
+        console.warn(`[Upload] Chunk ${i + 1}/${totalChunks} echec tentative ${attempt + 1}/${MAX_ATTEMPTS}:`, err.message)
+        if (attempt < MAX_ATTEMPTS - 1) {
+          // Backoff exponentiel : 1s, 2s, 4s, 8s
+          await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)))
+        }
       }
     }
-    if (lastErr) throw lastErr
-    // Mettre à jour la progression (0 à 1)
+    if (lastErr) {
+      throw new Error(
+        `Echec de l'upload : le morceau ${i + 1}/${totalChunks} du fichier "${file.name}" (${fileSizeMB} Mo) n'a pas pu etre transmis apres ${MAX_ATTEMPTS} essais. ` +
+        `Erreur reseau : ${lastErr.message}. Verifie ta connexion et reessaie.`
+      )
+    }
     onProgress?.((i + 1) / totalChunks)
   }
 
@@ -253,7 +268,11 @@ async function uploadFileChunked(file: File, onProgress?: (pct: number) => void)
     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ uploadId, fileName: file.name, totalChunks })
   })
-  if (!res.ok) throw new Error('Assemblage echoue')
+  if (!res.ok) {
+    let errMsg = `HTTP ${res.status}`
+    try { errMsg = (await res.json()).error || errMsg } catch {}
+    throw new Error(`Assemblage des morceaux echoue : ${errMsg}`)
+  }
   return res.json()
 }
 
