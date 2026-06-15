@@ -234,7 +234,6 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
             ? { ...item, status: "done", progress: 100, transcriptionId: data.transcriptionId }
             : item
         ))
-        api.getTranscriptionHistory().then(setHistory).catch(() => {})
       } else {
         if (data.taskId !== taskId) return
         setStatus("done")
@@ -242,7 +241,6 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         api.getTranscription(data.transcriptionId).then((result: any) => {
           setSegments(result.segments)
         }).catch(() => {})
-        api.getTranscriptionHistory().then(setHistory).catch(() => {})
       }
     })
 
@@ -313,6 +311,73 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
       unsubQueueUpdate()
     }
   }, [allTaskIds.join(","), batchMode, taskId])
+
+  // ── Filet de secours : reconciliation par polling REST ──
+  // Le WebSocket peut manquer l'evenement de fin si la connexion saute pendant
+  // le traitement (typiquement derriere le Cloudflare Tunnel sur un long batch).
+  // Dans ce cas la barre de progression restait figee a vie alors que le serveur
+  // avait fini. On interroge donc periodiquement l'etat REEL de chaque tache via
+  // l'API (les taches terminees restent en base avec status=completed/failed),
+  // et on resynchronise l'UI. C'est purement un rattrapage : en temps normal le
+  // WebSocket fait le travail et ce polling ne change rien.
+  useEffect(() => {
+    // Liste des taches encore "en vol" (ni terminees, ni en erreur)
+    const inFlight: string[] = batchMode
+      ? batchItems.filter(i => i.taskId && i.status !== 'done' && i.status !== 'error').map(i => i.taskId!)
+      : (taskId && !['idle', 'done', 'error'].includes(status) ? [taskId] : [])
+
+    if (inFlight.length === 0) return
+
+    let cancelled = false
+
+    const reconcile = async () => {
+      for (const tid of inFlight) {
+        let task: any
+        try { task = await api.getTaskStatus(tid) } catch { continue }
+        if (cancelled || !task) continue
+
+        if (task.status === 'completed') {
+          const completedId = task.result?.transcriptionId
+          if (batchMode) {
+            setBatchItems(prev => prev.map(item =>
+              item.taskId === tid && item.status !== 'done'
+                ? { ...item, status: 'done', progress: 100, transcriptionId: completedId }
+                : item
+            ))
+          } else if (tid === taskId) {
+            setStatus('done')
+            if (completedId) {
+              setTranscriptionId(completedId)
+              api.getTranscription(completedId).then((r: any) => setSegments(r.segments)).catch(() => {})
+            }
+          }
+        } else if (task.status === 'failed') {
+          const err = task.result?.error || 'Erreur inconnue'
+          if (batchMode) {
+            setBatchItems(prev => prev.map(item =>
+              item.taskId === tid && item.status !== 'done'
+                ? { ...item, status: 'error', error: err }
+                : item
+            ))
+          } else if (tid === taskId) {
+            setStatus('error')
+            setErrorMessage(err)
+          }
+        }
+      }
+    }
+
+    // Un passage immediat (rattrape une UI deja figee a l'ouverture), puis toutes les 8s
+    reconcile()
+    const interval = setInterval(reconcile, 8000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [batchMode, batchItems.map(i => `${i.taskId}:${i.status}`).join(','), taskId, status])
+
+  // Quand tout le batch est termine, on coupe l'indicateur "Traitement en cours"
+  // (sinon le label pulsant restait affiche meme une fois les fichiers tous traites)
+  useEffect(() => {
+    if (batchAllDone) setBatchProcessing(false)
+  }, [batchAllDone])
 
   // Handle file selection (single or multiple)
   const handleFilesSelect = useCallback(async (selectedFiles: File[]) => {
