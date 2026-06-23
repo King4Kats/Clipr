@@ -578,9 +578,13 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   }
 
   // Copy transcript to clipboard
-  const handleCopy = () => {
-    const text = segments.map(s => s.text).join('\n')
-    navigator.clipboard.writeText(text)
+  // Accepte un override de segments pour le cas d'un item de projet selectionne (selectedItemSegments)
+  const handleCopy = (segs?: TranscriptSegment[]) => {
+    const source = (segs && segs.length > 0) ? segs : segments
+    const text = source.map(s => s.text).join('\n')
+    navigator.clipboard.writeText(text).catch((err) => {
+      console.error('Clipboard write failed:', err)
+    })
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -739,7 +743,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         transcriptionId={selectedItem.transcriptionId}
         uploadedFileName={selectedItem.filename}
         copied={copied}
-        onCopy={handleCopy}
+        onCopy={() => handleCopy(selectedItemSegments)}
         onReset={() => setShowSemanticAnalysis(false)}
         onSegmentsUpdate={setSelectedItemSegments}
         ollamaModel="mistral-nemo:12b"
