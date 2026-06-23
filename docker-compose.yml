@@ -15,8 +15,10 @@ services:
       - OLLAMA_PORT=11434
       # Modele multimodal du sous-outil "Lecture d'image" de l'Assistant (OCR manuscrit).
       # IMPORTANT : le telecharger une fois dans le conteneur ollama :
-      #   docker exec clipr-ollama ollama pull qwen2.5vl:7b
-      - OLLAMA_VISION_MODEL=${OLLAMA_VISION_MODEL:-qwen2.5vl:7b}
+      #   docker exec clipr-ollama ollama pull qwen2.5vl:32b
+      # Le 32b deborde de la VRAM 12 Go -> il faut ~24 Go de RAM allouee a WSL
+      # (.wslconfig: [wsl2] memory=24GB) sinon le runner llama crashe au chargement.
+      - OLLAMA_VISION_MODEL=${OLLAMA_VISION_MODEL:-qwen2.5vl:32b}
       - JWT_SECRET=${JWT_SECRET}
       - HF_TOKEN=${HF_TOKEN}
       # ─── Validation des inscriptions par email (SMTP temonia.fr:465 SSL) ───

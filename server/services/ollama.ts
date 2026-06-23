@@ -29,7 +29,11 @@ const OLLAMA_PORT = parseInt(process.env.OLLAMA_PORT || '11434')
 // Modèle multimodal (vision) utilisé par le sous-outil "Lecture d'image" de
 // l'Assistant. Doit être un modèle Ollama capable de lire des images
 // (ex: qwen2.5vl, minicpm-v, llama3.2-vision). Configurable via l'environnement.
-export const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL || 'qwen2.5vl:7b'
+// Défaut 32b : nettement meilleur que le 7b sur le manuscrit / les ecritures
+// fines (noms, dates, diacritiques vietnamiens). Nécessite ~24 Go de RAM allouée
+// à WSL (cf .wslconfig memory=24GB) car il déborde de la VRAM 12 Go sur le CPU ;
+// inference plus lente (plusieurs min/page). Mettre OLLAMA_VISION_MODEL pour changer.
+export const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL || 'qwen2.5vl:32b'
 
 // --- Paramètres de découpage de la transcription ---
 // Nombre maximum de caractères par morceau envoyé au LLM

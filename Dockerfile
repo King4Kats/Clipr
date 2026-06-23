@@ -78,7 +78,7 @@ ENV DATA_DIR=/data
 ENV OLLAMA_HOST=ollama
 ENV OLLAMA_PORT=11434
 # Modele vision par defaut du sous-outil "Lecture d'image" (surchargé via docker-compose)
-ENV OLLAMA_VISION_MODEL=qwen2.5vl:7b
+ENV OLLAMA_VISION_MODEL=qwen2.5vl:32b
 
 EXPOSE 3000
 
