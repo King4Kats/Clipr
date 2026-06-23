@@ -13,6 +13,10 @@ services:
       - DATA_DIR=/data
       - OLLAMA_HOST=ollama
       - OLLAMA_PORT=11434
+      # Modele multimodal du sous-outil "Lecture d'image" de l'Assistant (OCR manuscrit).
+      # IMPORTANT : le telecharger une fois dans le conteneur ollama :
+      #   docker exec clipr-ollama ollama pull qwen2.5vl:7b
+      - OLLAMA_VISION_MODEL=${OLLAMA_VISION_MODEL:-qwen2.5vl:7b}
       - JWT_SECRET=${JWT_SECRET}
       - HF_TOKEN=${HF_TOKEN}
       # ─── Validation des inscriptions par email (SMTP temonia.fr:465 SSL) ───

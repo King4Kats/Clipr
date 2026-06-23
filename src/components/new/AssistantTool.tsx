@@ -99,7 +99,7 @@ export default function AssistantTool() {
   /** Recharge la liste des conversations depuis le serveur. */
   const refreshConversations = async () => {
     try {
-      const list = await api.assistantListConversations()
+      const list = await api.assistantListConversations('chat')
       setConvs(list)
     } catch (err) {
       console.error('Failed to load conversations:', err)
@@ -111,7 +111,7 @@ export default function AssistantTool() {
     // Si une conversation existe deja sans aucun message, on la reutilise (pas de doublon)
     if (activeId && messages.length === 0) return
     try {
-      const conv = await api.assistantCreateConversation()
+      const conv = await api.assistantCreateConversation('chat')
       setConvs((cs) => [conv, ...cs])
       setActiveId(conv.id)
       setMessages([])
@@ -229,7 +229,7 @@ export default function AssistantTool() {
     let convId = activeId
     if (!convId) {
       try {
-        const conv = await api.assistantCreateConversation()
+        const conv = await api.assistantCreateConversation('chat')
         setConvs((cs) => [conv, ...cs])
         setActiveId(conv.id)
         convId = conv.id
@@ -313,7 +313,7 @@ export default function AssistantTool() {
   }
 
   return (
-    <main className="h-[calc(100vh-64px)] flex">
+    <main className="h-full flex">
       {/* ═══════════════ Sidebar : liste des conversations ═══════════════ */}
       <aside className="w-64 border-r border-border bg-card/30 flex flex-col">
         <div className="p-3 border-b border-border">

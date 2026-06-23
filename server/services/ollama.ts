@@ -26,6 +26,11 @@ const OLLAMA_HOST = process.env.OLLAMA_HOST || 'ollama'
 // Port du serveur Ollama (par défaut 11434, le port standard d'Ollama)
 const OLLAMA_PORT = parseInt(process.env.OLLAMA_PORT || '11434')
 
+// Modèle multimodal (vision) utilisé par le sous-outil "Lecture d'image" de
+// l'Assistant. Doit être un modèle Ollama capable de lire des images
+// (ex: qwen2.5vl, minicpm-v, llama3.2-vision). Configurable via l'environnement.
+export const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL || 'qwen2.5vl:7b'
+
 // --- Paramètres de découpage de la transcription ---
 // Nombre maximum de caractères par morceau envoyé au LLM
 // (les LLM ont une taille de contexte limitée, on ne peut pas tout envoyer d'un coup)
@@ -119,6 +124,20 @@ export async function listOllamaModels(): Promise<string[]> {
 }
 
 /**
+ * Vérifie que le modèle vision (OLLAMA_VISION_MODEL) est bien téléchargé.
+ * Permet de renvoyer un message d'erreur clair plutôt qu'un échec obscur si
+ * l'admin a oublié de faire `ollama pull qwen2.5vl:7b` sur le serveur.
+ *
+ * @returns true si le modèle (ou une de ses variantes de tag) est disponible
+ */
+export async function isVisionModelReady(): Promise<boolean> {
+  const models = await listOllamaModels()
+  // Compare le nom complet (ex: "qwen2.5vl:7b") OU le nom de base (ex: "qwen2.5vl")
+  const base = OLLAMA_VISION_MODEL.split(':')[0]
+  return models.some((m) => m === OLLAMA_VISION_MODEL || m.split(':')[0] === base)
+}
+
+/**
  * Télécharge (pull) un modèle depuis le registre Ollama.
  * C'est comme un "docker pull" mais pour les modèles d'IA.
  * Le téléchargement peut prendre plusieurs minutes selon la taille du modèle.
@@ -160,9 +179,17 @@ export async function pullOllamaModel(modelName: string): Promise<boolean> {
  * @param onDone - Callback final avec le texte complet
  * @param onError - Callback si la requête échoue
  */
+// Un message envoye a Ollama. Le champ `images` (base64 SANS prefixe "data:")
+// n'est utilise que par les modeles multimodaux (vision) et ignore sinon.
+export interface OllamaChatMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  images?: string[]
+}
+
 export function chatStream(
   model: string,
-  messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
+  messages: OllamaChatMessage[],
   onToken: (chunk: string) => void,
   onDone: (full: string) => void,
   onError: (err: Error) => void,
@@ -171,9 +198,43 @@ export function chatStream(
   // - num_ctx 16384 : fenetre contexte assez large pour ingerer 9 sources HAL/OpenAlex
   //   (chaque source ~1500 chars => ~13k chars de prompt + reponse)
   // - num_predict 4096 : autorise des reponses longues (dossier bibliographique)
+  return runChatStream(model, messages, { num_ctx: 16384, num_predict: 4096 }, onToken, onDone, onError)
+}
+
+/**
+ * Stream une conversation MULTIMODALE (texte + images) avec le modele vision.
+ *
+ * Identique a chatStream mais :
+ *  - utilise le modele OLLAMA_VISION_MODEL (qwen2.5vl par defaut)
+ *  - les messages peuvent porter des images (base64) que le modele "voit"
+ *  - fenetre de contexte plus modeste (num_ctx 8192) car les jetons d'image
+ *    consomment beaucoup de VRAM : on reste prudent sur un GPU 12 Go.
+ *
+ * @param messages - Historique au format Ollama, images en base64 sur les messages user
+ */
+export function chatStreamVision(
+  messages: OllamaChatMessage[],
+  onToken: (chunk: string) => void,
+  onDone: (full: string) => void,
+  onError: (err: Error) => void,
+): { abort: () => void } {
+  return runChatStream(OLLAMA_VISION_MODEL, messages, { num_ctx: 8192, num_predict: 4096 }, onToken, onDone, onError)
+}
+
+/**
+ * Coeur partage du streaming /api/chat (factorise entre chat texte et vision).
+ * Lit la reponse NDJSON d'Ollama et appelle onToken pour chaque morceau.
+ */
+function runChatStream(
+  model: string,
+  messages: OllamaChatMessage[],
+  options: { num_ctx: number; num_predict: number },
+  onToken: (chunk: string) => void,
+  onDone: (full: string) => void,
+  onError: (err: Error) => void,
+): { abort: () => void } {
   const postData = JSON.stringify({
-    model, messages, stream: true,
-    options: { num_ctx: 16384, num_predict: 4096 },
+    model, messages, stream: true, options,
   })
   const req = http.request({
     hostname: OLLAMA_HOST, port: OLLAMA_PORT, path: '/api/chat', method: 'POST',

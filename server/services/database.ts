@@ -420,6 +420,36 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_assistant_msg_conv ON assistant_messages(conversation_id);
   `)
 
+  // ── Migration : colonne "kind" sur les conversations Assistant ──
+  // Distingue les deux sous-outils de l'Assistant :
+  //   - 'chat'   : chat texte classique (modele mistral-nemo)
+  //   - 'vision' : chat avec lecture d'image / OCR manuscrit (modele qwen2.5vl)
+  // Les conversations existantes deviennent 'chat' par defaut (retrocompatibilite).
+  const convCols = db.prepare("PRAGMA table_info('assistant_conversations')").all() as { name: string }[]
+  if (!convCols.some(c => c.name === 'kind')) {
+    db.exec("ALTER TABLE assistant_conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'")
+    logger.info('Migration: added kind column to assistant_conversations')
+  }
+
+  // ── Table assistant_images : images jointes au sous-outil "vision" ──
+  // Chaque page uploadee est stockee sur le disque (/data/assistant-images/) et
+  // referencee ici. message_id est NULL entre l'upload et l'envoi du message,
+  // puis rempli une fois le message cree. La cascade supprime les lignes quand
+  // la conversation est supprimee (les fichiers disque sont nettoyes cote API).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS assistant_images (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      message_id TEXT,
+      file TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (conversation_id) REFERENCES assistant_conversations(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_assistant_images_conv ON assistant_images(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_assistant_images_msg ON assistant_images(message_id);
+  `)
+
   // ── Table password_resets : codes a 6 chiffres pour reinitialisation mdp ──
   // On stocke le HASH du code (jamais en clair), date d'expiration (15 min),
   // et nombre de tentatives (max 5). Une ligne par demande active.

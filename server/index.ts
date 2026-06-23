@@ -317,6 +317,44 @@ const supportUpload = multer({
   },
 })
 
+// ── Upload images du sous-outil "Lecture d'image" (vision/OCR) de l'Assistant ──
+// Les scans de pages manuscrites peuvent etre lourds : on autorise jusqu'a 15 Mo.
+// Memes formats que le support (png, jpg, jpeg, webp, gif).
+const ASSISTANT_IMG_DIR = join(DATA_DIR, 'assistant-images')
+if (!existsSync(ASSISTANT_IMG_DIR)) mkdirSync(ASSISTANT_IMG_DIR, { recursive: true })
+const assistantImageStorage = multer.diskStorage({
+  destination: ASSISTANT_IMG_DIR,
+  filename: (_req, file, cb) => {
+    // Nom de fichier unique et non-devinable : timestamp_random.ext
+    const ext = extname(file.originalname).toLowerCase() || '.png'
+    cb(null, `${Date.now()}_${Math.random().toString(36).slice(2, 10)}${ext}`)
+  },
+})
+const assistantImageUpload = multer({
+  storage: assistantImageStorage,
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB
+  fileFilter: (_req, file, cb) => {
+    const ext = extname(file.originalname).toLowerCase()
+    if (ALLOWED_IMAGE_EXTS.includes(ext) && file.mimetype.startsWith('image/')) cb(null, true)
+    else cb(new Error('Image uniquement (png, jpg, webp, gif), 15 Mo max'))
+  },
+})
+
+/**
+ * Lit des fichiers image du dossier assistant et les encode en base64
+ * (format attendu par Ollama pour les modeles vision). Ignore silencieusement
+ * un fichier introuvable ou un nom suspect (securite anti-path-traversal).
+ */
+function readVisionImagesBase64(images?: { file: string }[]): string[] {
+  if (!images || images.length === 0) return []
+  const out: string[] = []
+  for (const im of images) {
+    if (!im.file || !/^[\w.-]+$/.test(im.file)) continue // nom simple uniquement
+    try { out.push(readFileSync(join(ASSISTANT_IMG_DIR, im.file)).toString('base64')) } catch {}
+  }
+  return out
+}
+
 async function assembleChunks(chunkDir: string, outputPath: string, totalChunks: number): Promise<void> {
   const ws = createWriteStream(outputPath)
   for (let i = 0; i < totalChunks; i++) {
@@ -1141,14 +1179,18 @@ app.post('/api/semantic/analyze', requireAuth, async (req, res) => {
 // ── ASSISTANT : Chatbot LLM standalone (par user, multi-conversations) ──
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Liste des conversations de l'utilisateur (sidebar)
+// Liste des conversations de l'utilisateur (sidebar).
+// Query optionnelle ?kind=chat|vision pour filtrer selon le sous-outil ouvert.
 app.get('/api/assistant/conversations', requireAuth, (req, res) => {
-  res.json(assistantService.listConversations(req.user!.userId))
+  const kind = req.query.kind === 'vision' ? 'vision' : req.query.kind === 'chat' ? 'chat' : undefined
+  res.json(assistantService.listConversations(req.user!.userId, kind))
 })
 
-// Cree une nouvelle conversation vide
+// Cree une nouvelle conversation vide.
+// Body optionnel : { kind: 'chat' | 'vision' } (defaut 'chat')
 app.post('/api/assistant/conversations', requireAuth, (req, res) => {
-  const conv = assistantService.createConversation(req.user!.userId)
+  const kind = req.body?.kind === 'vision' ? 'vision' : 'chat'
+  const conv = assistantService.createConversation(req.user!.userId, undefined, kind)
   res.json(conv)
 })
 
@@ -1168,10 +1210,16 @@ app.patch('/api/assistant/conversations/:id', requireAuth, (req, res) => {
   res.json({ success: true })
 })
 
-// Supprime une conversation
+// Supprime une conversation (+ ses fichiers images sur disque pour une conv vision)
 app.delete('/api/assistant/conversations/:id', requireAuth, (req, res) => {
+  // On recupere d'abord les fichiers images a nettoyer (avant la cascade DB)
+  const imageFiles = assistantService.listConversationImageFiles(req.user!.userId, req.params.id)
   const ok = assistantService.deleteConversation(req.user!.userId, req.params.id)
   if (!ok) return res.status(404).json({ error: 'Conversation introuvable' })
+  // Suppression best-effort des fichiers (la ligne DB est deja partie en cascade)
+  for (const file of imageFiles) {
+    if (/^[\w.-]+$/.test(file)) { try { unlinkSync(join(ASSISTANT_IMG_DIR, file)) } catch {} }
+  }
   res.json({ success: true })
 })
 
@@ -1290,6 +1338,136 @@ app.post('/api/assistant/extract', requireAuth, textUpload.single('file'), async
     logger.error(`[Assistant] extract: ${err.message}`)
     res.status(400).json({ error: err.message })
   }
+})
+
+// ════════════════════ Sous-outil VISION (lecture d'image / OCR) ════════════════════
+
+// Upload d'une image dans une conversation vision. Renvoie { id, file, name }.
+// L'image est enregistree mais pas encore rattachee a un message (cela se fait
+// a l'envoi). Si la conversation n'est pas a l'utilisateur ou n'est pas de type
+// vision, on supprime le fichier et on refuse.
+app.post('/api/assistant/conversations/:id/vision-image', requireAuth, assistantImageUpload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Image manquante' })
+  const img = assistantService.addImage(req.user!.userId, req.params.id, req.file.filename, req.file.originalname)
+  if (!img) {
+    try { unlinkSync(join(ASSISTANT_IMG_DIR, req.file.filename)) } catch {}
+    return res.status(403).json({ error: 'Conversation vision introuvable' })
+  }
+  res.json(img)
+})
+
+// Sert une image de conversation vision (miniature ou plein ecran).
+// Le token JWT peut venir de l'en-tete OU de ?t= (pratique pour <img src>).
+// L'acces est verifie via la conversation proprietaire (getOwnedImageFile).
+app.get('/api/assistant/vision-image/:imageId', (req, res) => {
+  const token = req.headers.authorization?.slice(7) || (req.query.t as string)
+  if (!token) return res.status(401).end()
+  let userId: string
+  try { userId = authService.verifyToken(token).userId } catch { return res.status(401).end() }
+
+  const imageId = req.params.imageId
+  if (!/^[0-9a-f-]{36}$/i.test(imageId)) return res.status(400).end() // doit etre un UUID
+  const file = assistantService.getOwnedImageFile(userId, imageId)
+  if (!file) return res.status(403).end()
+  if (!/^[\w.-]+$/.test(file)) return res.status(400).end() // anti path-traversal
+  const filePath = join(ASSISTANT_IMG_DIR, file)
+  if (!existsSync(filePath)) return res.status(404).end()
+  res.sendFile(filePath)
+})
+
+// Envoie un message au sous-outil VISION et stream la reponse du modele multimodal.
+// Body : { content?: string, imageIds?: string[] }
+// SSE events : data: {"token":"..."}, data: {"done":true,...}, data: {"error":"..."}
+app.post('/api/assistant/conversations/:id/vision', requireAuth, async (req, res) => {
+  const userId = req.user!.userId
+  const convId = req.params.id
+  const { content, imageIds } = req.body
+  const text = typeof content === 'string' ? content.trim() : ''
+  // On limite a 8 images par message (garde-fou memoire GPU)
+  const ids: string[] = Array.isArray(imageIds) ? imageIds.filter((x) => typeof x === 'string').slice(0, 8) : []
+  if (!text && ids.length === 0) return res.status(400).json({ error: 'Message ou image requis' })
+
+  // Verifie l'acces ET que c'est bien une conversation vision
+  const data = assistantService.getConversation(userId, convId)
+  if (!data || data.conversation.kind !== 'vision') {
+    return res.status(404).json({ error: 'Conversation vision introuvable' })
+  }
+
+  // En-tetes SSE
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-cache, no-transform')
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
+  res.flushHeaders?.()
+
+  // Verifie que le modele vision est installe (sinon message clair)
+  if (!(await ollamaService.isVisionModelReady())) {
+    res.write(`data: ${JSON.stringify({ error: `Modele vision indisponible (${ollamaService.OLLAMA_VISION_MODEL}). Sur le serveur : "ollama pull ${ollamaService.OLLAMA_VISION_MODEL}".` })}\n\n`)
+    return res.end()
+  }
+
+  // Sauvegarde le message user puis rattache les images uploadees a ce message
+  const userMsg = assistantService.addMessage(userId, convId, 'user', text || '[image]')
+  if (!userMsg) { res.write(`data: ${JSON.stringify({ error: 'Acces refuse' })}\n\n`); return res.end() }
+  const attachedImages = assistantService.attachImagesToMessage(convId, userMsg.id, ids)
+  if (data.messages.length === 0) {
+    assistantService.renameConversation(userId, convId, assistantService.generateTitle(text || "Lecture d'image"))
+  }
+
+  // ── Construit l'historique pour Ollama (system + messages passes + message courant) ──
+  // Chaque message user peut porter des images (base64). Pour proteger la VRAM du
+  // GPU, on plafonne le nombre TOTAL d'images envoyees a 6, en gardant les plus
+  // recentes (on parcourt donc l'historique a l'envers pour le budget d'images).
+  const systemPrompt =
+    "Tu es un assistant expert en lecture de documents et d'ecriture manuscrite, y compris " +
+    "en ecritures non-latines (khmer, vietnamien, latin, etc.) et en textes multilingues. " +
+    "Observe attentivement les images fournies. Par defaut, retranscris fidelement le texte " +
+    "que tu vois, ligne par ligne, en conservant l'ecriture et la langue d'origine, sans rien " +
+    "inventer ; si un caractere est illisible, note-le [?]. Reponds ensuite a la demande de " +
+    "l'utilisateur : il peut te demander de traduire (francais ou anglais), d'analyser, de " +
+    "resumer ou de commenter. Reponds dans la langue demandee, par defaut en francais. Tu peux " +
+    "utiliser du Markdown."
+
+  // Liste ordonnee {role, content, images?} ; on remplit les images avec budget.
+  const history = [...data.messages, { ...userMsg, images: attachedImages }]
+  let imageBudget = 6
+  // 1er passage a l'envers : decide quelles images on garde (les plus recentes)
+  const keptImagesByMsg = new Map<string, string[]>()
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m: any = history[i]
+    if (m.role !== 'user' || !m.images || m.images.length === 0 || imageBudget <= 0) continue
+    const take = m.images.slice(0, imageBudget)
+    const b64 = readVisionImagesBase64(take)
+    if (b64.length > 0) { keptImagesByMsg.set(m.id, b64); imageBudget -= b64.length }
+  }
+  // 2e passage dans l'ordre : construit les messages Ollama
+  const ollamaMessages: ollamaService.OllamaChatMessage[] = [{ role: 'system', content: systemPrompt }]
+  for (const m of history) {
+    const msg: ollamaService.OllamaChatMessage = { role: m.role, content: m.content || ' ' }
+    const imgs = keptImagesByMsg.get((m as any).id)
+    if (imgs) msg.images = imgs
+    ollamaMessages.push(msg)
+  }
+
+  let aborted = false
+  res.on('close', () => { aborted = true; ctrl?.abort() })
+
+  const ctrl = ollamaService.chatStreamVision(
+    ollamaMessages,
+    (chunk) => { if (!aborted) res.write(`data: ${JSON.stringify({ token: chunk })}\n\n`) },
+    (full) => {
+      if (aborted) return
+      const saved = assistantService.addMessage(userId, convId, 'assistant', full)
+      res.write(`data: ${JSON.stringify({ done: true, message: saved, userMessage: { ...userMsg, images: attachedImages } })}\n\n`)
+      res.end()
+    },
+    (err) => {
+      logger.error('[Assistant] vision chatStream error:', err.message)
+      if (aborted) return
+      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`)
+      res.end()
+    },
+  )
 })
 
 // Project list (active projects, max 6) — auth-protected

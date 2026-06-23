@@ -391,12 +391,17 @@ const api = {
   },
 
   // ── Assistant : Chatbot LLM standalone (multi-conversations par user) ──
-  assistantListConversations: () =>
-    get<{ id: string; title: string; created_at: string; updated_at: string }[]>('/api/assistant/conversations'),
-  assistantCreateConversation: () =>
-    post<{ id: string; title: string; created_at: string; updated_at: string }>('/api/assistant/conversations'),
+  assistantListConversations: (kind?: 'chat' | 'vision') =>
+    get<{ id: string; title: string; kind?: 'chat' | 'vision'; created_at: string; updated_at: string }[]>(
+      `/api/assistant/conversations${kind ? `?kind=${kind}` : ''}`,
+    ),
+  assistantCreateConversation: (kind?: 'chat' | 'vision') =>
+    post<{ id: string; title: string; kind?: 'chat' | 'vision'; created_at: string; updated_at: string }>(
+      '/api/assistant/conversations',
+      kind ? { kind } : undefined,
+    ),
   assistantGetConversation: (id: string) =>
-    get<{ conversation: { id: string; title: string }; messages: { id: string; role: 'user' | 'assistant'; content: string; created_at: string }[] }>(`/api/assistant/conversations/${id}`),
+    get<{ conversation: { id: string; title: string; kind?: 'chat' | 'vision' }; messages: { id: string; role: 'user' | 'assistant'; content: string; created_at: string; images?: { id: string; file: string; name: string }[] }[] }>(`/api/assistant/conversations/${id}`),
   assistantRenameConversation: (id: string, title: string) =>
     patch(`/api/assistant/conversations/${id}`, { title }),
   assistantDeleteConversation: (id: string) =>
@@ -464,6 +469,80 @@ const api = {
             if (data.sources && callbacks.onSources) callbacks.onSources(data.sources)
             if (data.status && callbacks.onStatus) callbacks.onStatus(data.status)
             if (data.done) { callbacks.onDone(full, data.message); return }
+            if (data.error) { callbacks.onError(data.error); return }
+          } catch {}
+        }
+      }
+    }).catch((err) => {
+      if (err.name !== 'AbortError') callbacks.onError(err.message || 'Erreur reseau')
+    })
+    return { abort: () => ctrl.abort() }
+  },
+
+  // ── Sous-outil VISION (lecture d'image / OCR manuscrit) ──
+
+  /** Upload une image dans une conversation vision. Retourne { id, file, name }. */
+  assistantUploadVisionImage: async (convId: string, file: File): Promise<{ id: string; file: string; name: string }> => {
+    const form = new FormData()
+    form.append('image', file)
+    const res = await fetch(`${API_BASE}/api/assistant/conversations/${convId}/vision-image`, {
+      method: 'POST',
+      body: form,
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`)
+    return res.json()
+  },
+
+  /**
+   * URL d'affichage d'une image vision (avec le token JWT en query, car une
+   * balise <img> ne peut pas envoyer d'en-tete Authorization).
+   */
+  assistantVisionImageUrl: (imageId: string): string => {
+    const token = localStorage.getItem(AUTH_STORAGE_KEY) || ''
+    return `${API_BASE}/api/assistant/vision-image/${imageId}?t=${encodeURIComponent(token)}`
+  },
+
+  /**
+   * Envoie un message au sous-outil VISION (texte + images deja uploadees) et
+   * stream la reponse du modele multimodal via SSE. Memes callbacks que le chat.
+   */
+  assistantSendVisionMessage: (
+    convId: string,
+    content: string,
+    imageIds: string[],
+    callbacks: {
+      onToken: (chunk: string) => void
+      onDone: (full: string, message: any, userMessage: any) => void
+      onError: (err: string) => void
+    },
+  ) => {
+    const ctrl = new AbortController()
+    fetch(`${API_BASE}/api/assistant/conversations/${convId}/vision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ content, imageIds }),
+      signal: ctrl.signal,
+    }).then(async (res) => {
+      if (!res.ok || !res.body) { callbacks.onError(`HTTP ${res.status}`); return }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let full = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let sepIdx
+        while ((sepIdx = buffer.indexOf('\n\n')) >= 0) {
+          const event = buffer.slice(0, sepIdx)
+          buffer = buffer.slice(sepIdx + 2)
+          const line = event.split('\n').find((l) => l.startsWith('data: '))
+          if (!line) continue
+          try {
+            const data = JSON.parse(line.slice(6))
+            if (data.token) { full += data.token; callbacks.onToken(data.token) }
+            if (data.done) { callbacks.onDone(full, data.message, data.userMessage); return }
             if (data.error) { callbacks.onError(data.error); return }
           } catch {}
         }
