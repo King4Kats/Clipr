@@ -37,6 +37,7 @@ import * as authService from './services/auth.js'
 import * as settingsService from './services/settings.js'
 import * as mailer from './services/mailer.js'
 import { extractText, createTextTranscription } from './services/text-import.js'
+import { parseTable } from './services/table-import.js'
 import * as supportService from './services/support.js'
 import * as passwordResetService from './services/password-reset.js'
 import * as aiLockService from './services/ai-lock.js'
@@ -292,6 +293,19 @@ const textUpload = multer({
     const ext = extname(file.originalname).toLowerCase()
     if (ALLOWED_TEXT_EXTS.includes(ext)) cb(null, true)
     else cb(new Error('Format non supporte. Accepte : .txt, .docx, .pdf'))
+  },
+})
+
+// Upload tableau (xlsx/csv) pour l'outil Nuage de mots, en memoire aussi.
+// .xls/.ods sont acceptes a l'upload pour pouvoir renvoyer un message clair.
+const ALLOWED_TABLE_EXTS = ['.xlsx', '.csv', '.xls', '.ods']
+const tableUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = extname(file.originalname).toLowerCase()
+    if (ALLOWED_TABLE_EXTS.includes(ext)) cb(null, true)
+    else cb(new Error('Format non supporte. Accepte : .xlsx, .csv'))
   },
 })
 
@@ -1913,6 +1927,28 @@ app.post('/api/text/import', requireAuth, textUpload.single('file'), async (req,
     res.json({ success: true, ...result })
   } catch (err: any) {
     logger.error(`[TextImport] ${err.message}`)
+    res.status(400).json({ error: err.message })
+  }
+})
+
+/**
+ * Lecture d'un tableau (.xlsx/.csv) pour l'outil Nuage de mots : renvoie les
+ * feuilles avec en-tetes et lignes. Rien n'est stocke, le client choisit les
+ * colonnes a analyser et calcule le nuage lui-meme.
+ */
+app.post('/api/text/table', requireAuth, (req, res, next) => {
+  // Appel manuel de multer pour renvoyer ses erreurs (format, taille) en JSON
+  tableUpload.single('file')(req, res, (err: any) => {
+    if (err) return res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Fichier trop lourd (20 Mo max)' : err.message })
+    next()
+  })
+}, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Fichier manquant' })
+    const sheets = await parseTable(req.file.buffer, req.file.originalname)
+    res.json({ filename: req.file.originalname, sheets })
+  } catch (err: any) {
+    logger.error(`[TableImport] ${err.message}`)
     res.status(400).json({ error: err.message })
   }
 })

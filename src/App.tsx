@@ -21,6 +21,7 @@ import AtlasPage from '@/routes/AtlasPage'
 import AdminPage from '@/routes/AdminPage'
 import AssistantPage from '@/routes/AssistantPage'
 import AudioPage from '@/routes/AudioPage'
+import WordCloudPage from '@/routes/WordCloudPage'
 
 function App() {
   const { checkAuth } = useAuthStore()
@@ -45,6 +46,7 @@ function App() {
           <Route path="admin" element={<AdminPage />} />
           <Route path="assistant" element={<AssistantPage />} />
           <Route path="audio" element={<AudioPage />} />
+          <Route path="nuage" element={<WordCloudPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>

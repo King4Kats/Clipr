@@ -18,7 +18,7 @@ import api from '@/api'
 import { motion } from 'framer-motion'
 import {
   Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check,
-  Share2, Users, Mic, BookOpen, Scissors, Bot, MoreVertical, Music
+  Share2, Users, Mic, BookOpen, Scissors, Bot, MoreVertical, Music, Cloud
 } from 'lucide-react'
 import logo from '@/assets/Clipr.svg'
 
@@ -493,6 +493,26 @@ export default function HomePage() {
                   <h3 className="text-sm font-bold text-foreground">Extraction audio</h3>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
                     Recuperer la bande son d'une video en MP3 (128 / 192 / 320 kbps)
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.25 }}
+              onClick={() => navigate('/nuage')}
+              className="group p-5 bg-card border-2 border-border hover:border-rose-500/50 rounded-xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400 group-hover:bg-rose-500 group-hover:text-white transition-colors">
+                  <Cloud className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">Nuage de mots</h3>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Analyser un texte existant : transcription, document ou reponses a un questionnaire (.xlsx / .csv)
                   </p>
                 </div>
               </div>

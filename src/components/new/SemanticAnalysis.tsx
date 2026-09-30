@@ -32,12 +32,14 @@ interface SemanticAnalysisProps {
   segments: TranscriptSegment[]
   /** Modele Ollama a utiliser pour l'analyse semantique */
   ollamaModel: string
-  /** Callback pour fermer le panneau */
-  onClose: () => void
+  /** Callback pour fermer le panneau (sans callback, pas de bouton fermer) */
+  onClose?: () => void
   /** Map mot → couleur custom (controle par le parent pour persister dans le projet) */
   wordColors?: Record<string, string>
   /** Callback quand l'utilisateur change la couleur d'un mot (null = reset) */
   onWordColorChange?: (word: string, color: string | null) => void
+  /** Nom du fichier image exporte (sans extension), « nuage-de-mots » par defaut */
+  exportFilename?: string
 }
 
 // Palette de couleurs pour le picker (8 couleurs sympas + reset)
@@ -62,7 +64,7 @@ interface CloudWord {
 // ============================================================
 // COMPOSANT PRINCIPAL
 // ============================================================
-export default function SemanticAnalysis({ segments, ollamaModel, onClose, wordColors, onWordColorChange }: SemanticAnalysisProps) {
+export default function SemanticAnalysis({ segments, ollamaModel, onClose, wordColors, onWordColorChange, exportFilename = 'nuage-de-mots' }: SemanticAnalysisProps) {
   // Onglet actif : nuage, tableau ou analyse IA
   const [tab, setTab] = useState<'cloud' | 'table' | 'analysis'>('cloud')
 
@@ -142,11 +144,13 @@ export default function SemanticAnalysis({ segments, ollamaModel, onClose, wordC
         <div className="flex items-center gap-1">
           {/* Export en image : visible uniquement sur l'onglet du nuage */}
           {tab === 'cloud' && (
-            <WordCloudExportButton svgRef={wordCloudSvgRef} filename="nuage-de-mots" />
+            <WordCloudExportButton svgRef={wordCloudSvgRef} filename={exportFilename} />
           )}
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-secondary transition-colors">
-            <X className="w-4 h-4 text-muted-foreground" />
-          </button>
+          {onClose && (
+            <button onClick={onClose} className="p-1 rounded-lg hover:bg-secondary transition-colors">
+              <X className="w-4 h-4 text-muted-foreground" />
+            </button>
+          )}
         </div>
       </div>
 

@@ -451,6 +451,25 @@ const api = {
     return res.json()
   },
   /**
+   * Upload un tableau (.xlsx/.csv, ex. reponses a un questionnaire) et retourne
+   * ses feuilles : en-tetes + lignes. Utilise par l'outil Nuage de mots.
+   */
+  textParseTable: async (file: File): Promise<{
+    filename: string
+    sheets: Array<{ name: string; headers: string[]; rows: string[][] }>
+  }> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`${API_BASE}/api/text/table`, {
+      method: 'POST',
+      body: form,
+      headers: getAuthHeaders(),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+    return data
+  },
+  /**
    * Envoie un message a l'assistant et stream la reponse via SSE.
    * onToken : appele a chaque token recu (texte incremental)
    * onDone : appele a la fin avec le texte complet et le message sauvegarde
