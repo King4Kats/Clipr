@@ -18,7 +18,7 @@ import api from '@/api'
 import { motion } from 'framer-motion'
 import {
   Film, Loader2, RotateCcw, Plus, Trash2, Pencil, Cpu, X, Check,
-  Share2, Users, Mic, BookOpen, Scissors, Bot, MoreVertical
+  Share2, Users, Mic, BookOpen, Scissors, Bot, MoreVertical, Music
 } from 'lucide-react'
 import logo from '@/assets/Clipr.svg'
 
@@ -473,6 +473,26 @@ export default function HomePage() {
                   <h3 className="text-sm font-bold text-foreground">Assistant</h3>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
                     Chat IA pour extraire / analyser / resumer du texte (recettes, idees, etc.)
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.2 }}
+              onClick={() => navigate('/audio')}
+              className="group p-5 bg-card border-2 border-border hover:border-amber-500/50 rounded-xl cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-400 group-hover:bg-amber-500 group-hover:text-white transition-colors">
+                  <Music className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">Extraction audio</h3>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Recuperer la bande son d'une video en MP3 (128 / 192 / 320 kbps)
                   </p>
                 </div>
               </div>

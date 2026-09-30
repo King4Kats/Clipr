@@ -199,3 +199,91 @@ export function concatenateVideos(inputPaths: string[], outputPath: string): Pro
       .mergeToFile(outputPath, TEMP_DIR)
   })
 }
+
+/**
+ * Vérifie qu'un fichier contient au moins une piste audio.
+ *
+ * Sans ce contrôle, FFmpeg échouerait plus loin avec un message technique
+ * incompréhensible ("Output file #0 does not contain any stream"). On préfère
+ * détecter le cas en amont pour afficher un message clair à l'utilisateur.
+ *
+ * @param inputPath - Chemin absolu du fichier à analyser
+ * @returns true si le fichier a au moins une piste audio
+ */
+export function hasAudioStream(inputPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    // -select_streams a : ne garder que les pistes audio ("a" comme audio)
+    const args = ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-select_streams', 'a', inputPath]
+    const proc = spawn('ffprobe', args, { stdio: ['pipe', 'pipe', 'pipe'] })
+
+    let stdout = ''
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+    // On ignore stderr : en cas de souci, on retombe simplement sur "false"
+    proc.stderr.on('data', () => {})
+
+    proc.on('close', () => {
+      try {
+        const data = JSON.parse(stdout)
+        resolve(Array.isArray(data.streams) && data.streams.length > 0)
+      } catch { resolve(false) }
+    })
+    proc.on('error', () => resolve(false))
+  })
+}
+
+/**
+ * Options de l'extraction audio MP3 (outil "Extraction audio").
+ */
+export interface Mp3Options {
+  /** Débit binaire en kbps : 128 (léger), 192 (équilibré), 320 (haute qualité) */
+  bitrate?: number
+  /** Nombre de canaux : 1 = mono (fichier ~2x plus léger), 2 = stéréo */
+  channels?: 1 | 2
+}
+
+/**
+ * Extrait la piste audio d'une vidéo (ou d'un fichier audio) et l'encode en MP3.
+ *
+ * Différence avec extractAudio() : cette fonction produit un MP3 destiné à
+ * l'écoute et au téléchargement par l'utilisateur (qualité musicale, stéréo,
+ * 44,1 kHz), alors qu'extractAudio() produit un WAV 16 kHz mono taillé pour
+ * la reconnaissance vocale de Whisper. Les deux coexistent volontairement.
+ *
+ * @param inputPath - Chemin absolu du fichier vidéo/audio source
+ * @param outputPath - Chemin absolu du MP3 à produire
+ * @param options - Débit et nombre de canaux souhaités
+ * @param onProgress - Callback de progression (0-100)
+ */
+export function extractMp3(
+  inputPath: string,
+  outputPath: string,
+  options: Mp3Options = {},
+  onProgress?: (percent: number) => void
+): Promise<void> {
+  // Valeurs par défaut : 192 kbps stéréo, le meilleur compromis taille/qualité
+  const bitrate = options.bitrate ?? 192
+  const channels = options.channels ?? 2
+
+  return new Promise((resolve, reject) => {
+    // On s'assure que le dossier de destination existe
+    const dir = require('path').dirname(outputPath)
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+
+    ffmpeg(inputPath)
+      .noVideo()                        // On jette la piste vidéo : seul l'audio nous intéresse
+      .audioCodec('libmp3lame')         // Encodeur MP3 de référence (fourni avec ffmpeg)
+      .audioBitrate(`${bitrate}k`)      // Débit choisi par l'utilisateur
+      .audioChannels(channels)          // Mono ou stéréo
+      .audioFrequency(44100)            // 44,1 kHz : fréquence standard de la musique
+      .outputOptions('-map_metadata', '0')  // Conserve les métadonnées du fichier source (titre, date...)
+      .on('progress', (p: any) => {
+        // FFmpeg ne connaît pas toujours le pourcentage exact : on borne entre 0 et 100
+        if (typeof p.percent === 'number' && onProgress) {
+          onProgress(Math.max(0, Math.min(100, p.percent)))
+        }
+      })
+      .on('end', () => resolve())
+      .on('error', (err: any) => reject(err))
+      .save(outputPath)
+  })
+}

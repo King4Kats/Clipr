@@ -578,9 +578,13 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
   }
 
   // Copy transcript to clipboard
-  const handleCopy = () => {
-    const text = segments.map(s => s.text).join('\n')
-    navigator.clipboard.writeText(text)
+  // Accepte un override de segments pour le cas d'un item de projet selectionne (selectedItemSegments)
+  const handleCopy = (segs?: TranscriptSegment[]) => {
+    const source = (segs && segs.length > 0) ? segs : segments
+    const text = source.map(s => s.text).join('\n')
+    navigator.clipboard.writeText(text).catch((err) => {
+      console.error('Clipboard write failed:', err)
+    })
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -739,7 +743,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
         transcriptionId={selectedItem.transcriptionId}
         uploadedFileName={selectedItem.filename}
         copied={copied}
-        onCopy={handleCopy}
+        onCopy={() => handleCopy(selectedItemSegments)}
         onReset={() => setShowSemanticAnalysis(false)}
         onSegmentsUpdate={setSelectedItemSegments}
         ollamaModel="mistral-nemo:12b"
@@ -1414,6 +1418,7 @@ const TranscriptionTool = ({ onBack, initialProject }: TranscriptionToolProps) =
 
 import { computeWordFrequencies, getWordCloudData, getSpeakers } from '@/lib/word-frequency'
 import { exportAnalysisPDF } from '@/lib/export-pdf'
+import WordCloudExportButton from '@/components/new/WordCloudExportButton'
 import type { WordFrequency as WordFreqType } from '@/types'
 
 const RESULT_STORAGE_KEY = 'clipr-transcription-result-layout'
@@ -1802,6 +1807,13 @@ function TranscriptionResult({
               <div className="panel-drag-handle flex items-center gap-2 px-4 py-2 border-b border-border cursor-move bg-secondary/20">
                 <Cloud className="w-3.5 h-3.5 text-primary" />
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Nuage de mots</span>
+                {/* stopPropagation : sans lui, cliquer sur le bouton ferait glisser le panneau */}
+                <div className="ml-auto" onMouseDown={(e) => e.stopPropagation()}>
+                  <WordCloudExportButton
+                    svgRef={wordCloudSvgRef}
+                    filename={`nuage-${(uploadedFileName || 'transcription').replace(/\.[^.]+$/, '')}`}
+                  />
+                </div>
               </div>
               <div className="flex-1 overflow-hidden p-2">
                 <WordCloudPanel

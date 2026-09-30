@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button'
 import api from '@/api'
 import type { TranscriptSegment, WordFrequency, SemanticAnalysisResult } from '@/types'
 import { computeWordFrequencies, getWordCloudData, getSpeakers } from '@/lib/word-frequency'
+import WordCloudExportButton from '@/components/new/WordCloudExportButton'
 // @ts-ignore — d3-cloud n'a pas toujours les types parfaits
 import cloud from 'd3-cloud'
 
@@ -75,6 +76,9 @@ export default function SemanticAnalysis({ segments, ollamaModel, onClose, wordC
   const [semanticLoading, setSemanticLoading] = useState(false)
   const [semanticError, setSemanticError] = useState<string | null>(null)
   const semanticLoaded = useRef(false)
+
+  // Reference vers le SVG du nuage, utilisee par le bouton d'export en image
+  const wordCloudSvgRef = useRef<SVGElement | null>(null)
 
   // Charger l'analyse semantique quand on clique sur l'onglet "analyse"
   useEffect(() => {
@@ -135,9 +139,15 @@ export default function SemanticAnalysis({ segments, ollamaModel, onClose, wordC
             {semanticLoading && <Loader2 className="w-3 h-3 animate-spin" />}
           </button>
         </div>
-        <button onClick={onClose} className="p-1 rounded-lg hover:bg-secondary transition-colors">
-          <X className="w-4 h-4 text-muted-foreground" />
-        </button>
+        <div className="flex items-center gap-1">
+          {/* Export en image : visible uniquement sur l'onglet du nuage */}
+          {tab === 'cloud' && (
+            <WordCloudExportButton svgRef={wordCloudSvgRef} filename="nuage-de-mots" />
+          )}
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-secondary transition-colors">
+            <X className="w-4 h-4 text-muted-foreground" />
+          </button>
+        </div>
       </div>
 
       {/* Contenu de l'onglet actif */}
@@ -151,6 +161,7 @@ export default function SemanticAnalysis({ segments, ollamaModel, onClose, wordC
                 speakers={speakers}
                 wordColors={wordColors}
                 onWordColorChange={onWordColorChange}
+                svgRef={wordCloudSvgRef}
               />
             </motion.div>
           )}
@@ -183,12 +194,15 @@ function WordCloudView({
   speakers,
   wordColors,
   onWordColorChange,
+  svgRef,
 }: {
   data: { text: string; value: number }[]
   frequencies: WordFrequency[]
   speakers: string[]
   wordColors?: Record<string, string>
   onWordColorChange?: (word: string, color: string | null) => void
+  /** Reference remontee au parent pour permettre l'export du nuage en image */
+  svgRef?: React.MutableRefObject<SVGElement | null>
 }) {
   const [words, setWords] = useState<CloudWord[]>([])
   const [hoveredWord, setHoveredWord] = useState<string | null>(null)
@@ -278,6 +292,7 @@ function WordCloudView({
 
       {/* SVG du nuage de mots */}
       <svg
+        ref={(el) => { if (svgRef) svgRef.current = el }}
         viewBox="-350 -200 700 400"
         className="w-full h-[400px] bg-background/50 rounded-lg border border-border"
       >

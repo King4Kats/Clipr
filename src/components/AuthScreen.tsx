@@ -20,6 +20,8 @@ import { motion } from 'framer-motion'
 import { LogIn, UserPlus, AlertCircle } from 'lucide-react'
 // Logo de l'application Clipr (fichier SVG importé comme asset)
 import logo from '@/assets/Clipr.svg'
+// Logo Témonia (partenariat développement)
+import temoniaLogo from '@/assets/temonia.png'
 
 /**
  * Composant principal de l'écran d'authentification.
@@ -411,6 +413,12 @@ export default function AuthScreen() {
           </p>
         )}
       </motion.div>
+
+      {/* Footer partenariat Témonia */}
+      <div className="fixed bottom-6 left-0 right-0 flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground/60 pointer-events-none">
+        <span>Développement en partenariat avec</span>
+        <img src={temoniaLogo} alt="Témonia" className="h-8 w-auto opacity-80" />
+      </div>
     </div>
   )
 }

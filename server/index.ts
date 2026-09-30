@@ -1024,6 +1024,150 @@ app.post('/api/ffmpeg/concatenate', requireAuth, async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }) }
 })
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── OUTIL "EXTRACTION AUDIO" : convertir une vidéo en fichier MP3 ──
+//
+// Pourquoi un traitement asynchrone (job + polling) plutôt qu'une simple
+// requête qui répond quand c'est fini ? Parce que l'encodage d'un fichier long
+// peut durer plusieurs minutes, alors que le Cloudflare Tunnel coupe toute
+// requête HTTP au bout de 100 secondes. On rend donc la main tout de suite avec
+// un identifiant de job, et le front interroge l'avancement toutes les secondes.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** État d'une conversion audio en cours ou terminée. */
+interface AudioJob {
+  id: string
+  userId: string
+  status: 'pending' | 'processing' | 'done' | 'error'
+  progress: number          // 0-100
+  sourceName: string        // nom du fichier d'origine (affiché dans l'UI)
+  filename?: string         // nom du MP3 produit (une fois terminé)
+  size?: number             // taille du MP3 en octets
+  error?: string
+  createdAt: number
+}
+
+// Les jobs vivent en mémoire : ce sont des conversions jetables, il n'y a
+// aucun intérêt à les persister en base (un redémarrage annule la conversion).
+const audioJobs = new Map<string, AudioJob>()
+
+// Débits autorisés : on refuse toute autre valeur pour ne pas laisser passer
+// n'importe quoi dans la ligne de commande FFmpeg.
+const ALLOWED_BITRATES = [128, 192, 320]
+
+/**
+ * Transforme un nom de fichier utilisateur en nom sûr pour le disque :
+ * accents supprimés, caractères spéciaux remplacés, extension retirée.
+ */
+function safeAudioBaseName(name: string): string {
+  return basename(name || 'audio')
+    .replace(/\.[^.]+$/, '')                       // retire l'extension d'origine
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')  // enlève les accents
+    .replace(/[^a-zA-Z0-9 _-]/g, '')               // ne garde que l'alphanumérique
+    .trim().replace(/\s+/g, '_')
+    .substring(0, 60) || 'audio'
+}
+
+// Lance une conversion : répond immédiatement avec un jobId
+app.post('/api/audio/extract', requireAuth, async (req, res) => {
+  try {
+    const { fileId, name, bitrate, channels } = req.body
+    const userId = req.user!.userId
+
+    // Le client envoie l'identifiant renvoyé par /api/upload, jamais un chemin
+    // complet : on reconstruit le chemin nous-mêmes pour empêcher toute lecture
+    // d'un fichier arbitraire du serveur (path traversal).
+    if (!fileId || typeof fileId !== 'string') return res.status(400).json({ error: 'Fichier manquant' })
+    const sourcePath = safePath(UPLOAD_DIR, basename(fileId))
+    if (!sourcePath || !existsSync(sourcePath)) return res.status(404).json({ error: 'Fichier introuvable' })
+
+    // Validation stricte des options
+    const rate = ALLOWED_BITRATES.includes(Number(bitrate)) ? Number(bitrate) : 192
+    const chan = Number(channels) === 1 ? 1 : 2
+
+    // Sans piste audio, inutile de lancer l'encodage : on prévient tout de suite
+    if (!await ffmpegService.hasAudioStream(sourcePath)) {
+      return res.status(400).json({ error: 'Ce fichier ne contient aucune piste audio' })
+    }
+
+    const jobId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const job: AudioJob = {
+      id: jobId, userId, status: 'pending', progress: 0,
+      sourceName: name || basename(fileId), createdAt: Date.now()
+    }
+    audioJobs.set(jobId, job)
+
+    // Nom du MP3 : nom d'origine + suffixe unique (EXPORT_DIR est partagé,
+    // le suffixe évite qu'une conversion écrase celle d'un autre utilisateur)
+    const outName = `audio_${safeAudioBaseName(name || fileId)}_${jobId}.mp3`
+    const outPath = join(EXPORT_DIR, outName)
+
+    // Encodage lancé en tâche de fond : on ne bloque pas la réponse HTTP
+    job.status = 'processing'
+    ffmpegService.extractMp3(sourcePath, outPath, { bitrate: rate, channels: chan as 1 | 2 }, (pct) => {
+      job.progress = Math.round(pct)
+    }).then(() => {
+      job.status = 'done'
+      job.progress = 100
+      job.filename = outName
+      job.size = existsSync(outPath) ? statSync(outPath).size : 0
+      logger.info(`Extraction audio terminee: ${outName} (${Math.round((job.size || 0) / 1024)} Ko)`)
+    }).catch((err: any) => {
+      job.status = 'error'
+      job.error = err?.message || 'Erreur pendant la conversion'
+      logger.error(`Extraction audio echouee: ${job.error}`)
+    })
+
+    res.json({ jobId, bitrate: rate, channels: chan })
+  } catch (err: any) { res.status(500).json({ error: err.message }) }
+})
+
+// Avancement d'une conversion (interrogé en boucle par le front)
+app.get('/api/audio/job/:jobId', requireAuth, (req, res) => {
+  const job = audioJobs.get(req.params.jobId)
+  if (!job) return res.status(404).json({ error: 'Conversion introuvable' })
+  // Un utilisateur ne voit que ses propres conversions
+  if (job.userId !== req.user!.userId) return res.status(403).json({ error: 'Acces refuse' })
+
+  res.json({
+    id: job.id,
+    status: job.status,
+    progress: job.progress,
+    sourceName: job.sourceName,
+    filename: job.filename,
+    size: job.size,
+    error: job.error,
+    // Le front n'a plus qu'à ouvrir cette URL pour récupérer le MP3
+    downloadUrl: job.filename ? `/api/export/download/${job.filename}` : undefined
+  })
+})
+
+/**
+ * Nettoyage des MP3 produits par l'outil d'extraction.
+ * Ce sont des fichiers jetables : une fois téléchargés, ils n'ont plus de
+ * raison d'occuper le disque. On les supprime au bout de 6 heures, en même
+ * temps que les jobs correspondants.
+ */
+function cleanStaleAudioExports() {
+  try {
+    const now = Date.now()
+    for (const name of readdirSync(EXPORT_DIR)) {
+      if (!name.startsWith('audio_') || !name.endsWith('.mp3')) continue
+      const filePath = join(EXPORT_DIR, name)
+      try {
+        if (now - statSync(filePath).mtimeMs > 6 * 3600_000) {
+          unlinkSync(filePath)
+          logger.info(`Nettoyage MP3 expire: ${name}`)
+        }
+      } catch {}
+    }
+    for (const [id, job] of audioJobs) {
+      if (now - job.createdAt > 6 * 3600_000) audioJobs.delete(id)
+    }
+  } catch {}
+}
+setInterval(cleanStaleAudioExports, 60 * 60_000)
+
 // Export segment(s) as video (auth required)
 app.post('/api/export/segment', requireAuth, async (req, res) => {
   try {
@@ -1056,6 +1200,14 @@ app.get('/api/export/download/:filename', (req, res) => {
   try { authService.verifyToken(token) } catch { return res.status(401).json({ error: 'Token invalide' }) }
   const filePath = safePath(EXPORT_DIR, req.params.filename)
   if (!filePath || !existsSync(filePath)) return res.status(404).json({ error: 'Fichier non trouve' })
+
+  // Nom propose au telechargement : le client peut demander un nom lisible
+  // (ex: "Interview Ginette.mp3") plutot que le nom technique du fichier sur
+  // le serveur. On retire tout ce qui pourrait bricoler l'en-tete HTTP.
+  const requested = typeof req.query.name === 'string' ? req.query.name : ''
+  const niceName = basename(requested).replace(/[\r\n"\\]/g, '').slice(0, 100)
+
+  if (niceName) return res.download(filePath, niceName)
   res.download(filePath)
 })
 

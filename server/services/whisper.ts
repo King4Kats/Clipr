@@ -130,6 +130,9 @@ export function transcribe(
     // qu'on peut communiquer via stdin, stdout et stderr
     whisperProcess = spawn('python3', args, { stdio: ['pipe', 'pipe', 'pipe'] })
 
+    // On consomme et ignore stdout pour éviter un blocage (deadlock) du pipe de sortie sur les gros fichiers
+    whisperProcess.stdout?.resume()
+
     // Écoute de stderr : c'est par là que le script Python envoie les données
     // en streaming (progression, segments, erreurs)
     whisperProcess.stderr?.on('data', (data) => {

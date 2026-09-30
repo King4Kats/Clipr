@@ -356,6 +356,35 @@ const api = {
   cutVideo: (input: string, start: number, end: number, output: string) => post('/api/ffmpeg/cut', { input, start, end, output }),
   concatenateVideos: (inputPaths: string[], output: string) => post('/api/ffmpeg/concatenate', { inputPaths, output }),
 
+  // ── Outil "Extraction audio" : vidéo → MP3 ──
+  // La conversion est lancée côté serveur puis suivie par interrogation
+  // régulière (polling) : une requête unique dépasserait le timeout de 100 s
+  // du tunnel Cloudflare sur les fichiers longs.
+  extractMp3: (fileId: string, name: string, bitrate: number, channels: 1 | 2) =>
+    post<{ jobId: string }>('/api/audio/extract', { fileId, name, bitrate, channels }),
+  getAudioJob: (jobId: string) =>
+    get<{
+      id: string
+      status: 'pending' | 'processing' | 'done' | 'error'
+      progress: number
+      sourceName: string
+      filename?: string
+      size?: number
+      error?: string
+      downloadUrl?: string
+    }>(`/api/audio/job/${jobId}`),
+  // URL de téléchargement signée par le token (les liens <a> ne peuvent pas
+  // porter de header Authorization)
+  getExportDownloadUrl: (filename: string, downloadName?: string) => {
+    const token = localStorage.getItem(AUTH_STORAGE_KEY)
+    const params = new URLSearchParams()
+    if (token) params.set('token', token)
+    // Nom lisible propose a l'utilisateur au moment d'enregistrer le fichier
+    if (downloadName) params.set('name', downloadName)
+    const query = params.toString()
+    return `${API_BASE}/api/export/download/${filename}${query ? `?${query}` : ''}`
+  },
+
   // ── Export : Génération et téléchargement de fichiers ──
   exportSegment: (clips: any[], title: string, index: number) => post<{ filename: string; downloadUrl: string }>('/api/export/segment', { clips, title, index }),
   exportText: (content: string, filename: string) => post<{ downloadUrl: string }>('/api/export/text', { content, filename }),

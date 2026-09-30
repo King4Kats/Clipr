@@ -20,6 +20,7 @@ import LinguisticPage from '@/routes/LinguisticPage'
 import AtlasPage from '@/routes/AtlasPage'
 import AdminPage from '@/routes/AdminPage'
 import AssistantPage from '@/routes/AssistantPage'
+import AudioPage from '@/routes/AudioPage'
 
 function App() {
   const { checkAuth } = useAuthStore()
@@ -43,6 +44,7 @@ function App() {
           <Route path="project/:projectId" element={<ProjectPage />} />
           <Route path="admin" element={<AdminPage />} />
           <Route path="assistant" element={<AssistantPage />} />
+          <Route path="audio" element={<AudioPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>
