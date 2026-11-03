@@ -373,6 +373,18 @@ function initSchema() {
   if (!hasCol('approved_at')) db.exec('ALTER TABLE users ADD COLUMN approved_at TEXT')
   if (!hasCol('approved_by')) db.exec('ALTER TABLE users ADD COLUMN approved_by TEXT')
 
+  // ── Migration : rattachement au compte du cloud Témonia (SSO Nextcloud) ──
+  // oidc_sub = identifiant stable de la personne dans le cloud (claim « sub »).
+  // Rempli à la première connexion par le cloud ; vide pour les comptes créés
+  // avec un mot de passe. L'index unique garantit qu'un compte cloud ne peut pas
+  // être rattaché à deux comptes Clipr (SQLite ignore les NULL dans un index
+  // unique, donc tous les comptes « mot de passe » cohabitent sans problème).
+  if (!hasCol('oidc_sub')) {
+    db.exec('ALTER TABLE users ADD COLUMN oidc_sub TEXT')
+    logger.info('Migration: added oidc_sub column to users')
+  }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc_sub ON users(oidc_sub)')
+
   // ── Table support_messages : messagerie utilisateur ↔ admins ──
   // Chaque utilisateur a UN fil de discussion (identifie par user_id).
   // Les messages sont stockes plat avec sender_role pour distinguer.

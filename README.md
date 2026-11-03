@@ -194,6 +194,55 @@ services:
       - CORS_ORIGINS=https://clipr.mon-domaine.fr
 ```
 
+### Connexion par un compte Nextcloud (SSO)
+
+Clipr sait deleguer l'authentification a un Nextcloud : plus de compte a creer
+dans Clipr, et ce sont les **groupes Nextcloud** qui decident qui entre et qui
+administre. L'ecran de connexion affiche alors un bouton « Se connecter avec le
+cloud », et le formulaire mot de passe reste disponible en secours.
+
+Cote Nextcloud : installer l'app **oidc**, creer un client confidentiel dont
+l'adresse de retour est `https://<clipr>/api/auth/sso/callback` avec les scopes
+`openid profile email groups`, et creer le groupe qui donnera l'acces. La
+procedure complete est dans [`deploy/nextcloud/README.md`](deploy/nextcloud/README.md).
+
+Cote Clipr, deux facons de configurer (les variables gagnent sur le fichier) :
+
+| Variable | Defaut | A quoi ca sert |
+|----------|--------|----------------|
+| `SSO_NC_ISSUER` | — | Adresse du Nextcloud, ex. `https://cloud.exemple.fr` |
+| `SSO_NC_CLIENT_ID` | — | Identifiant du client OIDC cree dans Nextcloud |
+| `SSO_NC_CLIENT_SECRET` | — | Secret du client. **Jamais dans le code ni dans un depot.** |
+| `SSO_NC_URL_PUBLIQUE` | `PUBLIC_URL` | Adresse publique de Clipr, pour l'adresse de retour |
+| `SSO_NC_GROUPE_ACCES` | `Clipr` | Groupe Nextcloud qui donne acces a Clipr |
+| `SSO_NC_GROUPES_ADMIN` | `admin` | Groupes Nextcloud qui donnent le role admin dans Clipr |
+
+... ou bien un fichier `sso-nextcloud.json` dans le volume de donnees
+(`$DATA_DIR/sso-nextcloud.json`, droits 600). Pratique quand on ne veut pas
+recreer le conteneur :
+
+```json
+{
+  "issuer": "https://cloud.exemple.fr",
+  "clientId": "...",
+  "clientSecret": "...",
+  "urlPublique": "https://clipr.exemple.fr",
+  "groupeAcces": "Clipr",
+  "groupesAdmin": ["admin"]
+}
+```
+
+Tant que ces quatre valeurs (issuer, clientId, clientSecret, adresse publique)
+ne sont pas toutes presentes, le SSO reste simplement eteint et Clipr fonctionne
+comme avant. Une fois en place, pensez a **fermer les inscriptions** dans
+Administration : sinon deux portes d'entree coexistent.
+
+Rattachement des comptes : a la premiere connexion par le cloud, Clipr relie le
+compte Nextcloud a un compte Clipr existant **ayant la meme adresse e-mail**
+(les projets et l'historique sont conserves), sinon il cree le compte. Un compte
+cree par le SSO n'a pas de mot de passe utilisable : il ne peut se connecter que
+par le cloud.
+
 ### HTTPS avec votre domaine
 
 Editez `caddy/Caddyfile` :
@@ -230,6 +279,9 @@ Toutes les routes (sauf `register`/`login`) demandent un header `Authorization: 
 | POST | `/api/auth/register` | Non | Inscription (limite : 10 essais / 15min) |
 | POST | `/api/auth/login` | Non | Connexion (limite : 10 essais / 15min) |
 | GET | `/api/auth/me` | JWT | Profil de l'utilisateur courant |
+| GET | `/api/auth/sso` | Non | La connexion par le cloud est-elle configuree ? |
+| GET | `/api/auth/sso/start` | Non | Depart vers le cloud (redirection 302) |
+| GET | `/api/auth/sso/callback` | Non | Retour du cloud : cree la session, revient sur `/login#jeton=...` |
 
 ### Projets
 

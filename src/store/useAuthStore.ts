@@ -44,6 +44,8 @@ interface AuthState {
   login: (login: string, password: string) => Promise<boolean>       // Se connecter
   // S'inscrire : retourne { ok, pending } — si pending, le compte attend la validation admin
   register: (username: string, email: string, password: string) => Promise<{ ok: boolean; pending: boolean; message?: string }>
+  // Ouvrir une session à partir d'un jeton déjà obtenu (retour du cloud Témonia)
+  connecterAvecJeton: (token: string) => Promise<boolean>
   logout: () => void                    // Se déconnecter
   checkAuth: () => Promise<void>        // Vérifier si le token stocké est encore valide
   clearError: () => void                // Effacer le message d'erreur
@@ -118,6 +120,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (e: any) {
       set({ error: e.message })
       return { ok: false, pending: false }
+    }
+  },
+
+  /**
+   * Connexion avec un jeton déjà fabriqué par le serveur.
+   *
+   * Utilisé au retour du cloud Témonia (SSO) : le serveur a vérifié l'identité
+   * et les groupes, puis nous a renvoyés sur /login#jeton=… . Il ne reste qu'à
+   * ranger ce jeton et à demander « qui suis-je ? » pour remplir l'interface.
+   * On ne se contente pas de faire confiance au jeton : si /api/auth/me le
+   * refuse, on ne connecte personne.
+   */
+  connecterAvecJeton: async (token) => {
+    try {
+      const res = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) throw new Error('Jeton refusé')
+      const user = await res.json()
+      localStorage.setItem(STORAGE_KEY, token)
+      set({ user, token, isAuthenticated: true, isLoading: false, error: null })
+      return true
+    } catch {
+      set({ error: 'La connexion par le cloud a échoué. Réessayez.', isLoading: false })
+      return false
     }
   },
 

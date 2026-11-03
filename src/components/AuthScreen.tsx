@@ -17,7 +17,7 @@ import { useAuthStore } from '@/store/useAuthStore'
 import { motion } from 'framer-motion'
 // Icônes provenant de la librairie lucide-react (icônes SVG légères)
 // LogIn = icône de connexion, UserPlus = icône de création de compte, AlertCircle = icône d'erreur
-import { LogIn, UserPlus, AlertCircle } from 'lucide-react'
+import { LogIn, UserPlus, AlertCircle, Cloud } from 'lucide-react'
 // Logo de l'application Clipr (fichier SVG importé comme asset)
 import logo from '@/assets/Clipr.svg'
 // Logo Témonia (partenariat développement)
@@ -28,7 +28,11 @@ import temoniaLogo from '@/assets/temonia.png'
  * Il gère deux modes : "login" (connexion) et "register" (inscription).
  * Le formulaire s'adapte dynamiquement selon le mode sélectionné.
  */
-export default function AuthScreen() {
+/**
+ * @param erreurSso message d'erreur rapporte par le retour du cloud Temonia
+ *                  (groupe manquant, connexion annulee...). Affiche tel quel.
+ */
+export default function AuthScreen({ erreurSso }: { erreurSso?: string | null } = {}) {
   // On récupère les fonctions et données du store d'authentification :
   // - login : fonction pour se connecter
   // - register : fonction pour créer un compte
@@ -54,6 +58,10 @@ export default function AuthScreen() {
   const [pendingMessage, setPendingMessage] = useState<string | null>(null)
   // Etat des inscriptions cote serveur (recupere au montage)
   const [registrationOpen, setRegistrationOpen] = useState<boolean>(true)
+  // La connexion par le cloud Temonia est-elle configuree sur ce serveur ?
+  // Si oui, c'est le chemin NORMAL : gros bouton en haut, formulaire en secours.
+  const [ssoActif, setSsoActif] = useState<boolean>(false)
+  const [ssoLibelle, setSsoLibelle] = useState<string>('Se connecter avec le cloud Témonia')
 
   // Au montage, on demande au serveur si les inscriptions sont ouvertes.
   // Si elles sont fermees (et qu'il y a deja un admin), on masque le bouton "S'inscrire".
@@ -62,7 +70,20 @@ export default function AuthScreen() {
       .then(r => r.json())
       .then(d => setRegistrationOpen(!!d.open))
       .catch(() => {})
+    fetch('/api/auth/sso')
+      .then(r => r.json())
+      .then(d => { setSsoActif(!!d.actif); if (d.libelle) setSsoLibelle(d.libelle) })
+      .catch(() => {})
   }, [])
+
+  /**
+   * Depart vers le cloud Temonia. On quitte franchement l'application (pas de
+   * fetch) : c'est le navigateur qui doit suivre la redirection vers le cloud,
+   * s'y authentifier, puis revenir sur /api/auth/sso/callback.
+   */
+  const connexionCloud = () => {
+    window.location.href = '/api/auth/sso/start?retour=' + encodeURIComponent('/')
+  }
 
   /**
    * Fonction appelée lors de la soumission du formulaire.
@@ -260,8 +281,11 @@ export default function AuthScreen() {
   }
 
   return (
-    // Conteneur plein écran centré verticalement et horizontalement
-    <div className="min-h-screen bg-background flex items-center justify-center px-4">
+    // Conteneur plein écran centré verticalement et horizontalement.
+    // pb-32 : le bandeau « partenariat » du bas est en position fixe ; sans cette
+    // marge, le formulaire passe dessous sur une fenêtre courte (surtout quand un
+    // message d'erreur du cloud s'ajoute en haut).
+    <div className="min-h-screen bg-background flex items-center justify-center px-4 py-10 pb-32">
       {/* Animation d'apparition : le formulaire glisse légèrement vers le haut en apparaissant */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -279,6 +303,42 @@ export default function AuthScreen() {
             {mode === 'login' ? 'Connectez-vous pour continuer' : 'Créer un compte'}
           </p>
         </div>
+
+        {/* Message rapporte par le retour du cloud (acces refuse, annulation...) */}
+        {erreurSso && (
+          <motion.div
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-start gap-2 p-3 mb-4 bg-destructive/10 border border-destructive/20 rounded-lg text-xs text-destructive"
+          >
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{erreurSso}</span>
+          </motion.div>
+        )}
+
+        {/* Connexion par le cloud Temonia : la voie normale quand elle est active.
+            Le formulaire en dessous reste disponible en secours (comptes locaux). */}
+        {mode === 'login' && ssoActif && (
+          <div className="mb-6">
+            <button
+              type="button"
+              onClick={connexionCloud}
+              className="w-full py-2.5 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+            >
+              <Cloud className="w-4 h-4" />
+              {ssoLibelle}
+            </button>
+            <p className="text-[10px] text-muted-foreground/70 mt-2 text-center">
+              Avec votre compte habituel du cloud Témonia, sans nouveau mot de passe.
+            </p>
+            {/* Separateur "ou" */}
+            <div className="flex items-center gap-3 mt-5">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">ou</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+          </div>
+        )}
 
         {/* Formulaire de connexion / inscription */}
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -351,7 +411,13 @@ export default function AuthScreen() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            className={`w-full py-2.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 ${
+              // Quand le cloud est la voie normale, le bouton "mot de passe"
+              // passe en second plan pour ne pas disputer la vedette.
+              ssoActif && mode === 'login'
+                ? 'bg-secondary text-foreground border border-border hover:bg-secondary/70'
+                : 'bg-primary text-primary-foreground hover:bg-primary/90'
+            }`}
           >
             {loading ? (
               // Spinner animé pendant le chargement
@@ -359,7 +425,7 @@ export default function AuthScreen() {
             ) : mode === 'login' ? (
               <>
                 <LogIn className="w-4 h-4" />
-                Se connecter
+                {ssoActif ? 'Se connecter avec un mot de passe' : 'Se connecter'}
               </>
             ) : (
               <>

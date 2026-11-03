@@ -30,6 +30,21 @@ services:
       - SMTP_FROM=${SMTP_FROM:-clipr@temonia.fr}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-clipr@temonia.fr}
       - PUBLIC_URL=${PUBLIC_URL:-https://clipr-temonia.flavienauvray.me}
+      # ─── Connexion par un compte Nextcloud (SSO) ───
+      # Facultatif : si ces valeurs sont absentes, Clipr cherche un fichier
+      # $DATA_DIR/sso-nextcloud.json (droits 600) ; s'il n'y en a pas non plus,
+      # le SSO reste eteint et seule la connexion par mot de passe existe.
+      # Le secret ne doit JAMAIS etre ecrit ici en clair : il vient du .env.
+      # Procedure cote Nextcloud : deploy/nextcloud/README.md
+      - SSO_NC_ISSUER=${SSO_NC_ISSUER:-}
+      - SSO_NC_CLIENT_ID=${SSO_NC_CLIENT_ID:-}
+      - SSO_NC_CLIENT_SECRET=${SSO_NC_CLIENT_SECRET:-}
+      # Adresse publique de Clipr pour l'adresse de retour OIDC. On ne reutilise
+      # pas PUBLIC_URL : celui-ci sert aux liens des e-mails et peut pointer une
+      # ancienne adresse, ce qui ferait refuser la connexion par le cloud.
+      - SSO_NC_URL_PUBLIQUE=${SSO_NC_URL_PUBLIQUE:-}
+      - SSO_NC_GROUPE_ACCES=${SSO_NC_GROUPE_ACCES:-Clipr}
+      - SSO_NC_GROUPES_ADMIN=${SSO_NC_GROUPES_ADMIN:-admin}
       # ─── Recherche web Assistant : SearXNG (meta-moteur open-source) ───
       # Par defaut : instance publique ethique searx.be (libre, sans tracking)
       # Pour la prod : ajoute un service searxng dans ce compose et mets

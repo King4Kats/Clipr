@@ -35,6 +35,7 @@ import * as ollamaService from './services/ollama.js'
 import * as projectService from './services/project-history.js'
 import * as authService from './services/auth.js'
 import * as settingsService from './services/settings.js'
+import * as ssoService from './services/sso-nextcloud.js'    // Connexion par le cloud Témonia
 import * as mailer from './services/mailer.js'
 import { extractText, createTextTranscription } from './services/text-import.js'
 import { parseTable } from './services/table-import.js'
@@ -522,6 +523,80 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
     const result = authService.login(login, password)
     res.json(result)
   } catch (err: any) { res.status(401).json({ error: err.message }) }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Connexion par le cloud Témonia (SSO Nextcloud)
+//
+// Trois routes, volontairement simples :
+//   GET /api/auth/sso           → l'écran de connexion demande « le SSO est-il
+//                                 configuré ? » pour afficher ou non le bouton.
+//   GET /api/auth/sso/start     → envoie le navigateur sur le cloud.
+//   GET /api/auth/sso/callback  → le cloud nous renvoie ici avec un code ;
+//                                 on crée la session et on revient dans l'app.
+//
+// Le jeton de session est transmis au front dans le FRAGMENT de l'adresse
+// (après le #). Un fragment n'est jamais envoyé au serveur ni écrit dans les
+// journaux d'accès : c'est ce qui fait la différence avec « ?jeton=… ».
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get('/api/auth/sso', (_req, res) => {
+  res.json({ actif: ssoService.ssoActif(), libelle: 'Se connecter avec le cloud Témonia' })
+})
+
+app.get('/api/auth/sso/start', authLimiter, (req, res) => {
+  const cfg = ssoService.configSso()
+  if (!cfg) return res.status(503).json({ error: 'La connexion par le cloud Témonia n\'est pas configurée sur ce serveur.' })
+
+  // On n'accepte qu'un chemin interne comme page de retour : « //ailleurs.example »
+  // ou « https://… » permettraient de faire rebondir l'utilisateur hors du site.
+  const demande = typeof req.query.retour === 'string' ? req.query.retour : '/'
+  const retour = demande.startsWith('/') && !demande.startsWith('//') ? demande : '/'
+
+  res.redirect(ssoService.urlDemarrage(cfg, retour))
+})
+
+app.get('/api/auth/sso/callback', authLimiter, async (req, res) => {
+  const cfg = ssoService.configSso()
+  // Petite aide : renvoyer l'utilisateur sur l'écran de connexion avec le message.
+  const versErreur = (message: string) => res.redirect('/login#erreur_sso=' + encodeURIComponent(message))
+
+  if (!cfg) return versErreur('La connexion par le cloud Témonia n\'est pas configurée.')
+
+  // Le cloud peut refuser (l'utilisateur a cliqué « Annuler », par exemple).
+  if (typeof req.query.error === 'string') {
+    return versErreur('Connexion annulée sur le cloud Témonia.')
+  }
+
+  const code = typeof req.query.code === 'string' ? req.query.code : ''
+  const state = typeof req.query.state === 'string' ? req.query.state : ''
+  if (!code || !state) return versErreur('Retour du cloud incomplet. Réessayez.')
+
+  try {
+    const { identite, retour } = await ssoService.identiteDepuisCode(cfg, code, state)
+
+    // L'accès se décide ICI, et uniquement sur les groupes Nextcloud.
+    if (!ssoService.aAcces(cfg, identite)) {
+      logger.warn(`SSO : accès refusé à ${identite.sub} (pas dans le groupe « ${cfg.groupeAcces} »)`)
+      return versErreur(`Votre compte du cloud n'a pas accès à Clipr. Demandez à être ajouté au groupe « ${cfg.groupeAcces} ».`)
+    }
+
+    const { user, token } = authService.connecterParSso({
+      sub: identite.sub,
+      nomAffichage: identite.nomAffichage,
+      email: identite.email,
+      estAdmin: ssoService.estAdmin(cfg, identite),
+    })
+    logger.info(`SSO : connexion de ${user.username} (${user.role})`)
+
+    // Retour dans l'application avec le jeton dans le fragment.
+    const params = new URLSearchParams({ jeton: token, retour })
+    res.redirect('/login#' + params.toString())
+  } catch (err: any) {
+    const message = err instanceof ssoService.ErreurSso ? err.message : 'Connexion par le cloud impossible.'
+    if (!(err instanceof ssoService.ErreurSso)) logger.error(`SSO : échec inattendu (${err?.message})`)
+    return versErreur(message)
+  }
 })
 
 app.get('/api/auth/me', requireAuth, (req, res) => {

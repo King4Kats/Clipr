@@ -261,3 +261,101 @@ export function listUsers(): User[] {
     'SELECT id, username, email, role, created_at FROM users ORDER BY created_at'
   ).all() as User[]
 }
+
+/**
+ * Connexion par le cloud Témonia (SSO Nextcloud).
+ *
+ * Appelée une fois que le cloud nous a confirmé l'identité de la personne (voir
+ * services/sso-nextcloud.ts). Ici, on ne vérifie plus rien : on fait seulement
+ * correspondre cette personne du cloud à un compte Clipr, et on lui remet un
+ * jeton de session comme après une connexion par mot de passe.
+ *
+ * Trois cas, dans cet ordre :
+ *   1. on connaît déjà ce compte cloud (colonne oidc_sub) → on le réutilise ;
+ *   2. on ne le connaît pas, mais un compte Clipr a la même adresse e-mail →
+ *      on RATTACHE le compte cloud à ce compte existant. C'est ce qui permet à
+ *      Marjorie de retrouver ses projets au lieu de repartir d'un compte vide ;
+ *   3. personne → on crée le compte, actif immédiatement (le cloud a déjà validé
+ *      qui est la personne, il n'y a rien à valider une deuxième fois).
+ *
+ * Le rôle : administrateur du cloud → administrateur de Clipr. Dans l'autre sens
+ * on ne rétrograde PAS un administrateur Clipr existant, pour ne pas se retrouver
+ * sans administrateur du jour où un groupe change de nom.
+ *
+ * @param infos identité confirmée par le cloud
+ * @returns l'utilisateur Clipr et son jeton de session
+ */
+export function connecterParSso(infos: { sub: string; nomAffichage: string; email: string; estAdmin: boolean }): { user: User; token: string } {
+  const db = getDb()
+  const email = infos.email.toLowerCase()
+
+  if (!email) {
+    throw new Error("Votre compte du cloud n'a pas d'adresse e-mail : impossible de créer votre accès. Prévenez un administrateur.")
+  }
+
+  // --- Cas 1 : compte déjà rattaché à ce compte cloud ---
+  let row = db.prepare(
+    'SELECT id, username, email, role, created_at, status FROM users WHERE oidc_sub = ?'
+  ).get(infos.sub) as any
+
+  // --- Cas 2 : même e-mail → on rattache ---
+  if (!row) {
+    row = db.prepare(
+      'SELECT id, username, email, role, created_at, status FROM users WHERE email = ?'
+    ).get(email) as any
+    if (row) {
+      db.prepare('UPDATE users SET oidc_sub = ? WHERE id = ?').run(infos.sub, row.id)
+      logger.info(`SSO : compte cloud rattaché au compte Clipr existant ${row.username}`)
+    }
+  }
+
+  // --- Cas 3 : création ---
+  if (!row) {
+    const id = randomUUID()
+    const username = nomUtilisateurLibre(infos.nomAffichage || email.split('@')[0])
+    // Le compte n'a pas de mot de passe utilisable : on stocke l'empreinte d'un
+    // secret aléatoire que personne ne connaît (la colonne ne peut pas être vide).
+    // Conséquence voulue : ce compte ne peut se connecter QUE par le cloud.
+    const password_hash = bcrypt.hashSync(require('crypto').randomBytes(48).toString('hex'), 10)
+    db.prepare(
+      "INSERT INTO users (id, username, email, password_hash, role, status, oidc_sub) VALUES (?, ?, ?, ?, ?, 'active', ?)"
+    ).run(id, username, email, password_hash, infos.estAdmin ? 'admin' : 'user', infos.sub)
+    logger.info(`SSO : compte Clipr créé pour ${username}`)
+    const user: User = { id, username, email, role: infos.estAdmin ? 'admin' : 'user', created_at: new Date().toISOString(), status: 'active' }
+    return { user, token: generateToken(user) }
+  }
+
+  // --- Mise à jour d'un compte connu ---
+  // Le cloud fait foi pour l'e-mail et pour le statut : une personne qui passe le
+  // SSO est active, même si son inscription attendait une validation.
+  const role: 'user' | 'admin' = infos.estAdmin ? 'admin' : row.role
+  db.prepare(
+    "UPDATE users SET email = ?, role = ?, status = 'active', approval_token = NULL WHERE id = ?"
+  ).run(email, role, row.id)
+
+  const user: User = { id: row.id, username: row.username, email, role, created_at: row.created_at, status: 'active' }
+  return { user, token: generateToken(user) }
+}
+
+/**
+ * Trouve un nom d'utilisateur libre à partir du nom affiché dans le cloud.
+ * « Philippe Boisseleau » → « philippe.boisseleau », puis « philippe.boisseleau2 »
+ * si le premier est déjà pris.
+ */
+function nomUtilisateurLibre(nomAffichage: string): string {
+  const db = getDb()
+  const base = nomAffichage
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')  // enlève les accents
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '.')                        // tout le reste devient un point
+    .replace(/^\.+|\.+$/g, '')                          // pas de point au début ni à la fin
+    .slice(0, 40) || 'utilisateur'
+
+  let candidat = base
+  let n = 1
+  while (db.prepare('SELECT 1 FROM users WHERE username = ?').get(candidat)) {
+    n += 1
+    candidat = `${base}${n}`
+  }
+  return candidat
+}
